@@ -1,0 +1,305 @@
+// ─── Public Data Contracts ───────────────────────────────────────────────────
+// These interfaces define the data shape consumers provide to NimbusGantt.
+// Designed to map 1:1 with Delivery Hub's Apex DTOs (GanttTask, GanttDependency)
+// while remaining generic enough for any project management tool.
+
+export interface GanttTask {
+  id: string;
+  name: string;
+  startDate: string;           // ISO YYYY-MM-DD
+  endDate: string;             // ISO YYYY-MM-DD
+  progress?: number;           // 0.0 - 1.0 (default 0)
+  status?: string;             // Maps to colorMap key (e.g. "Planning", "Development")
+  priority?: string;
+  parentId?: string;           // Self-reference for tree hierarchy
+  groupId?: string;            // Swimlane grouping (e.g. entity/client ID)
+  groupName?: string;          // Display name for the group
+  assignee?: string;           // Developer/owner display name
+  sortOrder?: number;          // Manual ordering within parent
+  isMilestone?: boolean;       // Zero-duration diamond marker
+  isCompleted?: boolean;
+  color?: string;              // Override color (hex)
+  metadata?: Record<string, unknown>;
+}
+
+export interface GanttDependency {
+  id: string;
+  source: string;              // ID of the blocking (predecessor) task
+  target: string;              // ID of the blocked (successor) task
+  type?: DependencyType;       // Default: 'FS'
+  lag?: number;                // Days offset (positive = delay, negative = lead)
+}
+
+export type DependencyType = 'FS' | 'FF' | 'SS' | 'SF';
+
+export type ZoomLevel = 'day' | 'week' | 'month' | 'quarter';
+
+// ─── Column Configuration ───────────────────────────────────────────────────
+
+export interface ColumnConfig {
+  field: string;               // Key in GanttTask or metadata
+  header: string;              // Column header text
+  width?: number;              // Pixel width (default 120)
+  minWidth?: number;
+  tree?: boolean;              // If true, this column renders the expand/collapse tree
+  align?: 'left' | 'center' | 'right';
+  renderer?: (task: GanttTask, field: string) => string; // Custom cell content
+}
+
+// ─── Configuration ──────────────────────────────────────────────────────────
+
+export interface GanttConfig {
+  // Data
+  tasks: GanttTask[];
+  dependencies?: GanttDependency[];
+
+  // Layout
+  columns?: ColumnConfig[];
+  zoomLevel?: ZoomLevel;
+  rowHeight?: number;          // Default 36
+  barHeight?: number;          // Default 24
+  headerHeight?: number;       // Default 56
+  gridWidth?: number;          // Default 300; 0 hides the tree grid
+  minBarWidth?: number;        // Default 8 (minimum rendered bar width in px)
+
+  // Behavior
+  readOnly?: boolean;
+  fitToView?: boolean;         // Auto-compute date range to fit all tasks
+  showToday?: boolean;         // Default true
+  showWeekends?: boolean;      // Shade weekend columns. Default true
+  showProgress?: boolean;      // Render progress fill inside bars. Default true
+  snapToDays?: boolean;        // Snap drag to day boundaries. Default true
+
+  // Appearance
+  colorMap?: Record<string, string>;   // status → hex color
+  theme?: 'light' | 'dark' | ThemeConfig;
+
+  // Callbacks — all optional, async-friendly
+  onTaskClick?: (task: GanttTask) => void;
+  onTaskDblClick?: (task: GanttTask) => void;
+  onTaskMove?: (task: GanttTask, startDate: string, endDate: string) => void | Promise<void>;
+  onTaskResize?: (task: GanttTask, startDate: string, endDate: string) => void | Promise<void>;
+  onTaskProgressChange?: (task: GanttTask, progress: number) => void | Promise<void>;
+  onDependencyCreate?: (source: string, target: string, type: DependencyType) => void | Promise<void>;
+  onDependencyClick?: (dep: GanttDependency) => void;
+  onViewChange?: (zoomLevel: ZoomLevel, startDate: string, endDate: string) => void;
+  onTaskSelect?: (taskIds: string[]) => void;
+
+  // Tooltip
+  tooltipRenderer?: (task: GanttTask) => string | HTMLElement;
+}
+
+// ─── Theme Configuration ────────────────────────────────────────────────────
+
+export interface ThemeConfig {
+  // Timeline
+  timelineBg?: string;
+  timelineGridColor?: string;
+  timelineHeaderBg?: string;
+  timelineHeaderText?: string;
+  timelineWeekendBg?: string;
+  todayLineColor?: string;
+  todayBg?: string;
+
+  // Bars
+  barDefaultColor?: string;
+  barBorderRadius?: number;
+  barProgressOpacity?: number;
+  barTextColor?: string;
+  barSelectedBorder?: string;
+
+  // Tree grid
+  gridBg?: string;
+  gridAltRowBg?: string;
+  gridBorderColor?: string;
+  gridTextColor?: string;
+  gridHeaderBg?: string;
+  gridHeaderText?: string;
+  gridHoverBg?: string;
+
+  // Dependencies
+  dependencyColor?: string;
+  dependencyWidth?: number;
+  criticalPathColor?: string;
+
+  // General
+  fontFamily?: string;
+  fontSize?: number;
+  selectionColor?: string;
+}
+
+// ─── Internal State ─────────────────────────────────────────────────────────
+
+export interface TaskTreeNode {
+  task: GanttTask;
+  children: TaskTreeNode[];
+  depth: number;
+  expanded: boolean;
+  visible: boolean;            // Visible in current tree state (parent expanded)
+  rowIndex: number;            // Position in the flattened visible list
+}
+
+export interface TaskLayout {
+  taskId: string;
+  rowIndex: number;
+  x: number;                  // Pixel x position (timeline)
+  y: number;                  // Pixel y position
+  width: number;              // Bar width in pixels
+  barY: number;               // Y offset of the bar within the row
+  barHeight: number;
+  progressWidth: number;      // Width of progress fill
+  color: string;
+  textColor: string;
+  label: string;              // Text rendered inside/beside the bar
+  isMilestone: boolean;
+}
+
+export interface HeaderCell {
+  label: string;
+  x: number;
+  width: number;
+  date: Date;
+}
+
+export interface GanttState {
+  tasks: Map<string, GanttTask>;
+  dependencies: Map<string, GanttDependency>;
+  tree: TaskTreeNode[];
+  flatVisibleIds: string[];    // Flattened task IDs respecting expand/collapse
+  expandedIds: Set<string>;
+  selectedIds: Set<string>;
+  zoomLevel: ZoomLevel;
+  scrollX: number;
+  scrollY: number;
+  dateRange: { start: Date; end: Date };
+  dragState: DragState | null;
+  config: ResolvedConfig;
+}
+
+export interface DragState {
+  type: 'move' | 'resize-left' | 'resize-right' | 'progress' | 'link';
+  taskId: string;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  originalStartDate: string;
+  originalEndDate: string;
+  previewStartDate?: string;
+  previewEndDate?: string;
+}
+
+// ─── Resolved Config (defaults applied) ─────────────────────────────────────
+
+export interface ResolvedConfig {
+  columns: ColumnConfig[];
+  zoomLevel: ZoomLevel;
+  rowHeight: number;
+  barHeight: number;
+  headerHeight: number;
+  gridWidth: number;
+  minBarWidth: number;
+  readOnly: boolean;
+  fitToView: boolean;
+  showToday: boolean;
+  showWeekends: boolean;
+  showProgress: boolean;
+  snapToDays: boolean;
+  colorMap: Record<string, string>;
+  theme: ResolvedTheme;
+}
+
+export interface ResolvedTheme {
+  timelineBg: string;
+  timelineGridColor: string;
+  timelineHeaderBg: string;
+  timelineHeaderText: string;
+  timelineWeekendBg: string;
+  todayLineColor: string;
+  todayBg: string;
+  barDefaultColor: string;
+  barBorderRadius: number;
+  barProgressOpacity: number;
+  barTextColor: string;
+  barSelectedBorder: string;
+  gridBg: string;
+  gridAltRowBg: string;
+  gridBorderColor: string;
+  gridTextColor: string;
+  gridHeaderBg: string;
+  gridHeaderText: string;
+  gridHoverBg: string;
+  dependencyColor: string;
+  dependencyWidth: number;
+  criticalPathColor: string;
+  fontFamily: string;
+  fontSize: number;
+  selectionColor: string;
+}
+
+// ─── Actions ────────────────────────────────────────────────────────────────
+
+export type Action =
+  | { type: 'SET_DATA'; tasks: GanttTask[]; dependencies?: GanttDependency[] }
+  | { type: 'UPDATE_TASK'; taskId: string; changes: Partial<GanttTask> }
+  | { type: 'ADD_TASK'; task: GanttTask }
+  | { type: 'REMOVE_TASK'; taskId: string }
+  | { type: 'TOGGLE_EXPAND'; taskId: string }
+  | { type: 'EXPAND_ALL' }
+  | { type: 'COLLAPSE_ALL' }
+  | { type: 'SET_ZOOM'; level: ZoomLevel }
+  | { type: 'SET_SCROLL'; x: number; y: number }
+  | { type: 'SET_SCROLL_X'; x: number }
+  | { type: 'SET_SCROLL_Y'; y: number }
+  | { type: 'SELECT_TASK'; taskId: string; multi?: boolean }
+  | { type: 'DESELECT_ALL' }
+  | { type: 'DRAG_START'; drag: DragState }
+  | { type: 'DRAG_UPDATE'; currentX: number; currentY: number }
+  | { type: 'DRAG_END' }
+  | { type: 'DRAG_CANCEL' }
+  | { type: 'TASK_MOVE'; taskId: string; startDate: string; endDate: string }
+  | { type: 'TASK_RESIZE'; taskId: string; startDate: string; endDate: string }
+  | { type: 'ADD_DEPENDENCY'; dependency: GanttDependency }
+  | { type: 'REMOVE_DEPENDENCY'; dependencyId: string }
+  | { type: 'SET_DATE_RANGE'; start: Date; end: Date };
+
+// ─── Plugin Interface ───────────────────────────────────────────────────────
+
+export interface NimbusGanttPlugin {
+  name: string;
+  install(gantt: PluginHost): void;
+  middleware?: (action: Action, next: (action: Action) => void) => void;
+  renderCanvas?: (ctx: CanvasRenderingContext2D, state: GanttState, layouts: TaskLayout[]) => void;
+  renderDOM?: (container: HTMLElement, state: GanttState) => void;
+  destroy?: () => void;
+}
+
+export interface PluginHost {
+  getState(): GanttState;
+  dispatch(action: Action): void;
+  on(event: string, handler: (...args: unknown[]) => void): () => void;
+  getLayouts(): TaskLayout[];
+  getTimeScale(): TimeScaleAPI;
+}
+
+export interface TimeScaleAPI {
+  dateToX(date: Date): number;
+  xToDate(x: number): Date;
+  getColumnWidth(): number;
+}
+
+// ─── Event Types ────────────────────────────────────────────────────────────
+
+export type GanttEventType =
+  | 'stateChange'
+  | 'taskClick'
+  | 'taskDblClick'
+  | 'taskMove'
+  | 'taskResize'
+  | 'taskSelect'
+  | 'taskProgressChange'
+  | 'dependencyCreate'
+  | 'dependencyClick'
+  | 'viewChange'
+  | 'scroll'
+  | 'render';

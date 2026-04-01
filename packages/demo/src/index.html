@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nimbus Gantt — Demo</title>
+  <style>
+    /* ─── Reset & Base ──────────────────────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background: #f8fafc;
+      color: #1e293b;
+    }
+
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    /* ─── Header ────────────────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #f1f5f9;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      flex-shrink: 0;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+      z-index: 10;
+    }
+
+    header .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      white-space: nowrap;
+    }
+
+    header .tagline {
+      font-size: 13px;
+      color: #94a3b8;
+      white-space: nowrap;
+    }
+
+    @media (max-width: 800px) {
+      header .tagline { display: none; }
+    }
+
+    /* ─── Toolbar ───────────────────────────────────────────────────────── */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+      flex-wrap: nowrap;
+    }
+
+    .toolbar .separator {
+      width: 1px;
+      height: 20px;
+      background: #334155;
+      margin: 0 6px;
+      flex-shrink: 0;
+    }
+
+    .toolbar button {
+      height: 32px;
+      padding: 0 14px;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+
+    .toolbar button:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: #475569;
+      color: #f1f5f9;
+    }
+
+    .toolbar button.active {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #ffffff;
+      box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+    }
+
+    .toolbar button.active:hover {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+
+    /* ─── Legend ─────────────────────────────────────────────────────────── */
+    .legend {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 24px;
+      background: #ffffff;
+      border-bottom: 1px solid #e2e8f0;
+      flex-shrink: 0;
+      overflow-x: auto;
+    }
+
+    .legend-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      flex-shrink: 0;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #475569;
+      flex-shrink: 0;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* ─── Gantt Container ───────────────────────────────────────────────── */
+    #gantt-container {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      background: #ffffff;
+    }
+
+    /* ─── Info Panel ────────────────────────────────────────────────────── */
+    #task-info {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 340px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 0;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1),
+                  0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      transform: translateY(20px);
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      z-index: 100;
+      overflow: hidden;
+    }
+
+    #task-info.visible {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .info-header {
+      padding: 16px 20px;
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .info-header h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #0f172a;
+      margin: 0;
+      line-height: 1.4;
+    }
+
+    .info-header .info-group {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 2px;
+    }
+
+    .info-body {
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .info-label {
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 500;
+    }
+
+    .info-value {
+      font-size: 13px;
+      color: #1e293b;
+      font-weight: 500;
+    }
+
+    .info-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      line-height: 1;
+    }
+
+    .info-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+    }
+
+    .info-progress-bar {
+      height: 6px;
+      background: #e2e8f0;
+      border-radius: 3px;
+      overflow: hidden;
+      width: 120px;
+    }
+
+    .info-progress-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    .info-close {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: #94a3b8;
+      font-size: 18px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+
+    .info-close:hover {
+      background: #f1f5f9;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="brand">
+        <h1>Nimbus Gantt</h1>
+        <span class="tagline">High-performance, framework-agnostic Gantt chart</span>
+      </div>
+      <div class="toolbar">
+        <button data-zoom="day">Day</button>
+        <button data-zoom="week" class="active">Week</button>
+        <button data-zoom="month">Month</button>
+        <button data-zoom="quarter">Quarter</button>
+        <div class="separator"></div>
+        <button id="btn-today">Today</button>
+        <button id="btn-expand">Expand All</button>
+        <button id="btn-collapse">Collapse All</button>
+      </div>
+    </header>
+    <div class="legend">
+      <span class="legend-label">Status</span>
+      <span class="legend-item"><span class="legend-dot" style="background: #3b82f6;"></span>Planning</span>
+      <span class="legend-item"><span class="legend-dot" style="background: #22c55e;"></span>Development</span>
+      <span class="legend-item"><span class="legend-dot" style="background: #a855f7;"></span>Testing</span>
+      <span class="legend-item"><span class="legend-dot" style="background: #14b8a6;"></span>UAT</span>
+      <span class="legend-item"><span class="legend-dot" style="background: #f97316;"></span>Deployment</span>
+      <span class="legend-item"><span class="legend-dot" style="background: #6b7280;"></span>Done</span>
+    </div>
+    <div id="gantt-container"></div>
+    <div id="task-info"></div>
+  </div>
+  <script type="module" src="./demo.ts"></script>
+</body>
+</html>
