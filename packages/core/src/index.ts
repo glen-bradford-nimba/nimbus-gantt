@@ -54,3 +54,15 @@ export { TelemetryPlugin } from './plugins/TelemetryPlugin';
 export type { TelemetryEvent } from './plugins/TelemetryPlugin';
 export { MotionControlPlugin } from './plugins/MotionControlPlugin';
 export type { MotionControlOptions, OrientationMessage, GestureMessage } from './plugins/MotionControlPlugin';
+export { MSProjectPlugin, importMSProjectXML, exportMSProjectXML } from './plugins/MSProjectPlugin';
+export type { MSProjectExportOptions, MSProjectImportResult } from './plugins/MSProjectPlugin';
+export { SplitTaskPlugin } from './plugins/SplitTaskPlugin';
+export type { TaskSplit, SplitTaskPluginOptions } from './plugins/SplitTaskPlugin';
+export { ResourceLevelingPlugin } from './plugins/ResourceLevelingPlugin';
+export type {
+  ResourceConfig,
+  ResourceAssignment,
+  LevelingResult,
+  ResourceConflict,
+  ResourceUtilization,
+} from './plugins/ResourceLevelingPlugin';
