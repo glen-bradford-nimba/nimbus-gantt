@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Nimbus Gantt — Motion Controller</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    h1 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #38bdf8;
+    }
+
+    .subtitle {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+      transition: background 0.3s;
+    }
+
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.connecting { background: #f59e0b; }
+
+    .values {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 16px 20px;
+      width: 100%;
+      max-width: 340px;
+      margin-bottom: 20px;
+    }
+
+    .value-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid #334155;
+    }
+
+    .value-row:last-child { border-bottom: none; }
+
+    .value-label {
+      font-size: 13px;
+      color: #94a3b8;
+    }
+
+    .value-num {
+      font-size: 15px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      min-width: 80px;
+      text-align: right;
+    }
+
+    .btn {
+      display: block;
+      width: 100%;
+      max-width: 340px;
+      padding: 16px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      margin-bottom: 12px;
+    }
+
+    .btn:active { transform: scale(0.97); }
+
+    .btn-primary {
+      background: #3b82f6;
+      color: #fff;
+    }
+
+    .btn-primary.active {
+      background: #ef4444;
+    }
+
+    .btn-secondary {
+      background: #334155;
+      color: #e2e8f0;
+    }
+
+    .gesture-area {
+      width: 100%;
+      max-width: 340px;
+      height: 120px;
+      background: #1e293b;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      color: #64748b;
+      margin-top: 8px;
+      border: 2px dashed #334155;
+    }
+
+    .gesture-area.active {
+      border-color: #3b82f6;
+      color: #94a3b8;
+    }
+
+    .permission-notice {
+      background: #fef3c7;
+      color: #92400e;
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      width: 100%;
+      max-width: 340px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .footer {
+      margin-top: auto;
+      padding-top: 20px;
+      font-size: 11px;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <h1>Nimbus Gantt</h1>
+  <p class="subtitle">Motion Controller</p>
+
+  <div id="permissionNotice" class="permission-notice">
+    iOS requires explicit permission for motion sensors.
+    Tap the Start button to grant access.
+  </div>
+
+  <div class="status">
+    <div id="statusDot" class="status-dot"></div>
+    <span id="statusText">Disconnected</span>
+  </div>
+
+  <div class="values">
+    <div class="value-row">
+      <span class="value-label">Alpha (compass)</span>
+      <span id="valAlpha" class="value-num">--</span>
+    </div>
+    <div class="value-row">
+      <span class="value-label">Beta (front-back)</span>
+      <span id="valBeta" class="value-num">--</span>
+    </div>
+    <div class="value-row">
+      <span class="value-label">Gamma (left-right)</span>
+      <span id="valGamma" class="value-num">--</span>
+    </div>
+    <div class="value-row">
+      <span class="value-label">Messages sent</span>
+      <span id="valSent" class="value-num">0</span>
+    </div>
+  </div>
+
+  <button id="btnToggle" class="btn btn-primary">Start</button>
+  <button id="btnReconnect" class="btn btn-secondary">Reconnect WebSocket</button>
+
+  <div id="gestureArea" class="gesture-area">
+    Swipe or tap here for gestures
+  </div>
+
+  <p class="footer">Cloud Nimbus LLC &mdash; Nimbus Gantt Motion Bridge</p>
+
+  <script>
+    // ─── Configuration ───────────────────────────────────────────────────
+    // WebSocket URL is read from the query string: ?ws=ws://host:port
+    // Falls back to ws://[current-hostname]:8765
+
+    const params = new URLSearchParams(window.location.search);
+    const wsUrl = params.get('ws') ||
+      (window.location.protocol === 'https:' ? 'wss:' : 'ws:') +
+      '//' + window.location.hostname + ':8765';
+
+    // ─── State ───────────────────────────────────────────────────────────
+
+    let ws = null;
+    let streaming = false;
+    let messagesSent = 0;
+    let orientationHandler = null;
+
+    // Throttle: send at ~30fps (33ms interval)
+    const SEND_INTERVAL_MS = 33;
+    let lastSendTime = 0;
+    let latestAlpha = 0;
+    let latestBeta = 0;
+    let latestGamma = 0;
+
+    // ─── DOM refs ────────────────────────────────────────────────────────
+
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const valAlpha = document.getElementById('valAlpha');
+    const valBeta = document.getElementById('valBeta');
+    const valGamma = document.getElementById('valGamma');
+    const valSent = document.getElementById('valSent');
+    const btnToggle = document.getElementById('btnToggle');
+    const btnReconnect = document.getElementById('btnReconnect');
+    const gestureArea = document.getElementById('gestureArea');
+    const permissionNotice = document.getElementById('permissionNotice');
+
+    // ─── iOS permission check ────────────────────────────────────────────
+
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (isIOS && typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      permissionNotice.style.display = 'block';
+    }
+
+    // ─── WebSocket ───────────────────────────────────────────────────────
+
+    function connectWS() {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+
+      setStatus('connecting', 'Connecting...');
+
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (err) {
+        setStatus('disconnected', 'Connection failed');
+        return;
+      }
+
+      ws.onopen = function () {
+        setStatus('connected', 'Connected');
+      };
+
+      ws.onclose = function () {
+        setStatus('disconnected', 'Disconnected');
+        ws = null;
+      };
+
+      ws.onerror = function () {
+        // onclose will fire after this
+      };
+    }
+
+    function setStatus(state, text) {
+      statusDot.className = 'status-dot' + (state === 'connected' ? ' connected' : state === 'connecting' ? ' connecting' : '');
+      statusText.textContent = text;
+    }
+
+    function sendMessage(msg) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
+        messagesSent++;
+        valSent.textContent = messagesSent.toString();
+      }
+    }
+
+    // ─── Orientation streaming ───────────────────────────────────────────
+
+    async function requestPermissionIfNeeded() {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const response = await DeviceOrientationEvent.requestPermission();
+          if (response !== 'granted') {
+            alert('Motion permission denied. The controller needs sensor access to work.');
+            return false;
+          }
+        } catch (err) {
+          alert('Could not request motion permission: ' + err.message);
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function startStreaming() {
+      orientationHandler = function (e) {
+        if (e.alpha == null || e.beta == null || e.gamma == null) return;
+
+        latestAlpha = e.alpha;
+        latestBeta = e.beta;
+        latestGamma = e.gamma;
+
+        // Update display
+        valAlpha.textContent = e.alpha.toFixed(1) + '\u00B0';
+        valBeta.textContent = e.beta.toFixed(1) + '\u00B0';
+        valGamma.textContent = e.gamma.toFixed(1) + '\u00B0';
+
+        // Throttle sends to ~30fps
+        var now = Date.now();
+        if (now - lastSendTime >= SEND_INTERVAL_MS) {
+          lastSendTime = now;
+          sendMessage({
+            type: 'orientation',
+            alpha: e.alpha,
+            beta: e.beta,
+            gamma: e.gamma,
+            timestamp: now
+          });
+        }
+      };
+
+      window.addEventListener('deviceorientation', orientationHandler);
+    }
+
+    function stopStreaming() {
+      if (orientationHandler) {
+        window.removeEventListener('deviceorientation', orientationHandler);
+        orientationHandler = null;
+      }
+      valAlpha.textContent = '--';
+      valBeta.textContent = '--';
+      valGamma.textContent = '--';
+    }
+
+    // ─── Gesture detection on gesture area ───────────────────────────────
+
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    let lastTapTime = 0;
+
+    gestureArea.addEventListener('touchstart', function (e) {
+      e.preventDefault();
+      var touch = e.changedTouches[0];
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      touchStartTime = Date.now();
+    }, { passive: false });
+
+    gestureArea.addEventListener('touchend', function (e) {
+      e.preventDefault();
+      var touch = e.changedTouches[0];
+      var dx = touch.clientX - touchStartX;
+      var dy = touch.clientY - touchStartY;
+      var dt = Date.now() - touchStartTime;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > 50 && dt < 500) {
+        // Swipe detected
+        if (Math.abs(dx) > Math.abs(dy)) {
+          sendMessage({ type: 'gesture', gesture: dx > 0 ? 'swipe-right' : 'swipe-left' });
+        }
+        // Vertical swipes ignored for now
+      } else if (dist < 20 && dt < 300) {
+        // Tap detected — check for double tap
+        var now = Date.now();
+        if (now - lastTapTime < 400) {
+          sendMessage({ type: 'gesture', gesture: 'doubletap' });
+          lastTapTime = 0;
+        } else {
+          lastTapTime = now;
+          setTimeout(function () {
+            if (lastTapTime !== 0) {
+              sendMessage({ type: 'gesture', gesture: 'tap' });
+              lastTapTime = 0;
+            }
+          }, 400);
+        }
+      }
+    }, { passive: false });
+
+    // ─── Button handlers ─────────────────────────────────────────────────
+
+    btnToggle.addEventListener('click', async function () {
+      if (!streaming) {
+        var granted = await requestPermissionIfNeeded();
+        if (!granted) return;
+
+        startStreaming();
+        streaming = true;
+        btnToggle.textContent = 'Stop';
+        btnToggle.classList.add('active');
+        gestureArea.classList.add('active');
+        permissionNotice.style.display = 'none';
+      } else {
+        stopStreaming();
+        streaming = false;
+        btnToggle.textContent = 'Start';
+        btnToggle.classList.remove('active');
+        gestureArea.classList.remove('active');
+      }
+    });
+
+    btnReconnect.addEventListener('click', function () {
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      connectWS();
+    });
+
+    // ─── Auto-connect on load ────────────────────────────────────────────
+
+    connectWS();
+  </script>
+</body>
+</html>

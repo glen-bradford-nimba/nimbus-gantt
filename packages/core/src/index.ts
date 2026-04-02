@@ -66,3 +66,10 @@ export type {
   ResourceConflict,
   ResourceUtilization,
 } from './plugins/ResourceLevelingPlugin';
+export { RiskAnalysisPlugin } from './plugins/RiskAnalysisPlugin';
+export type {
+  RiskAssessment,
+  RiskFactor,
+  ProjectHealth,
+  Recommendation,
+} from './plugins/RiskAnalysisPlugin';
