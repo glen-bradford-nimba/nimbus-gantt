@@ -5,7 +5,6 @@ import type {
   TimeScaleAPI,
   Action,
   DragState,
-  ResolvedConfig,
 } from '../model/types';
 import { HitTest } from './HitTest';
 import type { HitResult } from './HitTest';
@@ -107,6 +106,7 @@ export class DragManager {
   private readonly onPointerDown: (e: PointerEvent) => void;
   private readonly onPointerMove: (e: PointerEvent) => void;
   private readonly onPointerUp: (e: PointerEvent) => void;
+  private readonly onClick: (e: MouseEvent) => void;
 
   constructor(canvas: HTMLCanvasElement, options: DragManagerOptions) {
     this.canvas = canvas;
@@ -117,11 +117,15 @@ export class DragManager {
     this.onPointerDown = this.handlePointerDown.bind(this);
     this.onPointerMove = this.handlePointerMove.bind(this);
     this.onPointerUp = this.handlePointerUp.bind(this);
+    this.onClick = this.handleClick_native.bind(this);
 
     // Attach listeners
     this.canvas.addEventListener('pointerdown', this.onPointerDown);
     this.canvas.addEventListener('pointermove', this.onPointerMove);
     this.canvas.addEventListener('pointerup', this.onPointerUp);
+    // Prevent the native click from bubbling to framework-level navigation
+    // handlers (e.g. Salesforce Lightning's record navigation).
+    this.canvas.addEventListener('click', this.onClick);
   }
 
   /** Remove all event listeners and clean up. */
@@ -129,6 +133,7 @@ export class DragManager {
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
     this.canvas.removeEventListener('pointermove', this.onPointerMove);
     this.canvas.removeEventListener('pointerup', this.onPointerUp);
+    this.canvas.removeEventListener('click', this.onClick);
 
     // Release pointer capture if still held
     if (this.dragPointerId !== null) {
@@ -162,6 +167,37 @@ export class DragManager {
     const canvasX = pointerX + state.scrollX;
     const canvasY = pointerY + state.scrollY - state.config.headerHeight;
 
+    return { canvasX, canvasY };
+  }
+
+  // ── Native Click Handler ────────────────────────────────────────────────
+
+  /**
+   * Prevent the native click event from propagating to parent frameworks
+   * (e.g. Salesforce Lightning) which may interpret clicks on canvas elements
+   * as navigation actions.  We handle task clicks ourselves via pointer events.
+   */
+  private handleClick_native(e: MouseEvent): void {
+    const { canvasX, canvasY } = this.toCanvasCoordsFromMouse(e);
+    const state = this.options.getState();
+    const layouts = this.options.getLayouts();
+    const hit = this.hitTest.test(canvasX, canvasY, layouts, state.config);
+
+    if (hit && hit.type !== 'none') {
+      // A task was clicked — swallow the event so no parent handler navigates
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+
+  /** Translate a MouseEvent (non-pointer) to canvas coordinates. */
+  private toCanvasCoordsFromMouse(e: MouseEvent): { canvasX: number; canvasY: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const state = this.options.getState();
+    const pointerX = e.clientX - rect.left;
+    const pointerY = e.clientY - rect.top;
+    const canvasX = pointerX + state.scrollX;
+    const canvasY = pointerY + state.scrollY - state.config.headerHeight;
     return { canvasX, canvasY };
   }
 
@@ -205,6 +241,11 @@ export class DragManager {
 
     if (!hit || hit.type === 'none') return;
 
+    // Prevent default browser action (text selection, etc.) and stop the
+    // event from reaching framework-level navigation handlers.
+    e.preventDefault();
+    e.stopPropagation();
+
     // Store drag start info
     this.dragHit = hit;
     this.dragStartX = e.clientX;
@@ -217,12 +258,12 @@ export class DragManager {
     this.dragOriginalStartDate = task.startDate;
     this.dragOriginalEndDate = task.endDate;
 
-    if (!this.options.readOnly) {
-      // Capture the pointer for reliable drag tracking
-      this.canvas.setPointerCapture(e.pointerId);
-      this.dragPointerId = e.pointerId;
-      this.dragging = true;
+    // Capture the pointer for reliable tracking (both readOnly and interactive)
+    this.canvas.setPointerCapture(e.pointerId);
+    this.dragPointerId = e.pointerId;
+    this.dragging = true;
 
+    if (!this.options.readOnly) {
       // Determine drag type from hit type
       const dragType = hitTypeToDragType(hit.type);
       if (dragType) {
@@ -245,6 +286,13 @@ export class DragManager {
 
   private handleDragMove(e: PointerEvent): void {
     if (!this.dragHit) return;
+
+    // Prevent default to stop text selection and other browser behavior
+    // during drag operations.
+    e.preventDefault();
+
+    // Only dispatch drag updates in interactive mode
+    if (this.options.readOnly) return;
 
     const { canvasX, canvasY } = this.toCanvasCoords(e);
 
@@ -287,9 +335,12 @@ export class DragManager {
       if (task) {
         this.handleClick(task);
       }
-    } else {
-      // Complete the drag
+    } else if (!this.options.readOnly) {
+      // Complete the drag (only in interactive mode)
       this.completeDrag(e);
+    } else {
+      // ReadOnly mode: cancel any pending drag state
+      this.options.dispatch({ type: 'DRAG_END' });
     }
 
     this.dragging = false;

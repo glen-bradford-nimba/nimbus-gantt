@@ -44,6 +44,9 @@ export class CanvasRenderer {
   constructor(container: HTMLElement) {
     this.canvas = document.createElement('canvas');
     this.canvas.style.display = 'block';
+    // Disable browser touch gestures (pan/zoom) on the canvas so pointer
+    // events fire reliably for drag/click interactions.
+    this.canvas.style.touchAction = 'none';
     container.appendChild(this.canvas);
 
     const ctx = this.canvas.getContext('2d');
@@ -278,12 +281,13 @@ export class CanvasRenderer {
     const radius = theme.barBorderRadius;
 
     for (const layout of layouts) {
-      // The layout positions are in absolute coordinates.
-      // The context is already translated by -scrollX horizontally.
-      // We need to apply -scrollY to vertical positions manually since vertical
-      // scroll is handled through row y positions in absolute space.
+      // The layout positions are in content-space coordinates (0-based from top
+      // of the scrollable body). Convert to screen coordinates by:
+      //  - Adding bodyTop to shift below the fixed header
+      //  - Subtracting scrollY for vertical scroll
+      // Horizontal scroll is handled by the ctx.translate(-scrollX, 0) above.
       const barX = layout.x;
-      const barY = layout.barY - scrollY;
+      const barY = layout.barY - scrollY + bodyTop;
       const barW = layout.width;
       const barH = layout.barHeight;
 

@@ -23,10 +23,15 @@ export class DependencyRenderer {
   /**
    * Render all dependency arrows.
    *
-   * Context expectations:
-   * - ctx already has `translate(-scrollX, 0)` applied (X is timeline-space)
-   * - ctx is clipped to the body region (below headerHeight)
-   * - Y coordinates must be offset by `-scrollY` relative to absolute layout positions
+   * Called AFTER canvasRenderer.render() completes, so the context has a clean
+   * DPI transform with no scroll translation or body clip applied.  This method
+   * sets up its own clip region and scroll translation so arrows are correctly
+   * positioned and confined to the body area (below the header).
+   *
+   * Layout coordinates are in content-space (0-based from the top of the
+   * scrollable body).  We convert to screen coordinates by adding headerHeight
+   * and subtracting scrollY for vertical, and applying ctx.translate for
+   * horizontal scroll.
    */
   render(
     ctx: CanvasRenderingContext2D,
@@ -46,7 +51,18 @@ export class DependencyRenderer {
       layoutMap.set(layout.taskId, layout);
     }
 
+    const canvasWidth = ctx.canvas.width / (window.devicePixelRatio || 1);
+    const canvasHeight = ctx.canvas.height / (window.devicePixelRatio || 1);
+
     ctx.save();
+
+    // Clip to the body region so arrows don't bleed into the header
+    ctx.beginPath();
+    ctx.rect(0, headerHeight, canvasWidth, canvasHeight - headerHeight);
+    ctx.clip();
+
+    // Apply horizontal scroll translation (same as CanvasRenderer body pass)
+    ctx.translate(-scrollX, 0);
 
     for (const dep of dependencies.values()) {
       const sourceLayout = layoutMap.get(dep.source);
@@ -63,6 +79,7 @@ export class DependencyRenderer {
         sourceLayout,
         targetLayout,
         scrollY,
+        headerHeight,
       );
 
       // Draw the routed path
@@ -83,16 +100,18 @@ export class DependencyRenderer {
 
   /**
    * Compute the source and target connection points based on dependency type.
-   * All Y values are adjusted for scrollY.
+   * All Y values are converted from content-space to screen-space by adding
+   * headerHeight (to shift below the fixed header) and subtracting scrollY.
    */
   private getConnectionPoints(
     type: DependencyType,
     source: TaskLayout,
     target: TaskLayout,
     scrollY: number,
+    headerHeight: number,
   ): { sourceX: number; sourceY: number; targetX: number; targetY: number } {
-    const sCenterY = source.barY + source.barHeight / 2 - scrollY;
-    const tCenterY = target.barY + target.barHeight / 2 - scrollY;
+    const sCenterY = source.barY + source.barHeight / 2 - scrollY + headerHeight;
+    const tCenterY = target.barY + target.barHeight / 2 - scrollY + headerHeight;
 
     switch (type) {
       case 'FS': // Finish-to-Start
