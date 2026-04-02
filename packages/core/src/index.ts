@@ -73,3 +73,14 @@ export type {
   ProjectHealth,
   Recommendation,
 } from './plugins/RiskAnalysisPlugin';
+export { NetworkGraphPlugin } from './plugins/NetworkGraphPlugin';
+export type {
+  NetworkLayoutMode,
+  NetworkNode,
+  NetworkEdge,
+} from './plugins/NetworkGraphPlugin';
+export { ConfigPanelPlugin } from './plugins/ConfigPanelPlugin';
+export { HeatmapViewPlugin } from './plugins/HeatmapViewPlugin';
+export { MiniMapPlugin } from './plugins/MiniMapPlugin';
+export { TimelineNotesPlugin } from './plugins/TimelineNotesPlugin';
+export type { TimelineNote, TimelineNotesOptions } from './plugins/TimelineNotesPlugin';
