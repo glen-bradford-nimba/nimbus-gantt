@@ -41,6 +41,15 @@ export { UndoRedoPlugin } from './plugins/UndoRedoPlugin';
 export { KeyboardPlugin } from './plugins/KeyboardPlugin';
 export { MilestonePlugin } from './plugins/MilestonePlugin';
 export { GroupingPlugin } from './plugins/GroupingPlugin';
+export {
+  PriorityGroupingPlugin,
+  CLOUD_NIMBUS_PRIORITY_BUCKETS,
+  hoursWeightedProgress,
+} from './plugins/PriorityGroupingPlugin';
+export type {
+  PriorityBucket,
+  PriorityGroupingConfig,
+} from './plugins/PriorityGroupingPlugin';
 export { CriticalPathPlugin, computeCPM } from './plugins/CriticalPathPlugin';
 export type { CPMResult, TaskCPMAnalysis } from './plugins/CriticalPathPlugin';
 export { BaselinePlugin } from './plugins/BaselinePlugin';
