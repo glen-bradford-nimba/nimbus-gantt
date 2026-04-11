@@ -23,7 +23,9 @@ import type {
   GanttState,
   TaskLayout,
   GanttTask,
+  TimeScaleAPI,
 } from '../model/types';
+import { parseDate } from '../layout/LayoutEngine';
 
 // ─── Public config types ────────────────────────────────────────────────────
 
@@ -66,9 +68,18 @@ export interface PriorityGroupingConfig {
 
 interface BucketRuntime {
   config: PriorityBucket;
+  /** Visible task IDs (for rendering count/order, post-filter) */
   taskIds: string[];
+  /** All task IDs assigned to this bucket (pre-filter, source of truth for span) */
+  allTaskIds: string[];
   collapsed: boolean;
   progress: number;
+  /** Earliest startDate across ALL bucket members (not just visible) */
+  startDate: Date | null;
+  /** Latest endDate across ALL bucket members */
+  endDate: Date | null;
+  /** Sum of metadata.hoursHigh across all bucket members (0 if no metadata) */
+  totalHours: number;
 }
 
 // ─── Defaults ───────────────────────────────────────────────────────────────
@@ -128,11 +139,15 @@ export function PriorityGroupingPlugin(
     runtime = sortedBuckets.map((cfg) => ({
       config: cfg,
       taskIds: [],
+      allTaskIds: [],
       collapsed: collapsedIds.has(cfg.id),
       progress: 0,
+      startDate: null,
+      endDate: null,
+      totalHours: 0,
     }));
 
-    // Bucket assignment, preserving the natural order from flatVisibleIds
+    // Pass 1: walk flatVisibleIds to capture rendering order for visible tasks
     for (const taskId of state.flatVisibleIds) {
       const task = state.tasks.get(taskId);
       if (!task) continue;
@@ -143,18 +158,49 @@ export function PriorityGroupingPlugin(
       runtime[idx].taskIds.push(taskId);
     }
 
-    // Compute per-bucket progress
+    // Pass 2: walk state.tasks (the FULL Map, source of truth) to compute
+    // span/progress/hours independently of any visibility filter. This is what
+    // makes the bucket span bar render correctly even when the bucket is
+    // collapsed (its tasks are absent from flatVisibleIds at that point).
+    for (const [taskId, task] of state.tasks) {
+      const bucketId = getBucket(task);
+      if (!bucketId) continue;
+      const idx = bucketIndexById.get(bucketId);
+      if (idx === undefined) continue;
+      runtime[idx].allTaskIds.push(taskId);
+    }
+
     for (const b of runtime) {
-      if (b.taskIds.length === 0) {
+      if (b.allTaskIds.length === 0) {
         b.progress = 0;
+        b.startDate = null;
+        b.endDate = null;
+        b.totalHours = 0;
         continue;
       }
-      const tasks: GanttTask[] = [];
-      for (const id of b.taskIds) {
+      const tasksFull: GanttTask[] = [];
+      let minTime = Infinity;
+      let maxTime = -Infinity;
+      let totalHigh = 0;
+      for (const id of b.allTaskIds) {
         const t = state.tasks.get(id);
-        if (t) tasks.push(t);
+        if (!t) continue;
+        tasksFull.push(t);
+        if (t.startDate) {
+          const s = parseDate(t.startDate).getTime();
+          if (!isNaN(s) && s < minTime) minTime = s;
+        }
+        if (t.endDate) {
+          const e = parseDate(t.endDate).getTime();
+          if (!isNaN(e) && e > maxTime) maxTime = e;
+        }
+        const md = t.metadata as Record<string, unknown> | undefined;
+        if (typeof md?.hoursHigh === 'number') totalHigh += md.hoursHigh;
       }
-      b.progress = Math.max(0, Math.min(1, getBucketProgress(tasks)));
+      b.startDate = isFinite(minTime) ? new Date(minTime) : null;
+      b.endDate = isFinite(maxTime) ? new Date(maxTime) : null;
+      b.totalHours = totalHigh;
+      b.progress = Math.max(0, Math.min(1, getBucketProgress(tasksFull)));
     }
   }
 
@@ -231,7 +277,9 @@ export function PriorityGroupingPlugin(
         const drop = new Set<string>();
         for (const b of runtime) {
           if (b.collapsed) {
-            for (const id of b.taskIds) drop.add(id);
+            // Use allTaskIds (source of truth) — taskIds is already
+            // visibility-filtered and may be missing entries on subsequent runs
+            for (const id of b.allTaskIds) drop.add(id);
           }
         }
         if (drop.size > 0) {
@@ -251,10 +299,12 @@ export function PriorityGroupingPlugin(
     ): void {
       if (!host || runtime.length === 0) return;
 
-      const { config: cfg, scrollY } = state;
+      const { config: cfg, scrollX, scrollY } = state;
       const { theme } = cfg;
       const headerHeight = cfg.headerHeight;
       const rowHeight = cfg.rowHeight;
+      const gridWidth = cfg.gridWidth;
+      const timeScale = host.getTimeScale();
       const dpr = window.devicePixelRatio || 1;
       const canvasWidth = ctx.canvas.width / dpr;
       const bodyHeight = ctx.canvas.height / dpr - headerHeight;
@@ -274,7 +324,7 @@ export function PriorityGroupingPlugin(
       headerRowMap = new Map();
 
       for (const bucket of runtime) {
-        if (bucket.taskIds.length === 0) continue; // skip empty buckets
+        if (bucket.allTaskIds.length === 0) continue; // skip empty buckets
         const headerRow = rowIndex;
         const y = headerHeight + headerRow * rowHeight - scrollY;
 
@@ -283,7 +333,17 @@ export function PriorityGroupingPlugin(
 
         // Only paint if visible
         if (y + rowHeight >= headerHeight && y < headerHeight + bodyHeight) {
-          drawBucketHeader(ctx, bucket, y, rowHeight, canvasWidth, theme);
+          drawBucketHeader(
+            ctx,
+            bucket,
+            y,
+            rowHeight,
+            canvasWidth,
+            gridWidth,
+            scrollX,
+            timeScale,
+            theme,
+          );
         }
 
         rowIndex += 1;
@@ -325,11 +385,14 @@ export function PriorityGroupingPlugin(
     y: number,
     rowHeight: number,
     canvasWidth: number,
+    gridWidth: number,
+    scrollX: number,
+    timeScale: TimeScaleAPI,
     theme: { fontFamily: string; fontSize: number },
   ): void {
-    const { config: bcfg, taskIds, progress, collapsed } = bucket;
+    const { config: bcfg, taskIds, progress, collapsed, totalHours } = bucket;
 
-    // Background tint (faint)
+    // ── Row background tint (full width) ──────────────────────────────
     if (bcfg.bgTint) {
       ctx.fillStyle = bcfg.bgTint;
       ctx.fillRect(0, y, canvasWidth, rowHeight);
@@ -347,75 +410,128 @@ export function PriorityGroupingPlugin(
     ctx.fillStyle = bcfg.color;
     ctx.fillRect(0, y, COLOR_STRIP_WIDTH, rowHeight);
 
-    // Label
+    // ── GRID AREA: label + count + chevron (clipped to gridWidth) ─────
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, y, gridWidth, rowHeight);
+    ctx.clip();
+
+    const labelY = y + rowHeight / 2;
+
+    // Label "NOW" / "NEXT" / etc
     ctx.font = `700 ${theme.fontSize}px ${theme.fontFamily}`;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     ctx.fillStyle = bcfg.color;
-    const labelY = y + rowHeight / 2;
     ctx.fillText(bcfg.label, LABEL_LEFT_MARGIN, labelY);
     const labelWidth = ctx.measureText(bcfg.label).width;
-    ctx.restore();
 
-    // Count badge: "(N)"
-    ctx.save();
+    // Count "5"
     ctx.font = `${theme.fontSize - 1}px ${theme.fontFamily}`;
-    ctx.textBaseline = 'middle';
     ctx.fillStyle = HEADER_TEXT_COLOR_FALLBACK;
     const countText = `${taskIds.length}`;
     const countX = LABEL_LEFT_MARGIN + labelWidth + COUNT_BADGE_GAP;
     ctx.fillText(countText, countX, labelY);
-    const countWidth = ctx.measureText(countText).width;
-    ctx.restore();
 
-    // Progress bar (hours-weighted, slimmer than the bar row height)
-    const progressX = countX + countWidth + PROGRESS_BAR_LEFT_MARGIN;
-    const progressMaxX = canvasWidth - CHEVRON_RIGHT_MARGIN - 16;
-    const progressW = Math.min(
-      PROGRESS_BAR_MAX_WIDTH,
-      Math.max(PROGRESS_BAR_MIN_WIDTH, progressMaxX - progressX),
-    );
-
-    if (progressX + progressW <= progressMaxX) {
-      const pY = y + rowHeight / 2 - PROGRESS_HEIGHT / 2;
-      // Track
-      ctx.fillStyle = PROGRESS_TRACK_BG;
-      ctx.fillRect(progressX, pY, progressW, PROGRESS_HEIGHT);
-      // Fill
-      ctx.fillStyle = bcfg.color;
-      ctx.fillRect(progressX, pY, progressW * progress, PROGRESS_HEIGHT);
-      // Percentage label
-      ctx.save();
-      ctx.font = `600 ${theme.fontSize - 2}px ${theme.fontFamily}`;
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'left';
-      ctx.fillStyle = HEADER_TEXT_COLOR_FALLBACK;
-      const pctText = `${Math.round(progress * 100)}%`;
-      ctx.fillText(pctText, progressX + progressW + 6, labelY);
-      ctx.restore();
-    }
-
-    // Right-side chevron (expand/collapse indicator)
-    const chevronX = canvasWidth - CHEVRON_RIGHT_MARGIN;
-    const chevronY = labelY;
-    ctx.save();
+    // Chevron at the right edge of the grid area
+    const chevronX = gridWidth - CHEVRON_RIGHT_MARGIN;
     ctx.beginPath();
     ctx.fillStyle = bcfg.color;
     if (collapsed) {
-      // Right-pointing
-      ctx.moveTo(chevronX - CHEVRON_SIZE, chevronY - CHEVRON_SIZE);
-      ctx.lineTo(chevronX, chevronY);
-      ctx.lineTo(chevronX - CHEVRON_SIZE, chevronY + CHEVRON_SIZE);
+      ctx.moveTo(chevronX - CHEVRON_SIZE, labelY - CHEVRON_SIZE);
+      ctx.lineTo(chevronX, labelY);
+      ctx.lineTo(chevronX - CHEVRON_SIZE, labelY + CHEVRON_SIZE);
     } else {
-      // Down-pointing
-      ctx.moveTo(chevronX - CHEVRON_SIZE, chevronY - CHEVRON_SIZE / 2);
-      ctx.lineTo(chevronX, chevronY - CHEVRON_SIZE / 2);
-      ctx.lineTo(chevronX - CHEVRON_SIZE / 2, chevronY + CHEVRON_SIZE);
+      ctx.moveTo(chevronX - CHEVRON_SIZE, labelY - CHEVRON_SIZE / 2);
+      ctx.lineTo(chevronX, labelY - CHEVRON_SIZE / 2);
+      ctx.lineTo(chevronX - CHEVRON_SIZE / 2, labelY + CHEVRON_SIZE);
     }
     ctx.closePath();
     ctx.fill();
+
     ctx.restore();
+
+    // ── TIMELINE AREA: span bar from min start to max end ─────────────
+    if (bucket.startDate && bucket.endDate) {
+      ctx.save();
+      // Clip to the timeline portion of the row
+      ctx.beginPath();
+      ctx.rect(gridWidth, y, canvasWidth - gridWidth, rowHeight);
+      ctx.clip();
+
+      // Convert dates → canvas x. dateToX returns timeline-local pixels
+      // (relative to the timeline start), so we add gridWidth and subtract scroll.
+      const startTlX = timeScale.dateToX(bucket.startDate);
+      const endTlX = timeScale.dateToX(bucket.endDate);
+      const canvasStartX = gridWidth + startTlX - scrollX;
+      const canvasEndX = gridWidth + endTlX - scrollX;
+      const spanW = Math.max(2, canvasEndX - canvasStartX);
+
+      // Span bar dimensions — slightly slimmer than the row so the
+      // tinted background still shows above/below
+      const barHeight = Math.min(rowHeight - 8, 18);
+      const barY = y + (rowHeight - barHeight) / 2;
+      const radius = Math.min(barHeight / 2, 5);
+
+      // Track (lighter version of bucket color)
+      ctx.fillStyle = bcfg.color;
+      ctx.globalAlpha = 0.35;
+      drawRoundedRect(ctx, canvasStartX, barY, spanW, barHeight, radius);
+      ctx.fill();
+
+      // Progress fill (full opacity, clipped to progress fraction)
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = bcfg.color;
+      const progressW = spanW * progress;
+      if (progressW > 1) {
+        ctx.save();
+        // Clip to progress portion to keep rounded edges crisp
+        ctx.beginPath();
+        ctx.rect(canvasStartX, barY, progressW, barHeight);
+        ctx.clip();
+        drawRoundedRect(ctx, canvasStartX, barY, spanW, barHeight, radius);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Inline label inside the bar: "120h (45%)" — only if it fits
+      const labelText =
+        totalHours > 0
+          ? `${totalHours}h (${Math.round(progress * 100)}%)`
+          : `${Math.round(progress * 100)}%`;
+      ctx.font = `700 ${theme.fontSize - 1}px ${theme.fontFamily}`;
+      const labelTextWidth = ctx.measureText(labelText).width;
+      if (labelTextWidth + 12 < spanW) {
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.fillText(labelText, canvasStartX + 8, y + rowHeight / 2);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  function drawRoundedRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+  ): void {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.arcTo(x + w, y, x + w, y + rr, rr);
+    ctx.lineTo(x + w, y + h - rr);
+    ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+    ctx.lineTo(x + rr, y + h);
+    ctx.arcTo(x, y + h, x, y + h - rr, rr);
+    ctx.lineTo(x, y + rr);
+    ctx.arcTo(x, y, x + rr, y, rr);
+    ctx.closePath();
   }
 }
 
