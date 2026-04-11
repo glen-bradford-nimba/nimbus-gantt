@@ -20,6 +20,15 @@ export interface GanttTask {
   isCompleted?: boolean;
   color?: string;              // Override color (hex)
   metadata?: Record<string, unknown>;
+  // ── Group-header styling fields ─────────────────────────────────────
+  // Consumed by the core renderer when status === "group-header". Used by
+  // PriorityGroupingPlugin for the NOW/NEXT/PLANNED/PROPOSED/HOLD bucket
+  // headers. Kept optional so regular tasks never need to populate them.
+  groupBg?: string;            // Row background tint for the group header
+  groupColor?: string;         // Border + text color for the group header
+  hours?: number;              // Total hours rolled up (header rows only)
+  hoursLabel?: string;         // Pre-formatted count · hours label
+  title?: string;              // Display title override (distinct from `name`)
 }
 
 export interface GanttDependency {
@@ -280,6 +289,19 @@ export interface PluginHost {
   on(event: string, handler: (...args: unknown[]) => void): () => void;
   getLayouts(): TaskLayout[];
   getTimeScale(): TimeScaleAPI;
+  /**
+   * Rebuild state.tree and state.flatVisibleIds from the current
+   * state.tasks + state.expandedIds. Plugins that inject synthetic
+   * tasks into state.tasks (e.g. PriorityGroupingPlugin's bucket
+   * headers) MUST call this after mutating the tasks Map so the grid
+   * (which renders from state.tree) stays in sync with the canvas
+   * (which renders from state.flatVisibleIds via computed layouts).
+   *
+   * Without this call, any task added by a plugin middleware after the
+   * reducer runs is invisible to the DomTreeGrid — the tree was already
+   * built by the reducer before the plugin had a chance to mutate state.
+   */
+  rebuildTree(): void;
 }
 
 export interface TimeScaleAPI {

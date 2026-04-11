@@ -6,22 +6,32 @@
 // Nimbus pro-forma timeline use case but generic enough for any
 // "swimlane with rich headers" layout.
 //
-// HOW IT WORKS — synthetic header tasks
-// =====================================
-// The plugin's middleware INJECTS synthetic "bucket header" tasks directly into
-// state.tasks and state.flatVisibleIds at the position right above each bucket's
-// real members. The default renderer then handles them like any other task —
-// the DomTreeGrid renders the bucket label in the grid column, and the canvas
-// renderer draws a colored bar in the timeline column. They stay aligned
-// because both use the same row indices.
+// HOW IT WORKS — synthetic header tasks via middleware + rebuildTree()
+// ====================================================================
+// The plugin's middleware runs AFTER the reducer (via next(action)). It:
+//   1. Strips any stale synthetic header tasks from state.tasks
+//   2. Builds bucket membership from the real tasks
+//   3. Injects synthetic "bucket header" tasks into state.tasks and
+//      re-parents each real member task to its bucket header (setting
+//      t.parentId = headerTask.id) so the tree builder produces a proper
+//      parent-child structure with native expand/collapse
+//   4. Updates state.expandedIds to match the plugin's own collapsed set
+//   5. Calls host.rebuildTree() so the grid (which renders from state.tree)
+//      picks up the injected tasks — this is the key call that makes the
+//      plugin pattern work for row injection (the reducer built the tree
+//      BEFORE our middleware ran, so mutating state.tasks alone isn't
+//      enough — the tree has to be recomputed from the new tasks Map).
 //
-// This is the same pattern v4's `toGanttTasks()` used inline (see
-// cloudnimbusllc.com/src/app/mf/delivery-timeline-v4/DeliveryTimelineV4.tsx).
-// The plugin extracts it into the framework so consumers like the Delivery Hub
-// deliveryProFormaTimeline LWC can reuse the same logic against real
-// WorkItem__c records.
+// The same plugin ports directly to Delivery Hub's LWC: Apex serves
+// WorkItem__c records with a PriorityGroup__c field, the LWC instantiates
+// PriorityGroupingPlugin with buckets from the PriorityGroup__c picklist
+// values, and the plugin handles header injection, collapse, and progress
+// rollup. Zero LWC-specific code.
 //
-// Built 2026-04-10 for the v4 → v5 → Delivery Hub port.
+// Built 2026-04-10 for the v4 → v5 → Delivery Hub port. Refactored from
+// canvas-overlay rendering to synthetic-task injection 2026-04-10 after
+// tracking down the tree-render bug (see the comment block in the
+// cloudnimbusllc.com vendor copy for the full tracedown).
 
 import type {
   NimbusGanttPlugin,
@@ -53,20 +63,8 @@ export interface PriorityBucket {
 
 export interface PriorityGroupingConfig {
   buckets: PriorityBucket[];
-  /**
-   * Returns the bucket id for a task, or null if the task is unbucketed.
-   * Default: reads `task.groupId`. Pass a custom fn to derive from any
-   * combination of task fields — this is the seam between hardcoded data
-   * (cloudnimbusllc.com pro forma) and Salesforce data (DH WorkItem__c).
-   */
   getBucket?: (task: GanttTask) => string | null;
-  /**
-   * Returns the progress (0..1) shown on a bucket's header row. Default:
-   * arithmetic mean of task.progress. v4 passes a hours-weighted version
-   * (see hoursWeightedProgress export).
-   */
   getBucketProgress?: (tasks: GanttTask[]) => number;
-  /** Whether buckets start collapsed. Default: false. */
   startCollapsed?: boolean;
 }
 
@@ -80,7 +78,7 @@ interface BucketRuntime {
   allTaskIds: string[];
   collapsed: boolean;
   progress: number;
-  /** Earliest startDate across ALL bucket members */
+  /** Earliest startDate across ALL bucket members (not just visible) */
   startDate: Date | null;
   /** Latest endDate across ALL bucket members */
   endDate: Date | null;
@@ -149,6 +147,7 @@ export function PriorityGroupingPlugin(
 
     // Pass 2: walk state.tasks (the FULL Map, source of truth) to compute
     // span/progress/hours from ALL bucket members regardless of visibility.
+    // Skip any synthetic header tasks (we just deleted them but be defensive).
     for (const [taskId, task] of state.tasks) {
       if (taskId.startsWith(HEADER_PREFIX)) continue;
       const bucketId = getBucket(task);
@@ -196,10 +195,11 @@ export function PriorityGroupingPlugin(
   function makeHeaderTask(bucket: BucketRuntime): GanttTask | null {
     if (!bucket.startDate || !bucket.endDate) return null;
     const pct = Math.round(bucket.progress * 100);
+    // Bar label format matches v4: "266h (9%)"
     const labelText =
       bucket.totalHours > 0
-        ? `${bucket.config.label} · ${bucket.totalHours}h (${pct}%)`
-        : `${bucket.config.label} · ${bucket.allTaskIds.length} items`;
+        ? `${bucket.totalHours}h (${pct}%)`
+        : `${bucket.allTaskIds.length} items`;
     return {
       id: `${HEADER_PREFIX}${bucket.config.id}`,
       name: labelText,
@@ -207,10 +207,19 @@ export function PriorityGroupingPlugin(
       endDate: toISODate(bucket.endDate),
       progress: bucket.progress,
       color: bucket.config.color,
-      status: 'bucket-header',
+      // v4-compatible group styling — core.js reads these when
+      // status === "group-header" to render the row background tint,
+      // grid text color, canvas top border line, and label.
+      status: 'group-header',
+      groupBg: bucket.config.bgTint || undefined,
+      groupColor: bucket.config.color,
       groupId: bucket.config.id,
       groupName: bucket.config.label,
+      title: bucket.config.label,
+      hours: bucket.totalHours,
+      hoursLabel: `${bucket.allTaskIds.length} · ${bucket.totalHours}h`,
       assignee: '',
+      sortOrder: bucket.config.order,
       metadata: {
         __bucketHeader: true,
         bucketId: bucket.config.id,
@@ -267,7 +276,7 @@ export function PriorityGroupingPlugin(
       }
       for (const id of staleHeaderIds) state.tasks.delete(id);
 
-      // 2. Get a clean view of flatVisibleIds (no synthetic headers)
+      // 2. Clean view of flatVisibleIds (no synthetic headers)
       const cleanIds = state.flatVisibleIds.filter(
         (id) => !id.startsWith(HEADER_PREFIX),
       );
@@ -289,37 +298,36 @@ export function PriorityGroupingPlugin(
         return;
       }
 
-      // 4. Build buckets fresh from the clean state
+      // 4. Build buckets fresh from clean state
       buildBuckets(state, cleanIds);
 
-      // 5. Recompose flatVisibleIds: ungrouped first, then per-bucket
-      //    header + members (skipping members of collapsed buckets)
-      const newVisible: string[] = [];
-
-      for (const id of cleanIds) {
-        const t = state.tasks.get(id);
-        if (!t) continue;
-        const b = getBucket(t);
-        if (!b || !bucketIndexById.has(b)) {
-          newVisible.push(id);
-        }
-      }
-
+      // 5. Inject synthetic header tasks into state.tasks AND set parentId
+      //    on each member task → header, so the tree builder creates a
+      //    proper parent-child structure. Also sync state.expandedIds with
+      //    the plugin's collapsed set so the tree renders collapse
+      //    correctly without a custom filter.
       for (const bucket of runtime) {
         if (bucket.allTaskIds.length === 0) continue;
         const headerTask = makeHeaderTask(bucket);
         if (headerTask) {
           state.tasks.set(headerTask.id, headerTask);
-          newVisible.push(headerTask.id);
-        }
-        if (!bucket.collapsed) {
-          for (const tid of bucket.taskIds) newVisible.push(tid);
+          for (const tid of bucket.allTaskIds) {
+            const t = state.tasks.get(tid);
+            if (t) t.parentId = headerTask.id;
+          }
+          if (bucket.collapsed) {
+            state.expandedIds.delete(headerTask.id);
+          } else {
+            state.expandedIds.add(headerTask.id);
+          }
         }
       }
 
-      // 6. Apply
-      state.flatVisibleIds.length = 0;
-      for (const id of newVisible) state.flatVisibleIds.push(id);
+      // 6. Rebuild tree + flatVisibleIds so the grid sees the injected
+      //    parent rows with their members as children. Without this, the
+      //    grid still renders from the pre-middleware tree and the
+      //    synthetic headers never appear.
+      host.rebuildTree();
     },
 
     destroy(): void {
@@ -335,45 +343,32 @@ export function PriorityGroupingPlugin(
 // ─── Pre-built bucket palette for the cloud-nimbus pro-forma use case ───────
 
 export const CLOUD_NIMBUS_PRIORITY_BUCKETS: PriorityBucket[] = [
-  {
-    id: 'top-priority',
-    label: 'NOW',
-    color: '#dc2626',
-    bgTint: '#fef2f2',
-    order: 0,
-  },
-  {
-    id: 'active',
-    label: 'NEXT',
-    color: '#d97706',
-    bgTint: '#fffbeb',
-    order: 1,
-  },
-  {
-    id: 'follow-on',
-    label: 'PLANNED',
-    color: '#059669',
-    bgTint: '#ecfdf5',
-    order: 2,
-  },
-  {
-    id: 'proposed',
-    label: 'PROPOSED',
-    color: '#2563eb',
-    bgTint: '#eff6ff',
-    order: 3,
-  },
-  {
-    id: 'deferred',
-    label: 'HOLD',
-    color: '#94a3b8',
-    bgTint: '#f8fafc',
-    order: 4,
-  },
+  { id: 'top-priority', label: 'NOW',      color: '#dc2626', bgTint: '#fef2f2', order: 0 },
+  { id: 'active',       label: 'NEXT',     color: '#d97706', bgTint: '#fffbeb', order: 1 },
+  { id: 'follow-on',    label: 'PLANNED',  color: '#059669', bgTint: '#ecfdf5', order: 2 },
+  { id: 'proposed',     label: 'PROPOSED', color: '#2563eb', bgTint: '#eff6ff', order: 3 },
+  { id: 'deferred',     label: 'HOLD',     color: '#94a3b8', bgTint: '#f8fafc', order: 4 },
 ];
 
 /**
- * Hours-weighted progress fn — used by both v4 and the eventual DH LWC.
+ * Returns true if the given task ID is a synthetic bucket header.
+ * Use in click handlers to detect and route to bucket-collapse logic.
+ */
+export function isBucketHeaderId(id: string): boolean {
+  return typeof id === 'string' && id.startsWith(HEADER_PREFIX);
+}
+
+/**
+ * Extracts the bucket id from a synthetic header task id.
+ * Returns null if the input isn't a synthetic header id.
+ */
+export function bucketIdFromHeaderId(id: string): string | null {
+  if (!isBucketHeaderId(id)) return null;
+  return id.substring(HEADER_PREFIX.length);
+}
+
+/**
+ * Hours-weighted progress fn — used by both v5 and the eventual DH LWC.
  * Reads `hoursHigh` and `hoursLogged` from `task.metadata`. Falls back to
  * the arithmetic mean of `task.progress` if metadata is absent.
  */

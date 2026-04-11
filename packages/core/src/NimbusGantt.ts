@@ -588,6 +588,22 @@ export class NimbusGantt {
         xToDate: (x: number) => this.timeScale.xToDate(x),
         getColumnWidth: () => this.timeScale.getColumnWidth(),
       }),
+      /**
+       * Rebuild state.tree + state.flatVisibleIds from current state.tasks
+       * and state.expandedIds. Required by plugins that inject synthetic
+       * tasks (e.g. PriorityGroupingPlugin) so the grid sees them.
+       *
+       * Mutates state in place. Safe to call from middleware — the store's
+       * state object is exposed by reference and the in-place mutation is
+       * picked up by the subsequent render.
+       */
+      rebuildTree: () => {
+        const st = this.store.getState();
+        const { tree, flatIds } = buildTree(st.tasks, st.expandedIds);
+        st.tree = tree;
+        st.flatVisibleIds.length = 0;
+        for (const id of flatIds) st.flatVisibleIds.push(id);
+      },
     };
   }
 
