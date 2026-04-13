@@ -129,6 +129,23 @@ function injectStyles(root: HTMLElement, theme: ResolvedTheme): void {
       background: ${theme.selectionColor} !important;
     }
 
+    .ng-group-row {
+      font-weight: 600;
+      letter-spacing: 0.01em;
+    }
+
+    .ng-group-row .ng-grid-cell-text {
+      opacity: 0.9;
+    }
+
+    .ng-group-row .ng-expand-icon {
+      opacity: 0.75;
+    }
+
+    .ng-group-row:hover {
+      filter: brightness(0.97);
+    }
+
     /* ── Cells ───────────────────────────────────────────────────────────── */
 
     .ng-grid-cell {
@@ -552,9 +569,19 @@ export class DomTreeGrid {
     tr.setAttribute('data-task-id', node.task.id);
     tr.style.height = `${rowHeight}px`;
 
-    // Alternating row class
-    if (rowIndex % 2 === 1) {
-      tr.classList.add('ng-row-alt');
+    // Group header rows — apply class + inline background so CSS and
+    // attribute selectors can both target them. groupBg is set by
+    // PriorityGroupingPlugin on tasks with status === 'group-header'.
+    if (node.task.status === 'group-header') {
+      tr.classList.add('ng-group-row');
+      if (node.task.groupBg) {
+        tr.style.background = node.task.groupBg;
+      }
+    } else {
+      // Alternating row class (skip on group headers)
+      if (rowIndex % 2 === 1) {
+        tr.classList.add('ng-row-alt');
+      }
     }
 
     // Selected class
@@ -608,10 +635,36 @@ export class DomTreeGrid {
         td.appendChild(spacer);
       }
 
+      // ── Drag handle (hamburger) for leaf rows (cloudnimbusllc.com patch) ──
+      if (node.children.length === 0 && !node.task.groupBg) {
+        const grip = document.createElement('span');
+        grip.className = 'ng-drag-handle';
+        grip.innerHTML = '&#9776;';
+        td.appendChild(grip);
+      }
+
+      // ── Color dot before task name (uses task.color or colorMap) ──────────
+      const taskColor = node.task.color ||
+        (state.config.colorMap?.[node.task.status ?? '']) || '';
+      if (taskColor && node.children.length === 0) {
+        const dot = document.createElement('span');
+        dot.className = 'ng-status-dot';
+        dot.style.cssText =
+          `display:inline-block;width:7px;height:7px;border-radius:50%;` +
+          `background:${taskColor};margin-right:5px;flex-shrink:0;vertical-align:middle;`;
+        td.appendChild(dot);
+      }
+
       const textSpan = document.createElement('span');
       textSpan.className = 'ng-grid-cell-text';
       textSpan.textContent = getCellValue(node.task, col);
       td.appendChild(textSpan);
+    } else if (col.field === '_drag' && node.children.length === 0 && !node.task.groupBg) {
+      // ── Standalone _drag column: hamburger for leaf rows only ────────────
+      const grip = document.createElement('span');
+      grip.className = 'ng-drag-handle';
+      grip.innerHTML = '&#9776;';
+      td.appendChild(grip);
     } else {
       td.textContent = getCellValue(node.task, col);
     }
@@ -628,11 +681,22 @@ export class DomTreeGrid {
     const { config } = state;
     const { columns } = config;
 
-    // Update alternating class
-    if (rowIndex % 2 === 1) {
-      rowEl.classList.add('ng-row-alt');
-    } else {
+    // Group header styling
+    if (node.task.status === 'group-header') {
+      rowEl.classList.add('ng-group-row');
+      if (node.task.groupBg) {
+        rowEl.style.background = node.task.groupBg;
+      }
       rowEl.classList.remove('ng-row-alt');
+    } else {
+      rowEl.classList.remove('ng-group-row');
+      rowEl.style.background = '';
+      // Update alternating class
+      if (rowIndex % 2 === 1) {
+        rowEl.classList.add('ng-row-alt');
+      } else {
+        rowEl.classList.remove('ng-row-alt');
+      }
     }
 
     // Update selected class
@@ -658,7 +722,9 @@ export class DomTreeGrid {
       if (col.tree) {
         // Update tree cell: indentation, expand icon state, text
         const indent = node.depth * 20 + 8;
-        td.style.paddingLeft = `${indent}px`;
+        // Guard: only write if changed — avoids CSS layout thrash on every scroll tick
+        const newPad = `${indent}px`;
+        if (td.style.paddingLeft !== newPad) td.style.paddingLeft = newPad;
 
         const expandIcon = td.querySelector('.ng-expand-icon') as HTMLElement | null;
         const spacer = td.querySelector('.ng-expand-spacer') as HTMLElement | null;
@@ -693,6 +759,40 @@ export class DomTreeGrid {
           }
         }
 
+        // ── Update or create drag handle (cloudnimbusllc.com patch) ──────────
+        const existingGrip = td.querySelector('.ng-drag-handle') as HTMLElement | null;
+        if (node.children.length === 0 && !node.task.groupBg) {
+          if (!existingGrip) {
+            const grip = document.createElement('span');
+            grip.className = 'ng-drag-handle';
+            grip.innerHTML = '&#9776;';
+            const dotOrText = td.querySelector('.ng-status-dot') || td.querySelector('.ng-grid-cell-text');
+            dotOrText ? td.insertBefore(grip, dotOrText) : td.appendChild(grip);
+          }
+        } else if (existingGrip) {
+          existingGrip.remove();
+        }
+
+        // ── Update or create color dot ──────────────────────────────────────
+        const existingDot = td.querySelector('.ng-status-dot') as HTMLElement | null;
+        const taskColor = node.task.color ||
+          (state.config.colorMap?.[node.task.status ?? '']) || '';
+        if (taskColor && node.children.length === 0) {
+          if (existingDot) {
+            existingDot.style.background = taskColor;
+          } else {
+            const dot = document.createElement('span');
+            dot.className = 'ng-status-dot';
+            dot.style.cssText =
+              `display:inline-block;width:7px;height:7px;border-radius:50%;` +
+              `background:${taskColor};margin-right:5px;flex-shrink:0;vertical-align:middle;`;
+            const cellText = td.querySelector('.ng-grid-cell-text');
+            cellText ? td.insertBefore(dot, cellText) : td.appendChild(dot);
+          }
+        } else if (existingDot) {
+          existingDot.remove();
+        }
+
         // Update text content
         const textSpan = td.querySelector('.ng-grid-cell-text');
         if (textSpan) {
@@ -700,6 +800,20 @@ export class DomTreeGrid {
           if (textSpan.textContent !== newValue) {
             textSpan.textContent = newValue;
           }
+        }
+      } else if (col.field === '_drag') {
+        // ── Update _drag column: show hamburger for leaf rows only ──────────
+        const existingGrip = td.querySelector('.ng-drag-handle') as HTMLElement | null;
+        if (node.children.length === 0 && !node.task.groupBg) {
+          if (!existingGrip) {
+            td.textContent = '';
+            const grip = document.createElement('span');
+            grip.className = 'ng-drag-handle';
+            grip.innerHTML = '&#9776;';
+            td.appendChild(grip);
+          }
+        } else if (existingGrip) {
+          td.textContent = '';
         }
       } else {
         // Simple cell — just update text

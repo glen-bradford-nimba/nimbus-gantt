@@ -121,10 +121,15 @@ export class CanvasRenderer {
       this.renderTodayBackground(todayX, timeScale, bodyTop, bodyHeight, theme);
     }
 
-    // ── 6. Task bars ────────────────────────────────────────────────────
+    // ── 6. Group-header row background tints (canvas layer) ─────────────
+    // DomTreeGrid also applies inline CSS background to the <tr>, but the
+    // canvas needs its own fill so the tint shows through the timeline column.
+    this.renderGroupRowBgs(state, layouts, config, scrollX, scrollY, bodyTop, bodyHeight);
+
+    // ── 7. Task bars ────────────────────────────────────────────────────
     this.renderTaskBars(state, layouts, config, theme, scrollX, scrollY, bodyTop, bodyHeight);
 
-    // ── 7. Today marker line ────────────────────────────────────────────
+    // ── 8. Today marker line ────────────────────────────────────────────
     if (config.showToday && todayX !== null) {
       this.renderTodayLine(todayX, bodyTop, bodyHeight, theme);
     }
@@ -132,7 +137,7 @@ export class CanvasRenderer {
     // Restore from body clip
     ctx.restore();
 
-    // ── 8. Header (fixed, does not scroll vertically) ───────────────────
+    // ── 9. Header (fixed, does not scroll vertically) ───────────────────
     this.renderHeader(timeScale, config, theme, scrollX);
   }
 
@@ -252,6 +257,7 @@ export class CanvasRenderer {
 
   /**
    * Draw the translucent column background for today.
+   * Always renders exactly one day wide regardless of the current zoom level.
    */
   private renderTodayBackground(
     todayX: number,
@@ -260,8 +266,52 @@ export class CanvasRenderer {
     bodyHeight: number,
     theme: ResolvedTheme,
   ): void {
-    const colWidth = timeScale.getColumnWidth();
-    this.fillRect(todayX, bodyTop, colWidth, bodyHeight, theme.todayBg);
+    // Compute the pixel width of exactly one day by converting today and
+    // tomorrow to X coordinates. This ensures the highlight is always one
+    // day wide even when the zoom unit is week/month/quarter.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today.getTime() + MS_PER_DAY);
+    const dayWidth = timeScale.dateToX(tomorrow) - timeScale.dateToX(today);
+    this.fillRect(todayX, bodyTop, dayWidth, bodyHeight, theme.todayBg);
+  }
+
+  /**
+   * Draw colored background fills for group-header rows (bucket headers).
+   * The DOM grid applies an inline background to the <tr>, but the timeline
+   * canvas needs its own layer so the tint bleeds into the bar area too.
+   * (cloudnimbusllc.com patch — ported from local core.js)
+   */
+  private renderGroupRowBgs(
+    state: GanttState,
+    layouts: TaskLayout[],
+    config: ResolvedConfig,
+    scrollX: number,
+    scrollY: number,
+    bodyTop: number,
+    bodyHeight: number,
+  ): void {
+    const { ctx, displayWidth } = this;
+    const rowH = config.rowHeight;
+
+    for (const layout of layouts) {
+      const task = state.tasks.get(layout.taskId);
+      if (!task || !task.groupBg) continue;
+
+      const rowY = layout.y - scrollY + bodyTop;
+      // Skip rows outside the visible body area
+      if (rowY + rowH < bodyTop || rowY > bodyTop + bodyHeight) continue;
+
+      ctx.save();
+      ctx.fillStyle = task.groupBg;
+      ctx.fillRect(scrollX, rowY, displayWidth, rowH);
+      if (task.groupColor) {
+        // Thin accent line along the top of the header row
+        ctx.fillStyle = task.groupColor;
+        ctx.fillRect(scrollX, rowY, displayWidth, 2);
+      }
+      ctx.restore();
+    }
   }
 
   /**

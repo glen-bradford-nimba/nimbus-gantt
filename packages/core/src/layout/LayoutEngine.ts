@@ -53,7 +53,16 @@ export class LayoutEngine {
         progressWidth,
         color,
         textColor: config.theme.barTextColor,
-        label: task.name,
+        // ── Rich bar label: "137h · 27% · Title" (cloudnimbusllc.com patch) ──
+        // Group headers just show their name; regular tasks get hours + progress + title.
+        label: task.status === 'group-header'
+          ? task.name
+          : (
+              (task.hoursLabel || (task.hours != null ? `${task.hours}h` : '')) +
+              (task.hoursLabel || task.hours != null ? ' · ' : '') +
+              ((task.progress || 0) > 0 ? `${Math.round((task.progress || 0) * 100)}% · ` : '') +
+              (task.title || task.name)
+            ),
         isMilestone: task.isMilestone || false,
       });
     }
