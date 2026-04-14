@@ -1,0 +1,7 @@
+node_modules/
+screenshots/
+diffs/
+reports/
+*.log
+.playwright/
+test-results/

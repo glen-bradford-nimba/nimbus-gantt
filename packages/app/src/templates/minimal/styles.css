@@ -1,0 +1,20 @@
+/* === nimbus-gantt minimal template.css ===
+ * Minimal base-reset + utility subset. Ship as a smaller alternative to
+ * the full cloudnimbus template CSS. Consumers use this when they do not
+ * need Tailwind-utility parity and want to override heavily.
+ */
+
+.nga-root { font-family: var(--nga-font-family, sans-serif); font-size: var(--nga-font-size-base, 13px); color: var(--nga-text-primary, #0f172a); background: var(--nga-bg, #ffffff); }
+.nga-root *, .nga-root *::before, .nga-root *::after { box-sizing: border-box; }
+.nga-titlebar, .nga-zoombar, .nga-filterbar, .nga-stats, .nga-hrswkstrip, .nga-audit { padding: 6px 12px; border-bottom: 1px solid var(--nga-border, #e5e7eb); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nga-content-outer { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+.nga-content { flex: 1 1 auto; position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.nga-sidebar { width: 260px; flex-shrink: 0; border-right: 1px solid var(--nga-border, #e5e7eb); overflow-y: auto; }
+
+button { cursor: pointer; }
+.nga-root .flex { display: flex; }
+.nga-root .flex-col { flex-direction: column; }
+.nga-root .items-center { align-items: center; }
+.nga-root .gap-2 { gap: 8px; }
+.nga-root .h-full { height: 100%; }
+.nga-root .w-full { width: 100%; }

@@ -1,0 +1,24 @@
+{
+  "name": "@nimbus-gantt/visual-regression",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright + pixelmatch visual regression harness for nimbus-gantt v9, v10, and Salesforce.",
+  "type": "module",
+  "scripts": {
+    "capture": "tsx capture.ts",
+    "compare": "tsx compare.ts",
+    "report": "tsx report.ts",
+    "all": "tsx run.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "@types/node": "^20.11.0",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "pixelmatch": "^6.0.0",
+    "playwright": "^1.47.0",
+    "pngjs": "^7.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
