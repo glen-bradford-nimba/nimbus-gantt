@@ -24,6 +24,10 @@ import {
 } from './components/vanilla';
 // Inline the compiled stylesheet — Vite resolves ?raw to the file contents at build time.
 // Saves a fetch round-trip and avoids any Locker Service issues with the fetch flow.
+// Type decl kept inline so downstream tsc runs (cloudnimbusllc.com) don't need the .d.ts file.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
+/// <reference types="vite/client" />
+// @ts-expect-error — Vite-resolved virtual subpath, no matching type decl outside Vite context
 import inlineStyles from './styles.css?raw';
 
 export const cloudnimbusTemplate: Template = defineTemplate({
