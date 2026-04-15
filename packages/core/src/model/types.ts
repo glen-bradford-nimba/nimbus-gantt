@@ -11,7 +11,8 @@ export interface GanttTask {
   progress?: number;           // 0.0 - 1.0 (default 0)
   status?: string;             // Maps to colorMap key (e.g. "Planning", "Development")
   priority?: string;
-  parentId?: string;           // Self-reference for tree hierarchy
+  parentId?: string;           // Self-reference for tree hierarchy (primary/rendering parent)
+  additionalParentIds?: string[]; // DAG: extra logical parents (e.g. item belongs to multiple proposals). Does NOT affect tree rendering — only logical rollups, dependency edges, and scheduler input. Hour rollups must dedupe shared descendants across parents.
   groupId?: string;            // Swimlane grouping (e.g. entity/client ID)
   groupName?: string;          // Display name for the group
   assignee?: string;           // Developer/owner display name

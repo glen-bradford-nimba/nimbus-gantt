@@ -26,6 +26,13 @@ export type {
   GanttEventType,
 } from './model/types';
 
+// DAG utilities — consumers that need to walk parentId + additionalParentIds
+export {
+  getAllParentIds,
+  getDescendantIds,
+  rollupHoursDeduped,
+} from './model/dag';
+
 // Utilities consumers might need
 export { TimeScale } from './layout/TimeScale';
 export { LayoutEngine, parseDate } from './layout/LayoutEngine';
