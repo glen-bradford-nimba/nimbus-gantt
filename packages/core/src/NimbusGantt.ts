@@ -85,7 +85,7 @@ export class NimbusGantt {
   private pluginMiddlewares: Middleware[] = [];
   private layouts: TaskLayout[] = [];
 
-  private resizeObserver: ResizeObserver;
+  private resizeObserver: ResizeObserver | null = null;
   private unsubscribeStore: () => void;
 
   private renderScheduled = false;
@@ -244,13 +244,26 @@ export class NimbusGantt {
     // 14. Wire user callbacks via event bus
     this.wireCallbacks(config);
 
-    // 15. Set up ResizeObserver
-    this.resizeObserver = new ResizeObserver(() => {
-      if (!this.destroyed) {
-        this.resize();
-      }
-    });
-    this.resizeObserver.observe(this.container);
+    // 15. Set up ResizeObserver — guarded for Salesforce Locker/LWS, which
+    // blocks the global constructor. When unavailable, fall back to a
+    // window-level resize listener (less precise, but keeps the gantt alive).
+    if (typeof ResizeObserver === 'function') {
+      this.resizeObserver = new ResizeObserver(() => {
+        if (!this.destroyed) {
+          this.resize();
+        }
+      });
+      this.resizeObserver.observe(this.container);
+    } else {
+      const onWindowResize = () => {
+        if (!this.destroyed) {
+          this.resize();
+        }
+      };
+      window.addEventListener('resize', onWindowResize);
+      // Stash on the instance so destroy() can clean it up.
+      (this as unknown as { _fallbackResizeHandler?: () => void })._fallbackResizeHandler = onWindowResize;
+    }
 
     // 16. Initial render
     this.resize();
@@ -447,8 +460,13 @@ export class NimbusGantt {
     if (this.destroyed) return;
     this.destroyed = true;
 
-    // 1. Disconnect ResizeObserver
-    this.resizeObserver.disconnect();
+    // 1. Disconnect ResizeObserver (or fallback window listener)
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    } else {
+      const fallback = (this as unknown as { _fallbackResizeHandler?: () => void })._fallbackResizeHandler;
+      if (fallback) window.removeEventListener('resize', fallback);
+    }
 
     // 2. Destroy ScrollManager
     this.scrollManager.destroy();
