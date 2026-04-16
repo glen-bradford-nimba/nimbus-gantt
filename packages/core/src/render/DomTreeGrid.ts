@@ -210,7 +210,7 @@ function injectStyles(root: HTMLElement, theme: ResolvedTheme): void {
     }
   `;
 
-  root.prepend(style);
+  root.insertBefore(style, root.firstChild);
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
