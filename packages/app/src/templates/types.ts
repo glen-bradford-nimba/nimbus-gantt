@@ -66,6 +66,8 @@ export interface PriorityBucket {
 export type FilterMode = 'active' | 'proposal' | 'done' | 'real' | 'workstreams' | 'all';
 export type ZoomLevel = 'day' | 'week' | 'month' | 'quarter';
 export type GroupBy = 'priority' | 'epic';
+/** DetailPanel render mode — 'view' shows read-only fields, 'edit' shows inputs. */
+export type DetailMode = 'view' | 'edit';
 
 export interface AppState {
   viewMode: ViewMode;
@@ -77,6 +79,9 @@ export interface AppState {
   sidebarOpen: boolean;
   statsOpen: boolean;
   detailOpen: boolean;
+  /** DetailPanel mode — toggled via pencil button in header, or set by
+   *  TOGGLE_DETAIL's optional editMode payload (e.g. dblclick → edit). */
+  detailMode: DetailMode;
   auditPanelOpen: boolean;
   fullscreen: boolean;
   selectedTaskId: string | null;
@@ -92,7 +97,8 @@ export type AppEvent =
   | { type: 'TOGGLE_HIDE_COMPLETED' }
   | { type: 'TOGGLE_SIDEBAR' }
   | { type: 'TOGGLE_STATS' }
-  | { type: 'TOGGLE_DETAIL'; taskId?: string }
+  | { type: 'TOGGLE_DETAIL'; taskId?: string; editMode?: boolean }
+  | { type: 'SET_DETAIL_MODE'; mode: DetailMode }
   | { type: 'TOGGLE_AUDIT_PANEL' }
   | { type: 'TOGGLE_FULLSCREEN' }
   | { type: 'SELECT_TASK'; taskId: string | null }

@@ -82,19 +82,24 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     root.appendChild(version);
     root.appendChild(mkSep());
 
-    /* 4. VIEW_MODES row */
-    CLOUD_NIMBUS_VIEW_MODES.forEach((v) => {
-      const on = state.viewMode === v.id;
-      const cls = CLS_PILL_BTN_BASE + ' ' + (on ? CLS_PILL_BTN_ACTIVE_VIOLET : CLS_PILL_BTN_IDLE_VIOLET);
-      const btn = el('button', cls);
-      const ico = el('span', 'mr-1');
-      ico.textContent = v.icon;
-      btn.appendChild(ico);
-      btn.appendChild(document.createTextNode(v.label));
-      btn.addEventListener('click', () => dispatch({ type: 'SET_VIEW', mode: v.id as ViewMode }));
-      root.appendChild(btn);
-    });
-    root.appendChild(mkSep());
+    /* 4. VIEW_MODES row — only show modes enabled in config.views; hide section when ≤1 */
+    const enabledViews = CLOUD_NIMBUS_VIEW_MODES.filter(
+      (v) => !config.views || config.views.includes(v.id),
+    );
+    if (enabledViews.length > 1) {
+      enabledViews.forEach((v) => {
+        const on = state.viewMode === v.id;
+        const cls = CLS_PILL_BTN_BASE + ' ' + (on ? CLS_PILL_BTN_ACTIVE_VIOLET : CLS_PILL_BTN_IDLE_VIOLET);
+        const btn = el('button', cls);
+        const ico = el('span', 'mr-1');
+        ico.textContent = v.icon;
+        btn.appendChild(ico);
+        btn.appendChild(document.createTextNode(v.label));
+        btn.addEventListener('click', () => dispatch({ type: 'SET_VIEW', mode: v.id as ViewMode }));
+        root.appendChild(btn);
+      });
+      root.appendChild(mkSep());
+    }
 
     /* 6. Sidebar / Stats / Audit toggles */
     function toggleBtn(label: string, on: boolean, ev: () => void) {

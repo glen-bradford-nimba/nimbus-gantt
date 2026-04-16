@@ -38,7 +38,20 @@ export interface TaskPatch {
   parentId?: string | null;
   priorityGroup?: string;
   sortOrder?: number;
+  /** Dependency edges — full replacement list (not delta). When provided the
+   *  consumer replaces the task's `dependencies` array wholesale. */
+  dependencies?: string[];
 }
+
+/** Screen-space coordinates for right-click / context menu UX. */
+export interface ScreenPos {
+  x: number;
+  y: number;
+}
+
+/** Origin of a task click — canvas bar vs grid row. v5 used this to decide
+ *  whether to open the detail panel (canvas) or just highlight (grid). */
+export type TaskClickSource = 'canvas' | 'grid';
 
 export interface AppConfig {
   title?: string;
@@ -75,11 +88,26 @@ export interface MountOptions {
   config?: Partial<AppConfig>;
   /** Pre-resolved engine — bypasses window.NimbusGantt lookup when provided. */
   engine?: NimbusGanttEngine;
+  /** Optional consumer-facing interaction callbacks. Each is forwarded from
+   *  the underlying NimbusGantt engine event (plus a container-level
+   *  contextmenu listener) so host apps can render tooltips, context menus,
+   *  dependency-linking UI, edit-mode panels, etc. Mirrors v5 interaction
+   *  layer — same surface NimbusGantt already exposes via its engine opts. */
+  onTaskClick?: (task: NormalizedTask, source: TaskClickSource) => void;
+  onTaskDoubleClick?: (task: NormalizedTask) => void;
+  onTaskHover?: (taskId: string | null) => void;
+  onTaskContextMenu?: (task: NormalizedTask, pos: ScreenPos) => void;
 }
 
 export interface AppInstance {
   setTasks(tasks: NormalizedTask[]): void;
   destroy(): void;
+  /** Optional bridge methods exposed by the engineOnly IIFE mount so the
+   *  React driver can forward slot state changes (filter/search, zoom,
+   *  groupBy) to the live gantt canvas without re-mounting the engine. */
+  setFilter?(filter: string, search: string): void;
+  setZoom?(zoom: string): void;
+  setGroupBy?(groupBy: string): void;
 }
 
 /** Internal mapped task passed to NimbusGantt engine */

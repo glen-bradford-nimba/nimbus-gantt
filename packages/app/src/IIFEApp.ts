@@ -305,13 +305,98 @@ export class IIFEApp {
       const filtered = applyFilter(allTasks, state.filter as 'active', state.search);
       const gtasks = buildTasks(filtered);
 
+      // Last-hovered task id (canvas OR grid) — shared between mouseover
+      // tracking and the container-level contextmenu listener so right-click
+      // on a canvas bar resolves to the correct task.
+      let lastHoveredTaskId: string | null = null;
+
+      const findTaskById = (id: string | null): NormalizedTask | null => {
+        if (!id) return null;
+        return allTasks.find((t) => t.id === id) ?? null;
+      };
+
       const inst = new eng.NimbusGantt(ganttEl, {
         tasks: gtasks, dependencies: [], columns: GANTT_COLS, theme: V3_THEME,
         rowHeight: 32, barHeight: 20, headerHeight: 32, gridWidth: 295,
         zoomLevel: state.zoom, showToday: true, showWeekends: true, showProgress: true,
         colorMap: options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
         readOnly: false,
+        onTaskClick: (task: { id: string }) => {
+          if (!task || !task.id || isBucketId(task.id)) return;
+          const t = findTaskById(task.id);
+          if (t) options.onTaskClick?.(t, 'canvas');
+        },
+        onTaskDblClick: (task: { id: string }) => {
+          if (!task || !task.id || isBucketId(task.id)) return;
+          const t = findTaskById(task.id);
+          // engineOnly: no internal reducer — consumer's callback is the
+          // control path. The React driver's reducer handles TOGGLE_DETAIL
+          // with editMode:true on this same event via its own engine-bridge.
+          if (t) options.onTaskDoubleClick?.(t);
+        },
+        // Canvas-bar hover: engine fires onHover on every pointermove that
+        // hits a bar, with task=null when the cursor leaves all bars. We
+        // coalesce to avoid duplicate fires when the cursor stays over the
+        // same bar, and share lastHoveredTaskId with the grid-row + context-
+        // menu path so right-click on a canvas bar resolves correctly.
+        onHover: (task: { id?: string } | null) => {
+          const id = task?.id && !isBucketId(task.id) ? task.id : null;
+          if (id === lastHoveredTaskId) return;
+          lastHoveredTaskId = id;
+          options.onTaskHover?.(id);
+        },
+        onTaskMove: (task: { id: string }, s: string, e: string) => {
+          if (task && task.id && !isBucketId(task.id)) options.onPatch?.({ id: task.id, startDate: s, endDate: e });
+        },
+        onTaskResize: (task: { id: string }, s: string, e: string) => {
+          if (task && task.id && !isBucketId(task.id)) options.onPatch?.({ id: task.id, startDate: s, endDate: e });
+        },
       });
+
+      /* ── DOM-level hover + contextmenu listeners ────────────────────────
+       * Canvas-bar hover is handled by the engine's `onHover` callback in
+       * the Ctor options above (fires on every pointermove hit). The DOM
+       * `mouseover` listener below catches hover on the left-side grid
+       * tree-cell (which sits outside the canvas), so consumers see both
+       * surfaces as the same taskId.
+       *
+       * The contextmenu listener uses lastHoveredTaskId to resolve right-
+       * clicks on canvas bars, since contextmenu fires on the container
+       * element rather than a bar.
+       *
+       * Salesforce Locker/LWS swallows contextmenu events — the listener
+       * attaches but the event never fires, so consumers must provide an
+       * alternate UX (e.g. "edit dependencies" button in DetailPanel).
+       */
+      const handleMouseOver = (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        const row = target?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
+        const id = row?.getAttribute('data-task-id') ?? null;
+        if (id && !isBucketId(id) && id !== lastHoveredTaskId) {
+          lastHoveredTaskId = id;
+          options.onTaskHover?.(id);
+        }
+      };
+      const handleMouseLeave = () => {
+        if (lastHoveredTaskId !== null) {
+          lastHoveredTaskId = null;
+          options.onTaskHover?.(null);
+        }
+      };
+      const handleContextMenu = (e: MouseEvent) => {
+        if (!options.onTaskContextMenu) return;
+        const target = e.target as HTMLElement | null;
+        const row = target?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
+        const rowId = row?.getAttribute('data-task-id') ?? null;
+        const taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
+        const t = findTaskById(taskId);
+        if (!t) return;
+        e.preventDefault();
+        options.onTaskContextMenu(t, { x: e.clientX, y: e.clientY });
+      };
+      ganttEl.addEventListener('mouseover', handleMouseOver);
+      ganttEl.addEventListener('mouseleave', handleMouseLeave);
+      ganttEl.addEventListener('contextmenu', handleContextMenu);
       if (typeof tplConfig.engine?.PriorityGroupingPlugin === 'function') {
         inst.use(tplConfig.engine.PriorityGroupingPlugin({
           buckets: tplConfig.buckets,
@@ -332,6 +417,9 @@ export class IIFEApp {
       const cleanup = () => {
         if (cleanupShading) cleanupShading();
         if (cleanupDrag)    cleanupDrag();
+        ganttEl.removeEventListener('mouseover', handleMouseOver);
+        ganttEl.removeEventListener('mouseleave', handleMouseLeave);
+        ganttEl.removeEventListener('contextmenu', handleContextMenu);
         try { inst.destroy(); } catch (_e) { /* ok */ }
         container.innerHTML = '';
       };
@@ -340,7 +428,9 @@ export class IIFEApp {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       function _syncToCanvas() {
         const f = applyFilter(allTasks, state.filter as 'active', state.search);
-        const g = buildTasks(f);
+        const g = state.groupBy === 'epic'
+          ? buildTasks(buildTasksEpic(f))
+          : buildTasks(f);
         const gi = inst as any;
         if (typeof gi.setData === 'function') { gi.setData(g, []); try { gi.expandAll(); } catch (_e) { /* ok */ } }
       }
@@ -362,6 +452,11 @@ export class IIFEApp {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const gi = inst as any;
           if (typeof gi.setZoom === 'function') gi.setZoom(zoom);
+        },
+        /** Called by NimbusGanttAppReact when the groupBy toggle changes. */
+        setGroupBy(groupBy: string) {
+          state.groupBy = groupBy as AppState['groupBy'];
+          _syncToCanvas();
         },
         destroy() { IIFEApp.unmount(container); },
       };
@@ -425,6 +520,15 @@ export class IIFEApp {
     }
 
     function dispatch(ev: AppEvent): void {
+      // Slot-dispatched PATCH (e.g. DetailPanel Save button) needs to flow
+      // to the consumer's onPatch callback — same surface drag/resize use
+      // via onTaskPatch(). Without this, Save would bump pendingPatchCount
+      // but never persist. We route through onTaskPatch so optimistic
+      // update + refresh happens uniformly.
+      if (ev.type === 'PATCH') {
+        onTaskPatch(ev.patch);
+        return;
+      }
       const nextState = reduceAppState(state, ev);
       const stateChanged = nextState !== state;
       state = nextState;
@@ -535,6 +639,11 @@ export class IIFEApp {
       host.innerHTML = '';
       host.appendChild(ganttEl);
 
+      // Declared before the Ctor call so the engine's onHover callback can
+      // update it (single source of truth shared with the DOM grid-row +
+      // contextmenu listeners added below).
+      let lastHoveredTaskId: string | null = null;
+
       ganttInst = new Ctor(ganttEl, {
         tasks: gtasks, dependencies: [], columns: GANTT_COLS, theme: V3_THEME,
         rowHeight: 32, barHeight: 20, headerHeight: 32, gridWidth: 295,
@@ -542,10 +651,31 @@ export class IIFEApp {
         colorMap: options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
         readOnly: false,
         onTaskClick:  (task: { id: string }) => {
-          if (task && task.id && !isBucketId(task.id)) dispatch({ type: 'TOGGLE_DETAIL', taskId: task.id });
+          if (!task || !task.id || isBucketId(task.id)) return;
+          dispatch({ type: 'TOGGLE_DETAIL', taskId: task.id });
+          const t = allTasks.find((x) => x.id === task.id);
+          if (t) options.onTaskClick?.(t, 'canvas');
         },
         onTaskDblClick: (task: { id: string }) => {
-          if (task && task.id && !isBucketId(task.id)) dispatch({ type: 'TOGGLE_DETAIL', taskId: task.id });
+          if (!task || !task.id || isBucketId(task.id)) return;
+          // Phase 3: dblclick opens the DetailPanel directly in edit mode
+          // (v5 parity — `openPanel(item, true)`). The reducer's TOGGLE_DETAIL
+          // honours the editMode payload. Single-click still uses the view
+          // mode path (onTaskClick above). Consumer callback fires after as
+          // a notification (analytics, side effects) — not a control path.
+          dispatch({ type: 'TOGGLE_DETAIL', taskId: task.id, editMode: true });
+          const t = allTasks.find((x) => x.id === task.id);
+          if (t) options.onTaskDoubleClick?.(t);
+        },
+        // Canvas-bar hover — engine fires onHover on pointermove hits.
+        // Coalesce so identical-id sequential fires are a no-op, and keep
+        // lastHoveredTaskId in sync with the DOM grid-row path (set below)
+        // so right-click on a canvas bar resolves correctly.
+        onHover: (task: { id?: string } | null) => {
+          const id = task?.id && !isBucketId(task.id) ? task.id : null;
+          if (id === lastHoveredTaskId) return;
+          lastHoveredTaskId = id;
+          options.onTaskHover?.(id);
         },
         onTaskMove: (task: { id: string }, s: string, e: string) => {
           if (task && task.id && !isBucketId(task.id)) onTaskPatch({ id: task.id, startDate: s, endDate: e });
@@ -554,6 +684,50 @@ export class IIFEApp {
           if (task && task.id && !isBucketId(task.id)) onTaskPatch({ id: task.id, startDate: s, endDate: e });
         },
       });
+
+      /* DOM hover + contextmenu (same pattern as engineOnly path). Canvas-bar
+       * hover is handled by the engine's onHover callback above; the DOM
+       * grid-row mouseover below catches hover on the left-side tree cell.
+       * Contextmenu silently no-ops in Salesforce Locker. */
+      const findTaskById = (id: string | null): NormalizedTask | null =>
+        id ? (allTasks.find((t) => t.id === id) ?? null) : null;
+      const onMouseOver = (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        const row = target?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
+        const id = row?.getAttribute('data-task-id') ?? null;
+        if (id && !isBucketId(id) && id !== lastHoveredTaskId) {
+          lastHoveredTaskId = id;
+          options.onTaskHover?.(id);
+        }
+      };
+      const onMouseLeave = () => {
+        if (lastHoveredTaskId !== null) {
+          lastHoveredTaskId = null;
+          options.onTaskHover?.(null);
+        }
+      };
+      const onContextMenu = (e: MouseEvent) => {
+        if (!options.onTaskContextMenu) return;
+        const target = e.target as HTMLElement | null;
+        const row = target?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
+        const rowId = row?.getAttribute('data-task-id') ?? null;
+        const taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
+        const t = findTaskById(taskId);
+        if (!t) return;
+        e.preventDefault();
+        options.onTaskContextMenu(t, { x: e.clientX, y: e.clientY });
+      };
+      ganttEl.addEventListener('mouseover', onMouseOver);
+      ganttEl.addEventListener('mouseleave', onMouseLeave);
+      ganttEl.addEventListener('contextmenu', onContextMenu);
+      // Attach cleanup — reuse cleanupDrag slot indirectly by stacking:
+      const prevCleanupDrag = cleanupDrag;
+      cleanupDrag = () => {
+        ganttEl.removeEventListener('mouseover', onMouseOver);
+        ganttEl.removeEventListener('mouseleave', onMouseLeave);
+        ganttEl.removeEventListener('contextmenu', onContextMenu);
+        if (prevCleanupDrag) prevCleanupDrag();
+      };
 
       if (typeof PGP === 'function') {
         const pluginBuckets = tplConfig.buckets;

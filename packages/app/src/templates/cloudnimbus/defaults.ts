@@ -58,6 +58,7 @@ export const CLOUD_NIMBUS_FILTERS: FilterOption[] = [
 
 /* ── VIEW_MODES (v10 spec §Plugin Constants) ───────────────────────────── */
 export interface ViewModeDef { id: ViewMode; label: string; icon: string; }
+/** All known view mode definitions — used by TitleBar to look up icons/labels. */
 export const CLOUD_NIMBUS_VIEW_MODES: ViewModeDef[] = [
   { id: 'gantt',    label: 'Gantt',    icon: '\u25A4' },
   { id: 'list',     label: 'List',     icon: '\u2630' },
@@ -67,7 +68,12 @@ export const CLOUD_NIMBUS_VIEW_MODES: ViewModeDef[] = [
   { id: 'flow',     label: 'Flow',     icon: '\u27FF' },
 ];
 
-export const CLOUD_NIMBUS_VIEWS: ViewMode[] = CLOUD_NIMBUS_VIEW_MODES.map((v) => v.id);
+/**
+ * Default enabled views for the cloudnimbus template.
+ * Trimmed to gantt-only until the alt-view renderers are ported into the
+ * React/engineOnly path. Expand this array when renderers land.
+ */
+export const CLOUD_NIMBUS_VIEWS: ViewMode[] = ['gantt'];
 
 /* ── Category display — drives FilterBar color legend ──────────────────── */
 export interface CategoryDisplay { label: string; color: string; category: string; }

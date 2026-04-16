@@ -21,6 +21,8 @@ export type {
   AppInstance,
   MappedTask,
   NimbusGanttEngine,
+  ScreenPos,
+  TaskClickSource,
 } from './types';
 
 export {
@@ -64,7 +66,7 @@ export type {
   Template, TemplateOverrides, TemplateConfig, TemplateDefaults, TemplateStylesheet,
   FeatureFlags, ThemeTokens,
   SlotName, SlotProps, ComponentSlot, VanillaSlot, VanillaSlotInstance,
-  ViewMode, FilterOption, FilterMode, ZoomLevel, GroupBy,
+  ViewMode, FilterOption, FilterMode, ZoomLevel, GroupBy, DetailMode,
   AppState, AppEvent, SlotData, PatchLogEntry,
 } from './templates/types';
 

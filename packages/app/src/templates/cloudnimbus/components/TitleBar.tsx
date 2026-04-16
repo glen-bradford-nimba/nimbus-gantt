@@ -41,27 +41,38 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
     : moHigh ? moHigh + ' mo' : null;
   const summary = s.scheduled + ' scheduled · ' + hrsStr + (moStr ? ' · ' + moStr : '');
 
+  // Only render view pills for views enabled in the template config (config.views).
+  // When only 1 view is available (default: gantt-only), hide the entire section
+  // to avoid showing a button that does nothing.
+  const enabledViews = CLOUD_NIMBUS_VIEW_MODES.filter(
+    (v) => !config.views || config.views.includes(v.id),
+  );
+
   return (
     <div className={CLS_TITLEBAR} data-slot="TitleBar">
       <span className={CLS_TITLE_BRAND}>{config.title || 'Pro Forma Timeline'}</span>
       <span className={CLS_VERSION_PILL}>{config.version || 'v10 · Nimbus Gantt'}</span>
-      <Sep />
-      {CLOUD_NIMBUS_VIEW_MODES.map((v) => {
-        const on = state.viewMode === v.id;
-        return (
-          <button
-            key={v.id}
-            type="button"
-            className={
-              CLS_PILL_BTN_BASE + ' ' +
-              (on ? CLS_PILL_BTN_ACTIVE_VIOLET : CLS_PILL_BTN_IDLE_VIOLET)
-            }
-            onClick={() => dispatch({ type: 'SET_VIEW', mode: v.id as ViewMode })}
-          >
-            <span className="mr-1">{v.icon}</span>{v.label}
-          </button>
-        );
-      })}
+      {enabledViews.length > 1 && (
+        <>
+          <Sep />
+          {enabledViews.map((v) => {
+            const on = state.viewMode === v.id;
+            return (
+              <button
+                key={v.id}
+                type="button"
+                className={
+                  CLS_PILL_BTN_BASE + ' ' +
+                  (on ? CLS_PILL_BTN_ACTIVE_VIOLET : CLS_PILL_BTN_IDLE_VIOLET)
+                }
+                onClick={() => dispatch({ type: 'SET_VIEW', mode: v.id as ViewMode })}
+              >
+                <span className="mr-1">{v.icon}</span>{v.label}
+              </button>
+            );
+          })}
+        </>
+      )}
       <Sep />
       <button
         type="button"

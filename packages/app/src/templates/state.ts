@@ -13,6 +13,7 @@ export const INITIAL_STATE: AppState = {
   sidebarOpen: false,
   statsOpen: false,
   detailOpen: false,
+  detailMode: 'view',
   auditPanelOpen: true, // v9 parity — Audit strip defaults to open
   fullscreen: false,
   selectedTaskId: null,
@@ -30,12 +31,20 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
       return { ...state, hideCompleted: !state.hideCompleted };
     case 'TOGGLE_SIDEBAR': return { ...state, sidebarOpen: !state.sidebarOpen };
     case 'TOGGLE_STATS':   return { ...state, statsOpen: !state.statsOpen };
-    case 'TOGGLE_DETAIL':
+    case 'TOGGLE_DETAIL': {
+      const opening = event.taskId !== undefined;
       return {
         ...state,
-        detailOpen: event.taskId !== undefined ? true : !state.detailOpen,
-        selectedTaskId: event.taskId !== undefined ? event.taskId : state.selectedTaskId,
+        detailOpen: opening ? true : !state.detailOpen,
+        selectedTaskId: opening ? event.taskId! : state.selectedTaskId,
+        // When opening: use editMode payload (default 'view'). When closing
+        // or toggling (no taskId): keep existing detailMode — v10 dblclick
+        // sets editMode:true, plain click leaves it 'view'.
+        detailMode: opening ? (event.editMode ? 'edit' : 'view') : state.detailMode,
       };
+    }
+    case 'SET_DETAIL_MODE':
+      return { ...state, detailMode: event.mode };
     case 'TOGGLE_AUDIT_PANEL':
       return { ...state, auditPanelOpen: !state.auditPanelOpen };
     case 'TOGGLE_FULLSCREEN':

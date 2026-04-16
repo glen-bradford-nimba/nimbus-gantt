@@ -87,6 +87,10 @@ export interface GanttConfig {
   // Callbacks — all optional, async-friendly
   onTaskClick?: (task: GanttTask) => void;
   onTaskDblClick?: (task: GanttTask) => void;
+  /** Fires on every canvas pointermove that hits a bar — task is null when
+   *  the cursor leaves all bars. Internally used by the engine's own
+   *  tooltipManager; consumers can opt-in for their own hover UX. */
+  onHover?: (task: GanttTask | null, x: number, y: number, color?: string) => void;
   onTaskMove?: (task: GanttTask, startDate: string, endDate: string) => void | Promise<void>;
   onTaskResize?: (task: GanttTask, startDate: string, endDate: string) => void | Promise<void>;
   onTaskProgressChange?: (task: GanttTask, progress: number) => void | Promise<void>;

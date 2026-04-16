@@ -211,6 +211,11 @@ export class NimbusGantt {
             } else {
               this.tooltipManager.hide();
             }
+            // Forward to consumer-provided onHover so hosts (cloudnimbusllc.com,
+            // SF LWC) can render their own hover UX alongside / instead of the
+            // built-in tooltipManager. Consumer callback runs AFTER the built-in
+            // so it can read / override tooltip DOM state if needed.
+            try { config.onHover?.(task, x, y, color); } catch { /* swallow */ }
           },
           readOnly: this.config.readOnly,
           headerHeight: this.config.headerHeight,
