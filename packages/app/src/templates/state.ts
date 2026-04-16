@@ -13,7 +13,7 @@ export const INITIAL_STATE: AppState = {
   sidebarOpen: false,
   statsOpen: false,
   detailOpen: false,
-  auditPanelOpen: false,
+  auditPanelOpen: true, // v9 parity — Audit strip defaults to open
   fullscreen: false,
   selectedTaskId: null,
   pendingPatchCount: 0,

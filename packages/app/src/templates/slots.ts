@@ -31,12 +31,15 @@ export function shouldRenderSlot(slot: SlotName, features: FeatureFlags): boolea
   return features[flag] !== false;
 }
 
-/** Ordered slot list used by both React + vanilla drivers. */
+/** Ordered slot list used by both React + vanilla drivers.
+ *  AuditPanel is a full-width horizontal commit strip above the gantt content
+ *  (v9 parity), not a right-column sibling inside ContentArea. */
 export const SLOT_ORDER: SlotName[] = [
   'TitleBar',
   'StatsPanel',
   'FilterBar',
   'ZoomBar',
+  'AuditPanel',
   'HrsWkStrip',
-  'ContentArea', // wraps Sidebar + main + DetailPanel + AuditPanel
+  'ContentArea', // wraps Sidebar + main + DetailPanel
 ];

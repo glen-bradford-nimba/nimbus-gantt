@@ -279,7 +279,15 @@ const PROPOSAL_STAGES: Record<string, boolean> = {
   'Ready for Development': true,
 };
 
-/* ── Filter — matches v8 filter options exactly ─────────────────────────── */
+/** Stages that map to "backlog" or "expansion" categories — excluded from the
+ *  active view but shown in the Proposal filter. Mirrors v9's applyFilter which
+ *  keeps only ["in-flight", "next-up", "paused"] categories for "active". */
+const BACKLOG_OR_EXPANSION_STAGES: Record<string, boolean> = {
+  'Backlog': true,
+  'Scoping In Progress': true,
+};
+
+/* ── Filter — mirrors v9 DeliveryTimelineV5 applyFilter exactly ─────────── */
 export function applyFilter(
   tasks: NormalizedTask[],
   filter: 'all' | 'active' | 'proposal' | 'done' | 'real' | 'workstreams',
@@ -287,7 +295,21 @@ export function applyFilter(
 ): NormalizedTask[] {
   let r = tasks;
   if (filter === 'active') {
-    r = r.filter(t => !DONE_STAGES[t.stage || ''] && !t.isInactive);
+    // Compute the 30-day cutoff date as an ISO string for simple string comparison
+    const cutoff = addDays(todayISO(), -30);
+    r = r.filter(t => {
+      if (t.isInactive) return false;
+      const stage = t.stage || '';
+      // Backlog/expansion stages are excluded from active (shown in Proposal tab)
+      if (BACKLOG_OR_EXPANSION_STAGES[stage]) return false;
+      // Done stages: only include if recently completed (within last 30 days)
+      if (DONE_STAGES[stage]) {
+        return !!(t.endDate && t.endDate >= cutoff);
+      }
+      // Active items: exclude if their end date has been past for >30 days
+      if (t.endDate && t.endDate < cutoff) return false;
+      return true;
+    });
   } else if (filter === 'proposal') {
     r = r.filter(t => PROPOSAL_STAGES[t.stage || ''] || t.priorityGroup === 'proposed');
   } else if (filter === 'done') {

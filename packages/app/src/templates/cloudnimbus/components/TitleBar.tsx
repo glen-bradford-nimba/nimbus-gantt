@@ -21,10 +21,25 @@ function Sep() {
   return <span className={CLS_SEP}>|</span>;
 }
 
+const HOURS_PER_MONTH = 170; // 80 Glen + 50 Mahi + 40 Antima
+
+function fmt1(n: number): string {
+  return (Math.round(n * 10) / 10).toString();
+}
+
 export function TitleBar({ config, state, dispatch, data }: SlotProps) {
   const s = data.stats;
-  const summary =
-    s.scheduled + ' scheduled · ' + (s.est || 0) + 'h';
+  const estLow  = s.estLow || 0;
+  const estHigh = s.est    || 0;
+  const hrsStr  = estLow < estHigh
+    ? estLow + '-' + estHigh + 'h'
+    : estHigh + 'h';
+  const moLow  = estLow  > 0 ? fmt1(estLow  / HOURS_PER_MONTH) : null;
+  const moHigh = estHigh > 0 ? fmt1(estHigh / HOURS_PER_MONTH) : null;
+  const moStr  = moLow && moHigh && moLow !== moHigh
+    ? moLow + '-' + moHigh + ' mo'
+    : moHigh ? moHigh + ' mo' : null;
+  const summary = s.scheduled + ' scheduled · ' + hrsStr + (moStr ? ' · ' + moStr : '');
 
   return (
     <div className={CLS_TITLEBAR} data-slot="TitleBar">
@@ -100,6 +115,7 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
       {config.features.groupByToggle && (
         <>
           <Sep />
+          <span className="text-[10px] text-slate-400 font-medium tracking-wide mr-0.5">Group:</span>
           {GROUPS.map((g) => {
             const on = state.groupBy === g;
             return (

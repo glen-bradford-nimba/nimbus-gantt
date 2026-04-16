@@ -10,6 +10,7 @@ import { useEffect, useMemo, useReducer, useRef, createElement, Fragment } from 
 import type { CSSProperties } from 'react';
 import type {
   Template, TemplateOverrides, TemplateConfig, SlotProps, SlotData, AppEvent,
+  AuditSubmitHandler,
 } from './templates/types';
 import type { NormalizedTask, TaskPatch, NimbusGanttEngine } from './types';
 import { resolveTemplate } from './templates/resolver';
@@ -30,6 +31,11 @@ export interface NimbusGanttAppProps {
   /** Legacy alias for `data`. */
   tasks?: NormalizedTask[];
   onPatch: (patch: TaskPatch) => void | Promise<void>;
+  /** Optional runtime audit-submit handler. When present, AuditPanel's
+   *  Submit+commit button calls this; when absent, commit is local-only. */
+  onAuditSubmit?: AuditSubmitHandler;
+  /** Optional runtime override for AuditPanel dirty state. */
+  isDirty?: boolean;
   overrides?: TemplateOverrides;
   engine?: NimbusGanttEngine;
   style?: CSSProperties;
@@ -46,9 +52,11 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
     () => {
       const cfg = resolveTemplate(tplInput as string | Template, props.overrides);
       if (props.engine) cfg.engine = props.engine;
+      if (props.onAuditSubmit) cfg.onAuditSubmit = props.onAuditSubmit;
+      if (props.isDirty !== undefined) cfg.isDirty = props.isDirty;
       return cfg;
     },
-    [tplInput, props.overrides, props.engine],
+    [tplInput, props.overrides, props.engine, props.onAuditSubmit, props.isDirty],
   );
 
   const [state, dispatch] = useReducer(reduceAppState, INITIAL_STATE);
@@ -85,6 +93,9 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
       template: tplConfig.templateName,
       overrides: props.overrides,
       config: props.config,
+      // React already renders all chrome slots above — IIFEApp only drives
+      // the gantt engine inside the ContentArea host. No chrome duplication.
+      engineOnly: true,
     });
 
     return () => {
@@ -94,10 +105,25 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Forward task updates to the live IIFE instance.
+  // Forward raw task updates (data edits, patches) to the live IIFE instance.
   useEffect(() => {
     if (ganttInstanceRef.current) ganttInstanceRef.current.setTasks(tasks);
   }, [tasks]);
+
+  // Forward filter/search state changes to the gantt engine so the canvas
+  // rerenders when the user clicks a filter tab or types in the search box.
+  useEffect(() => {
+    type WithFilter = typeof ganttInstanceRef.current & { setFilter?: (f: string, s: string) => void };
+    const inst = ganttInstanceRef.current as WithFilter | null;
+    if (inst?.setFilter) inst.setFilter(state.filter, state.search || '');
+  }, [state.filter, state.search]);
+
+  // Forward zoom level changes to the gantt engine.
+  useEffect(() => {
+    type WithZoom = typeof ganttInstanceRef.current & { setZoom?: (z: string) => void };
+    const inst = ganttInstanceRef.current as WithZoom | null;
+    if (inst?.setZoom) inst.setZoom(state.zoom);
+  }, [state.zoom]);
 
   const themeStyle: CSSProperties = useMemo(() => {
     const cssVars = themeToCssVars(tplConfig.theme)

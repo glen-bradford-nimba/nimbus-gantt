@@ -20,8 +20,10 @@
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
-  --font-geist-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-geist-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* --font-geist-sans / --font-geist-mono intentionally NOT set here so the
+     host page's :root declaration (globals.css loads Geist on cloudnimbusllc.com)
+     wins. For Salesforce/LWS and standalone HTML where Geist isn't loaded, the
+     :where(:root) fallback block further down supplies a system-font default. */
   --tracking-tighter: -0.05em;
   --tracking-tight: -0.025em;
   --tracking-normal: 0em;

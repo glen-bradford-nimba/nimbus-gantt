@@ -174,6 +174,15 @@ export interface TemplateOverrides {
   version?: string;
 }
 
+export interface AuditSubmitResult {
+  ok: boolean;
+  msg: string;
+  /** Optional short commit SHA for the audit log UI. */
+  sha?: string;
+}
+
+export type AuditSubmitHandler = (note: string) => Promise<AuditSubmitResult>;
+
 export interface TemplateConfig {
   templateName: string;
   features: FeatureFlags;
@@ -187,6 +196,16 @@ export interface TemplateConfig {
   version: string;
   /** Optional engine reference — used by ContentArea to mount the Gantt. */
   engine?: NimbusGanttEngine;
+  /** Optional runtime audit-submit handler. When present, AuditPanel's
+   *  Submit+commit button will call it, show result state, and only reset
+   *  the pending-patch count on success. When absent, falls back to a
+   *  local RESET_PATCHES dispatch (no persistence). */
+  onAuditSubmit?: AuditSubmitHandler;
+  /** Optional runtime override for the AuditPanel dirty flag. When present,
+   *  this wins over state.pendingPatchCount. Consumers with their own state
+   *  store (e.g. useProFormaState) should pipe their isDirty here so the
+   *  "unsaved changes" pill and Submit button reflect real dirty state. */
+  isDirty?: boolean;
 }
 
 /* ── Re-export upstream core types ──────────────────────────────────────── */

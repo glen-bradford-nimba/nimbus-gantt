@@ -12,6 +12,11 @@ export interface NormalizedTask {
   name?: string;
   priorityGroup?: string | null;
   parentWorkItemId?: string | null;
+  /** DAG: additional logical parents beyond parentWorkItemId. When a work
+   *  item belongs to multiple proposals/groupings, list extra parent IDs
+   *  here. Rendering tree uses parentWorkItemId only; rollups and scheduler
+   *  constraints honor the full parent set. */
+  additionalParentIds?: string[];
   startDate?: string | null;
   endDate?: string | null;
   estimatedHours?: number;

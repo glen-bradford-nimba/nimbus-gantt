@@ -11,7 +11,6 @@ import {
 } from './shared/classes';
 import { Sidebar } from './Sidebar';
 import { DetailPanel } from './DetailPanel';
-import { AuditPanel } from './AuditPanel';
 
 export function ContentArea(props: SlotProps) {
   const { config, state } = props;
@@ -19,8 +18,10 @@ export function ContentArea(props: SlotProps) {
 
   // Mount a placeholder div; the React driver is responsible for mounting the
   // actual IIFEApp gantt instance INSIDE the host container (via its own
-  // useEffect). We render children that are purely React — Sidebar + detail +
-  // audit. The raw gantt canvas is mounted imperatively into `ganttHostRef`.
+  // useEffect). We render children that are purely React — Sidebar + detail.
+  // NOTE: AuditPanel used to live here as a right-column sibling of the gantt;
+  // v9 parity moved it to a top-level SLOT_ORDER strip above the content
+  // (horizontal commit bar), so it is no longer rendered inside ContentArea.
   useEffect(() => {
     // No-op here — the outer NimbusGanttAppReact drives the engine mount.
   }, []);
@@ -39,7 +40,6 @@ export function ContentArea(props: SlotProps) {
         {/* engine mounts imperatively here */}
       </div>
       {state.detailOpen && config.features.detailPanel ? <DetailPanel {...props} /> : null}
-      {state.auditPanelOpen && config.features.auditPanel ? <AuditPanel {...props} /> : null}
     </div>
   );
 }

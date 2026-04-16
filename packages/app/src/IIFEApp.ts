@@ -252,6 +252,12 @@ function removeEntry(c: HTMLElement): void {
 export interface TemplateAwareMountOptions extends MountOptions {
   template?: string;
   overrides?: TemplateOverrides;
+  /**
+   * engineOnly — skip all slot/chrome rendering and treat `container`
+   * directly as the gantt canvas surface. Used by NimbusGanttAppReact
+   * when React already owns the chrome; IIFEApp just drives the engine.
+   */
+  engineOnly?: boolean;
 }
 
 export class IIFEApp {
@@ -274,6 +280,92 @@ export class IIFEApp {
       tplConfig = resolveTemplate('cloudnimbus', overrides);
     }
     if (options.engine) tplConfig.engine = options.engine;
+
+    /* ── engineOnly: React owns chrome — just run the gantt engine ──── */
+    if (options.engineOnly) {
+      container.style.cssText = 'height:100%;width:100%;position:relative';
+      const ganttEl = document.createElement('div');
+      ganttEl.style.cssText = 'height:100%;width:100%;position:absolute;inset:0';
+      container.innerHTML = '';
+      container.appendChild(ganttEl);
+
+      const _win = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : null;
+      const eng: NimbusGanttEngine | null = options.engine ?? (_win?.NimbusGantt as NimbusGanttEngine | undefined) ?? null;
+      if (!eng || !eng.NimbusGantt) {
+        ganttEl.style.cssText += ';padding:20px;color:#b91c1c;font-size:13px';
+        ganttEl.textContent = 'nimbus-gantt engine not loaded';
+        registry.push({ container, cleanup: () => { container.innerHTML = ''; } });
+        return { setTasks: () => { /* no-op */ }, destroy: () => IIFEApp.unmount(container) };
+      }
+
+      injectLegacyNgCss();
+      let allTasks: NormalizedTask[] = options.tasks || [];
+      const state: AppState = { ...INITIAL_STATE };
+      const depthMap = buildDepthMap(allTasks);
+      const filtered = applyFilter(allTasks, state.filter as 'active', state.search);
+      const gtasks = buildTasks(filtered);
+
+      const inst = new eng.NimbusGantt(ganttEl, {
+        tasks: gtasks, dependencies: [], columns: GANTT_COLS, theme: V3_THEME,
+        rowHeight: 32, barHeight: 20, headerHeight: 32, gridWidth: 295,
+        zoomLevel: state.zoom, showToday: true, showWeekends: true, showProgress: true,
+        colorMap: options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
+        readOnly: false,
+      });
+      if (typeof tplConfig.engine?.PriorityGroupingPlugin === 'function') {
+        inst.use(tplConfig.engine.PriorityGroupingPlugin({
+          buckets: tplConfig.buckets,
+          getBucket: (task: { groupId?: string | null }) => task.groupId || null,
+        }));
+      }
+      inst.setData(gtasks, []);
+      try { inst.expandAll(); } catch (_e) { /* ok */ }
+      // Scroll to today after a tick so the canvas has its final dimensions
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setTimeout(() => { try { (inst as any).scrollToDate?.(new Date()); } catch (_e) { /* ok */ } }, 50);
+
+      let cleanupShading: (() => void) | null = null;
+      let cleanupDrag: (() => void) | null = null;
+      if (tplConfig.features.depthShading) cleanupShading = startDepthShading(ganttEl, depthMap);
+      if (tplConfig.features.dragReparent) cleanupDrag    = startDragReparent(ganttEl, allTasks, depthMap, options.onPatch || (() => { /* no-op */ }));
+
+      const cleanup = () => {
+        if (cleanupShading) cleanupShading();
+        if (cleanupDrag)    cleanupDrag();
+        try { inst.destroy(); } catch (_e) { /* ok */ }
+        container.innerHTML = '';
+      };
+      registry.push({ container, cleanup });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      function _syncToCanvas() {
+        const f = applyFilter(allTasks, state.filter as 'active', state.search);
+        const g = buildTasks(f);
+        const gi = inst as any;
+        if (typeof gi.setData === 'function') { gi.setData(g, []); try { gi.expandAll(); } catch (_e) { /* ok */ } }
+      }
+
+      return {
+        setTasks(tasks: NormalizedTask[]) {
+          allTasks = tasks;
+          _syncToCanvas();
+        },
+        /** Called by NimbusGanttAppReact when the React filter/search state changes. */
+        setFilter(filter: string, search: string) {
+          state.filter = filter as AppState['filter'];
+          state.search = search;
+          _syncToCanvas();
+        },
+        /** Called by NimbusGanttAppReact when the zoom pill changes. */
+        setZoom(zoom: string) {
+          state.zoom = zoom as AppState['zoom'];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const gi = inst as any;
+          if (typeof gi.setZoom === 'function') gi.setZoom(zoom);
+        },
+        destroy() { IIFEApp.unmount(container); },
+      };
+    }
 
     /* ── State ──────────────────────────────────────────────────────── */
     let state: AppState = { ...INITIAL_STATE };
