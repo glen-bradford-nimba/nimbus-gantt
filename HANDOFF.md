@@ -10,8 +10,9 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `9ee542608fe327d419cce972799c2bedf6d2a7af` |
-| Commit subject | `feat(app): A1 stage-1 view-mode unlock + diag observability patches` |
+| Commit SHA (source — latest) | `3ffd7d327a1276315b86fd23c999e5cca1b40bcc` |
+| Commit subject | `fix(app): 0.181 cut blockers — revert A1 unlock, AuditPanel state-gate, today-14d viewport` |
+| A1 stage-1 + diag v2 (A1 REVERTED in this release; diag stays) | `9ee542608fe327d419cce972799c2bedf6d2a7af` |
 | Diag emitter v1 | `b202a85c14181f8b5d307ab8a33877ea97e72d96` |
 | Zoombar dedup | `268354225c2457cac454436fcc19d9f7f636a263` |
 | Non-destructive mount + vh floor | `330eba7b162964bf08fa58eda05bbb88dc32344b` |
@@ -19,12 +20,12 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Phase 0.5 base commit | `fa6a25e2d40cac07390cbfbe9ba2a2f51d7c0525` |
 | Parent commit | `a49a130eda7f38d84ef3ed143e6bee8e76bb8037` |
 
-**If you copied any earlier bundle, re-copy from `9ee5426`.** The
+**If you copied any earlier bundle, re-copy from `3ffd7d3`.** The
 `nimbusganttapp.resource` sha256 changed; `nimbusgantt.resource` has been
-unchanged since `fa6a25e`. This bundle adds: (1) A1 stage-1 view-mode
-unlock — all six view pills now render in TitleBar, (2) three diag
-observability patches — engineOnly path + engine-missing errors + unmount
-event.
+unchanged since `fa6a25e`. This bundle targets the 0.181 cut: reverts A1
+stage-1 pill unlock (keeps only `gantt` view, defers full port to 0.182),
+fixes the Audit pill state-sync so the panel actually toggles, and adds
+a today-14d default viewport offset that matches v9 on initial mount.
 
 ## Bundle artifacts
 
@@ -43,9 +44,9 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **144,353 bytes** (~141 KB)
-- sha256: `2ed90644615c3712f95c1f9623a69d1398bf4e2ccb964a75537ccad7b87da200`
-- **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`).
+- Size: **144,718 bytes** (~141 KB)
+- sha256: `6f1846aebd406883f75170a03c969049be40f1149834d3f11f75b31e1b013f69`
+- **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`, `2ed90644…a200` at `9ee5426`).
 
 Copy mapping (Delivery-Hub CC):
 
@@ -201,6 +202,42 @@ with page events.
 
 ## Regression fixes
 
+### `3ffd7d3` — 0.181 cut blockers (HQ's 2026-04-17 empirical check)
+
+Three fixes, one revert. Targets the 0.181 cut specifically.
+
+**B1 — A1 stage-1 view-mode unlock REVERTED.** `CLOUD_NIMBUS_VIEWS` flipped
+back to `['gantt']`. Rationale: the alt-view renderers wired in
+`IIFEApp.ts:137-242` are ~30-line stubs, not a port of v9's 2,225-line
+`AuditListView` component. Shipping 6 pills where only 1 produces a
+functional view is worse product than 1 pill that works. Full A1 (unlock
++ vanilla slot ports + keyboard + persistence) bundles into 0.182.
+
+**B2 — AuditPanel state-gate added.** Previously the AuditPanel slot was
+only feature-gated (rendered whenever `features.auditPanel === true`), so
+clicking the Audit pill in TitleBar flipped `state.auditPanelOpen` but
+nothing read it — the panel stayed visible regardless. Added
+`root.style.display = p.state.auditPanelOpen ? '' : 'none'` to
+`AuditPanel.vanilla.ts`, mirroring the pattern `StatsPanel.vanilla.ts:48`
+has used since it shipped.
+
+**B2 (partial) — Stats + Sidebar pill bugs: NOT REPRODUCED.** Static
+analysis shows the dispatch + renderSlots + update cycle is correct.
+TitleBar's `render(p)` does `clear(root) + rebuild` every call,
+`ContentArea.vanilla.ts:34` correctly gates sidebar on `state.sidebarOpen`,
+`StatsPanel.vanilla.ts:48` correctly toggles display. Could not reproduce
+the symptoms without a browser. Recommend post-rebuild re-check on v12
+localhost — if symptoms persist, a console.log at `dispatch()` entry will
+confirm whether the events fire, isolating render-cycle vs dispatch-path.
+
+**B3 — viewport now scrolls to today-14d on initial mount.** Previously
+the chrome-path `initGantt` never called `scrollToDate` at all; only the
+engineOnly (React driver) branch did, and it scrolled to `new Date()`
+exactly. Both sites now use `new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS)`
+where `INITIAL_VIEWPORT_OFFSET_MS = 14 * 24 * 60 * 60 * 1000`. Matches v9
+initial viewport; gives ~2 weeks of recent past context instead of flushing
+today to the left edge. Library-side default — no new `@api` prop required.
+
 ### `9ee5426` — A1 stage-1 + diag observability patches
 
 **A1 stage-1 (view-mode unlock, 1-line flip of `CLOUD_NIMBUS_VIEWS`).** The
@@ -284,9 +321,10 @@ consumer (v10 used the React driver, which had already corrected both).
 | Regression patch (non-destructive mount + vh floor) | ✅ done | `330eba7` |
 | Zoombar dedup | ✅ done | `2683542` |
 | Opt-in diagnostic emitter (v1) | ✅ done | `b202a85` |
-| A1 stage-1 view-mode unlock + diag patches | ✅ done | `9ee5426` — this release |
-| A1 stage-2 (keyboard shortcuts + view-mode persistence) | ⏳ pending | separate from unlock |
-| A3 (CSS port, strip `!important` + `mf-depth-check`) | ⏳ next phase | largest visual delta |
+| A1 stage-1 view-mode unlock + diag observability patches | ⏸ reverted in `3ffd7d3` | A1 unlock reverts for 0.181; diag patches remain active |
+| 0.181 cut blockers (revert + AuditPanel gate + today-14d viewport) | ✅ done | `3ffd7d3` — this release |
+| A1 full port (stage-1 re-unlock + AuditListView.vanilla + keyboard + persistence) | ⏳ 0.182 | |
+| A3 (CSS port, strip `!important` + `mf-depth-check`) | ⏳ 0.182+ | largest visual delta |
 | A1 (multi-view switcher) | pending | v10 currently ships `CLOUD_NIMBUS_VIEWS = ['gantt']` |
 | A2 (top-bar controls) | pending | Unpin/Admin/Advisor/v3/API-docs wiring |
 | A6 (progress % toggle) | pending | |
