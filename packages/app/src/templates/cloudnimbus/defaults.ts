@@ -70,10 +70,26 @@ export const CLOUD_NIMBUS_VIEW_MODES: ViewModeDef[] = [
 
 /**
  * Default enabled views for the cloudnimbus template.
- * Trimmed to gantt-only until the alt-view renderers are ported into the
- * React/engineOnly path. Expand this array when renderers land.
+ *
+ * 2026-04-17 — A1 stage-1 unlock. The alt-view renderers (renderList /
+ * renderTreemap / renderBubbles / renderCalendar / renderFlow) have been
+ * wired in IIFEApp.ts since the Phase 2 rewrite; rebuildView() dispatches
+ * to the correct renderer based on state.viewMode. All that was gating
+ * them from the UI was this defaults array — TitleBar renders pills only
+ * when config.views contains them (enabledViews.length > 1 check).
+ *
+ * Flipping this to all six restores v9's view-mode switcher parity
+ * (A1 stage-1). Stage-2 work — keyboard shortcuts + URL/localStorage
+ * persistence — follows separately.
  */
-export const CLOUD_NIMBUS_VIEWS: ViewMode[] = ['gantt'];
+export const CLOUD_NIMBUS_VIEWS: ViewMode[] = [
+  'gantt',
+  'list',
+  'treemap',
+  'bubbles',
+  'calendar',
+  'flow',
+];
 
 /* ── Category display — drives FilterBar color legend ──────────────────── */
 export interface CategoryDisplay { label: string; color: string; category: string; }
