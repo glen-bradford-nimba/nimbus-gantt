@@ -60,12 +60,28 @@ const GANTT_COLS = [
   { field: 'hoursLabel', header: '', width: 85,  align: 'right' },
 ];
 
-/* ── Legacy gantt-CSS injection (kept from v5 for library class overrides) ── */
+/* ── Legacy gantt-CSS injection (kept from v5 for library class overrides) ──
+ *
+ * Also carries CRITICAL template-flex rules so the gantt canvas measures the
+ * correct host dimensions at initGantt() time, BEFORE the async template
+ * stylesheet (ensureTemplateCss) arrives. Without these, the column-flex
+ * layout hasn't applied yet — ContentArea is content-sized (tiny), host
+ * measures ~40-60px, and the canvas permanently sticks at that size.
+ * Regression observed on /v12 2026-04-16 (canvas 43px tall).
+ *
+ * The async template stylesheet still handles everything else (colours,
+ * spacing, typography). Only the load-order-critical flex rules live here. */
 function injectLegacyNgCss(): void {
   if (document.getElementById('nga-v5-css')) return;
   const s = document.createElement('style');
   s.id  = 'nga-v5-css';
   s.textContent = [
+    /* Critical template-flex rules — must apply synchronously at mount. */
+    '.nga-root{display:flex;flex-direction:column;height:100%;width:100%;overflow:hidden}',
+    '.nga-titlebar,.nga-filterbar,.nga-zoombar,.nga-stats,.nga-hrswkstrip,.nga-audit{flex-shrink:0}',
+    '.nga-content-outer{flex:1 1 auto;display:flex;overflow:hidden;min-width:0;min-height:0}',
+    '.nga-content{flex:1 1 auto;position:relative;min-width:0;min-height:0}',
+    /* Library-class (.ng-*) overrides — v5 styling carried forward. */
     '.ng-grid{font-family:sans-serif!important;font-size:12px!important;color:#1f2937!important;letter-spacing:-.01em}',
     '.ng-grid table{border-collapse:collapse!important;border-spacing:0!important}',
     '.ng-grid-header{background:#f3f4f6!important;visibility:hidden!important}',
