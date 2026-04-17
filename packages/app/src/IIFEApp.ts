@@ -78,6 +78,12 @@ function injectLegacyNgCss(): void {
   s.textContent = [
     /* Critical template-flex rules — must apply synchronously at mount. */
     '.nga-root{display:flex;flex-direction:column;height:100%;width:100%;overflow:hidden}',
+    /* Fullscreen mode safety floor — if the consumer\'s parent chain doesn\'t
+     * resolve to a real viewport height (e.g. Lightning app page with weird
+     * layout, or a plain div that lost its position:fixed), fall back to
+     * 100vh so the canvas always has room. Embedded mode is explicitly NOT
+     * floored — embedded consumers opt into small container sizes. */
+    '.nga-root[data-mode="fullscreen"]{min-height:100vh}',
     '.nga-titlebar,.nga-filterbar,.nga-zoombar,.nga-stats,.nga-hrswkstrip,.nga-audit{flex-shrink:0}',
     '.nga-content-outer{flex:1 1 auto;display:flex;overflow:hidden;min-width:0;min-height:0}',
     '.nga-content{flex:1 1 auto;position:relative;min-width:0;min-height:0}',
@@ -368,7 +374,13 @@ export class IIFEApp {
 
     /* ── engineOnly: React owns chrome — just run the gantt engine ──── */
     if (options.engineOnly) {
-      container.style.cssText = 'height:100%;width:100%;position:relative';
+      // Non-destructive: only add what we need (position:relative so absolute
+      // children anchor correctly, plus a height:100% default when consumer
+      // hasn't provided one). DON'T clobber existing cssText — that would
+      // wipe consumer-provided positioning (e.g. position:fixed; inset:0).
+      if (!container.style.position) container.style.position = 'relative';
+      if (!container.style.height)   container.style.height   = '100%';
+      if (!container.style.width)    container.style.width    = '100%';
       const ganttEl = document.createElement('div');
       ganttEl.style.cssText = 'height:100%;width:100%;position:absolute;inset:0';
       container.innerHTML = '';
@@ -567,7 +579,24 @@ export class IIFEApp {
 
     container.className = 'nga-root';
     container.setAttribute('data-template', tplConfig.templateName);
-    container.style.cssText = 'height:100%;display:flex;flex-direction:column;background:' + tplConfig.theme.bg + ';overflow:hidden;font-family:' + tplConfig.theme.fontFamily;
+    container.setAttribute('data-mode', mode);
+    // Non-destructive style application. Previously this assigned
+    // container.style.cssText = '...' which WIPED consumer-provided inline
+    // styles (position:fixed; inset:0 on /v12; any host-owned sizing on SF)
+    // — making .nga-root content-size to the chrome sum (~240 px) and
+    // leaving 0 px of surplus for ContentArea → canvas height 0.
+    // Regression observed 2026-04-16 on /v12 + SF Delivery_Gantt_Standalone.
+    //
+    // We only need flex-column + overflow + theme defaults. Height/width/
+    // position are the consumer's business — preserve whatever they set.
+    // The critical CSS (injectLegacyNgCss) adds `.nga-root { height:100% }`
+    // and `.nga-root[data-mode="fullscreen"] { min-height:100vh }` as
+    // sensible defaults that only kick in if the consumer didn't size.
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.overflow = 'hidden';
+    container.style.background = tplConfig.theme.bg;
+    container.style.fontFamily = tplConfig.theme.fontFamily;
 
     /* ── Dispatch + data helpers ────────────────────────────────────── */
     const _patchRefreshTimer: { t: ReturnType<typeof setTimeout> | null } = { t: null };
