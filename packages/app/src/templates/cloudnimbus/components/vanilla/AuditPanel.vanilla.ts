@@ -34,6 +34,10 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
   let inputEl: HTMLInputElement | null = null;
 
   function render(p: SlotProps) {
+    // DIAGNOSTIC-TRACE: wrap entire render in try/catch so Standalone
+    // fullscreen crash surfaces a labeled stack rather than bubbling
+    // up unlabeled.
+    try {
     clear(root);
     inputEl = null;
     // State-gated visibility — matches StatsPanel.vanilla.ts:48 pattern.
@@ -98,6 +102,11 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
     inner.appendChild(rst);
 
     root.appendChild(inner);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[NGA FS-DIAG] AuditPanel.render threw', err instanceof Error ? err.message : err, (err as Error)?.stack, { stateShape: Object.keys(p.state || {}), auditPanelOpen: p.state?.auditPanelOpen });
+      throw err;
+    }
   }
 
   render(initial);

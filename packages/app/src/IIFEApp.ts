@@ -47,6 +47,18 @@ import './templates/minimal/index.vanilla';
 // grows a define. For now, 'unknown' is fine — SHA lives in HANDOFF.md.
 diag('lib:loaded', { app: 'unknown' });
 
+// DIAGNOSTIC-TRACE BUILD — unconditional console.log at module-load.
+// Confirms the IIFE bundle executed to completion (registerTemplate calls
+// + template constants materialized + window.NimbusGanttApp assigned).
+// If this message is ABSENT in Standalone console but PRESENT in Embedded
+// console, the bundle is failing at module load under fullscreen context.
+// If it's present on both, the module loaded fine and the throw is at
+// mount/render time — trace the [NGA FS-DIAG] prefixed logs from there.
+try {
+  // eslint-disable-next-line no-console
+  console.log('[NGA FS-DIAG] module-load:complete', { hasWindow: typeof window !== 'undefined' });
+} catch (_e) { /* ok */ }
+
 /* ── Theme (V3_MATCH_THEME — used by the gantt engine) ──────────────────── */
 const V3_THEME = {
   timelineBg: '#ffffff', timelineGridColor: '#e5e7eb', timelineHeaderBg: '#f3f4f6',
@@ -353,6 +365,21 @@ function renderEmbeddedFullscreenButton(
 
 export class IIFEApp {
   static mount(container: HTMLElement, options: TemplateAwareMountOptions): AppInstance {
+    // DIAGNOSTIC-TRACE BUILD — catches Standalone/fullscreen mount throws
+    // on SF Locker and logs [NGA FS-DIAG] prefixed output. To be stripped
+    // once root cause is identified. See commit message for context.
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[NGA FS-DIAG] mount:entry', { mode: options.mode, engineOnly: !!options.engineOnly, tasksCount: options.tasks?.length });
+      return IIFEApp._mountBody(container, options);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[NGA FS-DIAG] mount:throw', err instanceof Error ? err.message : err, (err as Error)?.stack);
+      throw err;
+    }
+  }
+
+  private static _mountBody(container: HTMLElement, options: TemplateAwareMountOptions): AppInstance {
     const mountStartedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     IIFEApp.unmount(container);
 
@@ -893,15 +920,36 @@ export class IIFEApp {
         }));
       }
 
-      ganttInst.setData(gtasks, []);
+      // eslint-disable-next-line no-console
+      console.log('[NGA FS-DIAG] chrome-initGantt: pre-setData');
+      try { ganttInst.setData(gtasks, []); } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[NGA FS-DIAG] chrome-initGantt: setData threw', err); throw err;
+      }
       try { ganttInst.expandAll(); } catch (_e) { /* ok */ void 0; }
+      // eslint-disable-next-line no-console
+      console.log('[NGA FS-DIAG] chrome-initGantt: post-setData, scheduling scrollToDate');
 
-      // Scroll to (today - 14 days) after a tick so the canvas has final
-      // dimensions. Same v9-parity initial viewport as the engineOnly path
-      // above — without this, the chrome path (SF fullscreen + v12 IIFE)
-      // opened flush on today with zero past context.
+      // Scroll to (today - 14 days) after layout settles. HQ side-ask:
+      // changed from setTimeout(50) to double-rAF to guarantee the grid is
+      // sized before scrollToDate fires. First rAF = layout computed,
+      // second rAF = paint done; engine scrollToDate can assume stable
+      // canvas dimensions.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setTimeout(() => { try { (ganttInst as any).scrollToDate?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS)); } catch (_e) { /* ok */ void 0; } }, 50);
+      const rafFn: (cb: FrameRequestCallback) => number = (typeof requestAnimationFrame === 'function')
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16) as unknown as number;
+      rafFn(() => {
+        rafFn(() => {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (ganttInst as any).scrollToDate?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[NGA FS-DIAG] chrome-scrollToDate threw', err);
+          }
+        });
+      });
 
       if (cleanupShading) cleanupShading();
       if (cleanupDrag)    cleanupDrag();
