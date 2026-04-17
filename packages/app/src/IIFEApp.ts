@@ -278,17 +278,7 @@ function renderFlow(container: HTMLElement, tasks: ReturnType<typeof buildTasks>
 
 /* ══════════════════════════════════════════════════════════════════════════ */
 
-interface Registry {
-  container: HTMLElement;
-  cleanup: () => void;
-  /** Captured at mount so unmount can emit telemetry that describes what
-   *  was torn down. hadGantt distinguishes "real mount" from the
-   *  engine-missing error-path stub. */
-  hadGantt: boolean;
-  mode: string;
-  containerId: string;
-}
-let mountSeq = 0;
+interface Registry { container: HTMLElement; cleanup: () => void; }
 const registry: Registry[] = [];
 function getEntry(c: HTMLElement): Registry | null { return registry.find(e => e.container === c) || null; }
 function removeEntry(c: HTMLElement): void {
@@ -368,15 +358,10 @@ export class IIFEApp {
 
     const templateName = options.template || 'cloudnimbus';
     const mode = options.mode || 'fullscreen';
-    const containerId = 'nga-' + (++mountSeq);
-    // Tag the container so unmount + any external observer can resolve
-    // the mount identity without a separate registry lookup.
-    try { container.setAttribute('data-nga-id', containerId); } catch (_e) { /* ok */ }
 
     try {
       const r = container.getBoundingClientRect();
       diag('mount:start', {
-        containerId,
         containerRect: { x: r.x, y: r.y, w: r.width, h: r.height },
         mode,
         engineVersion: (options.engine && (options.engine as { version?: string }).version) || 'unknown',
@@ -434,10 +419,9 @@ export class IIFEApp {
       const _win = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>) : null;
       const eng: NimbusGanttEngine | null = options.engine ?? (_win?.NimbusGantt as NimbusGanttEngine | undefined) ?? null;
       if (!eng || !eng.NimbusGantt) {
-        diag('err:engine-missing', { containerId, path: 'engineOnly' });
         ganttEl.style.cssText += ';padding:20px;color:#b91c1c;font-size:13px';
         ganttEl.textContent = 'nimbus-gantt engine not loaded';
-        registry.push({ container, cleanup: () => { container.innerHTML = ''; }, hadGantt: false, mode, containerId });
+        registry.push({ container, cleanup: () => { container.innerHTML = ''; } });
         return { setTasks: () => { /* no-op */ }, destroy: () => IIFEApp.unmount(container) };
       }
 
@@ -568,65 +552,7 @@ export class IIFEApp {
         try { inst.destroy(); } catch (_e) { /* ok */ }
         container.innerHTML = '';
       };
-      registry.push({ container, cleanup, hadGantt: true, mode, containerId });
-
-      /* ── Post-mount diag (engineOnly path, symmetric with chrome path) ─
-       * React owns the chrome slots in this path, so chrome-heights are
-       * measured as zeros here — the signal is still useful: confirms this
-       * branch is engineOnly + lets Cowork detect if a React consumer
-       * accidentally routes through the chrome path or vice versa. */
-      try {
-        const raf = (typeof requestAnimationFrame === 'function')
-          ? requestAnimationFrame
-          : (fn: FrameRequestCallback) => setTimeout(() => fn(Date.now()), 16) as unknown as number;
-        raf(() => {
-          try {
-            const measure = (sel: string): number => {
-              const e = container.querySelector<HTMLElement>(sel);
-              return e ? Math.round(e.getBoundingClientRect().height) : 0;
-            };
-            diag('mount:chrome-heights', {
-              containerId,
-              engineOnly: true,
-              root:        Math.round(container.getBoundingClientRect().height),
-              titlebar:    measure('.nga-titlebar'),
-              stats:       measure('.nga-stats'),
-              filterbar:   measure('.nga-filterbar'),
-              zoombar:     measure('.nga-zoombar'),
-              audit:       measure('.nga-audit'),
-              hrswkstrip:  measure('.nga-hrswkstrip'),
-              contentOuter: measure('.nga-content-outer'),
-              content:     measure('.nga-content'),
-            });
-            const canvasEl = ganttEl.querySelector<HTMLCanvasElement>('canvas');
-            if (canvasEl) {
-              diag('mount:init-gantt', {
-                containerId,
-                engineOnly: true,
-                canvasW: canvasEl.width,
-                canvasH: canvasEl.height,
-                cssW: Math.round(canvasEl.getBoundingClientRect().width),
-                cssH: Math.round(canvasEl.getBoundingClientRect().height),
-              });
-              if (canvasEl.height < 64) {
-                diag('warn:zero-height', { containerId, surface: 'canvas', canvasH: canvasEl.height });
-              }
-            } else {
-              diag('warn:no-canvas', { containerId });
-            }
-            const durationMs = ((typeof performance !== 'undefined' && performance.now)
-              ? performance.now() : Date.now()) - mountStartedAt;
-            diag('mount:complete', {
-              containerId,
-              engineOnly: true,
-              taskCount: allTasks.length,
-              durationMs: Math.round(durationMs),
-            });
-          } catch (err) {
-            diag('err:post-mount', { containerId, message: (err as Error)?.message || String(err) });
-          }
-        });
-      } catch (_e) { /* ignore — diag best-effort */ }
+      registry.push({ container, cleanup });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       function _syncToCanvas() {
@@ -704,7 +630,6 @@ export class IIFEApp {
     container.style.background = tplConfig.theme.bg;
     container.style.fontFamily = tplConfig.theme.fontFamily;
     diag('mount:styles-applied', {
-      containerId,
       propsWritten: ['display', 'flex-direction', 'overflow', 'background', 'font-family'],
       preservedConsumer: {
         height: container.style.height || '(inherits)',
@@ -712,7 +637,7 @@ export class IIFEApp {
         position: container.style.position || '(inherits)',
       },
     });
-    diag('mount:data-mode', { containerId, mode });
+    diag('mount:data-mode', { mode });
 
     /* ── Dispatch + data helpers ────────────────────────────────────── */
     const _patchRefreshTimer: { t: ReturnType<typeof setTimeout> | null } = { t: null };
@@ -848,7 +773,6 @@ export class IIFEApp {
     function initGantt(host: HTMLElement): void {
       const eng = resolveEngine();
       if (!eng || !eng.NimbusGantt) {
-        diag('err:engine-missing', { containerId, path: 'chrome' });
         host.style.cssText = 'padding:20px;color:#b91c1c;font-size:13px';
         host.textContent = 'nimbus-gantt engine not loaded';
         return;
@@ -1038,7 +962,6 @@ export class IIFEApp {
       const renderedSlots: string[] = [];
       slotInstances.forEach((_inst, name) => renderedSlots.push(name));
       diag('mount:slots-rendered', {
-        containerId,
         slotOrder: SLOT_ORDER,
         rendered: renderedSlots,
         features: tplConfig.features,
@@ -1060,8 +983,6 @@ export class IIFEApp {
             return elSel ? Math.round(elSel.getBoundingClientRect().height) : 0;
           };
           diag('mount:chrome-heights', {
-            containerId,
-            engineOnly: false,
             root:        Math.round(container.getBoundingClientRect().height),
             titlebar:    measure('.nga-titlebar'),
             stats:       measure('.nga-stats'),
@@ -1075,31 +996,25 @@ export class IIFEApp {
           const canvasEl = container.querySelector<HTMLCanvasElement>('canvas');
           if (canvasEl) {
             diag('mount:init-gantt', {
-              containerId,
-              engineOnly: false,
               canvasW:   canvasEl.width,
               canvasH:   canvasEl.height,
               cssW:      Math.round(canvasEl.getBoundingClientRect().width),
               cssH:      Math.round(canvasEl.getBoundingClientRect().height),
-              // pxPerWeek / visibleWeeks are engine-internal; omitted until
-              // the engine exposes a getState() surface.
             });
             if (canvasEl.height < 64) {
-              diag('warn:zero-height', { containerId, surface: 'canvas', canvasH: canvasEl.height });
+              diag('warn:zero-height', { surface: 'canvas', canvasH: canvasEl.height });
             }
           } else {
-            diag('warn:no-canvas', { containerId });
+            diag('warn:no-canvas', {});
           }
           const durationMs = ((typeof performance !== 'undefined' && performance.now)
             ? performance.now() : Date.now()) - mountStartedAt;
           diag('mount:complete', {
-            containerId,
-            engineOnly: false,
             taskCount: allTasks.length,
             durationMs: Math.round(durationMs),
           });
         } catch (err) {
-          diag('err:post-mount', { containerId, message: (err as Error)?.message || String(err) });
+          diag('err:post-mount', { message: (err as Error)?.message || String(err) });
         }
       });
     } catch (_e) { /* ignore — diag is best-effort */ }
@@ -1127,7 +1042,7 @@ export class IIFEApp {
       removeTemplateCss(container);
       try { themeStyleEl.remove(); } catch (_e) { /* ok */ void 0; }
     };
-    registry.push({ container, cleanup, hadGantt: true, mode, containerId });
+    registry.push({ container, cleanup });
 
     return {
       setTasks(tasks: NormalizedTask[]) {
@@ -1141,15 +1056,7 @@ export class IIFEApp {
 
   static unmount(container: HTMLElement): void {
     const e = getEntry(container);
-    const hadGantt = e?.hadGantt ?? false;
-    const mode = e?.mode ?? 'unknown';
-    const containerId = e?.containerId ?? (container.getAttribute?.('data-nga-id') || 'unknown');
     if (e) { if (e.cleanup) e.cleanup(); removeEntry(container); }
     container.innerHTML = '';
-    try { container.removeAttribute('data-nga-id'); } catch (_err) { /* ok */ }
-    // Emit AFTER teardown so Cowork knows the mount is fully gone.
-    // Fires even when there was no prior registry entry (e is null) —
-    // useful for idempotent unmount detection.
-    diag('unmount', { containerId, hadGantt, mode });
   }
 }
