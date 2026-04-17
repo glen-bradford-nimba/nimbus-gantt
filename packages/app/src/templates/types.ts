@@ -8,6 +8,7 @@ import type {
   TaskPatch,
   MappedTask,
   NimbusGanttEngine,
+  AppMode,
 } from '../types';
 import type { TaskStats } from '../pipeline';
 
@@ -200,8 +201,17 @@ export interface TemplateConfig {
   stylesheet: TemplateStylesheet;
   title: string;
   version: string;
+  /** Render mode — default 'fullscreen'. When 'embedded', chrome feature
+   *  flags are forced off before resolution, leaving ContentArea only. */
+  mode: AppMode;
   /** Optional engine reference — used by ContentArea to mount the Gantt. */
   engine?: NimbusGanttEngine;
+  /** Host-provided fullscreen navigation callbacks. TitleBar reads
+   *  onExitFullscreen to relabel its Fullscreen button when mode==='fullscreen';
+   *  IIFEApp reads onEnterFullscreen to wire the embedded-mode floating
+   *  button. Library NEVER navigates itself. */
+  onEnterFullscreen?: () => void;
+  onExitFullscreen?: () => void;
   /** Optional runtime audit-submit handler. When present, AuditPanel's
    *  Submit+commit button will call it, show result state, and only reset
    *  the pending-patch count on success. When absent, falls back to a
@@ -220,5 +230,6 @@ export type {
   TaskPatch,
   MappedTask,
   NimbusGanttEngine,
+  AppMode,
 } from '../types';
 export type { TaskStats } from '../pipeline';

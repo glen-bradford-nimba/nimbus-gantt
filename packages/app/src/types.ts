@@ -82,12 +82,37 @@ export interface NimbusGanttEngine {
   hoursWeightedProgress?: (...args: any[]) => any;
 }
 
+/** Render mode — controls which chrome slots are rendered.
+ *  'fullscreen' (default) = full toolbar + all template chrome (TitleBar,
+ *  Stats, FilterBar, ZoomBar, Sidebar, DetailPanel, AuditPanel, HrsWkStrip).
+ *  'embedded'             = ContentArea only + a single floating "↗ Full
+ *  Screen" button top-right. All other chrome suppressed.
+ *
+ *  Hosts (e.g. Salesforce LWC) pass `mode` based on the Lightning app page
+ *  they mount in. The library emits `onEnterFullscreen` / `onExitFullscreen`
+ *  callbacks so the host owns navigation — nimbus-gantt does NOT hardcode
+ *  any Salesforce URLs. */
+export type AppMode = 'embedded' | 'fullscreen';
+
 export interface MountOptions {
   tasks: NormalizedTask[];
   onPatch: (patch: TaskPatch) => Promise<void> | void;
   config?: Partial<AppConfig>;
   /** Pre-resolved engine — bypasses window.NimbusGantt lookup when provided. */
   engine?: NimbusGanttEngine;
+  /** Render mode — default 'fullscreen'. See AppMode. */
+  mode?: AppMode;
+  /** Fired when the user clicks the embedded-mode "↗ Full Screen" button.
+   *  Host (LWC) should navigate to the full-screen Lightning app page. */
+  onEnterFullscreen?: () => void;
+  /** Fired when the user clicks the fullscreen-mode "← Exit Full Screen"
+   *  button. Host (LWC) should navigate back to the embedded tab. */
+  onExitFullscreen?: () => void;
+  /** Optional URL to the template stylesheet. When set, the library fetches
+   *  this URL and injects it inside the container (Strategy C — pierces
+   *  Salesforce synthetic shadow DOM). Overrides the template's own
+   *  stylesheet.url. Typical use: the LWC passes a static-resource URL. */
+  cssUrl?: string;
   /** Optional consumer-facing interaction callbacks. Each is forwarded from
    *  the underlying NimbusGantt engine event (plus a container-level
    *  contextmenu listener) so host apps can render tooltips, context menus,

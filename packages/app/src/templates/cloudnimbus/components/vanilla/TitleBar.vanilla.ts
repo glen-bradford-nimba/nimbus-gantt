@@ -198,11 +198,23 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     });
     root.appendChild(unpinBtn);
 
-    // Fullscreen — wired to real AppState.
+    // Fullscreen — host-nav mode vs local-toggle mode.
+    // When the host passes `onExitFullscreen` AND mode==='fullscreen' (i.e.
+    // we're mounted on the Salesforce Delivery_Gantt_Standalone page), the
+    // button becomes "← Exit Full Screen" and invokes the host callback so
+    // the LWC can navigate back to the embedded tab. Otherwise it keeps the
+    // v9-style local TOGGLE_FULLSCREEN behaviour (expands within the page).
+    const hostExit = config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function';
     const fsBtn = el('button',
-      CLS_PILL_BTN_BASE + ' ' + (state.fullscreen ? CLS_RIGHT_FS_ON : CLS_RIGHT_FS_OFF));
-    fsBtn.textContent = state.fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
-    fsBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_FULLSCREEN' }));
+      CLS_PILL_BTN_BASE + ' ' + ((state.fullscreen || hostExit) ? CLS_RIGHT_FS_ON : CLS_RIGHT_FS_OFF));
+    if (hostExit) {
+      fsBtn.textContent = '\u2190 Exit Full Screen';
+      fsBtn.setAttribute('data-nga-fullscreen-exit', '1');
+      fsBtn.addEventListener('click', () => { config.onExitFullscreen!(); });
+    } else {
+      fsBtn.textContent = state.fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+      fsBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_FULLSCREEN' }));
+    }
     root.appendChild(fsBtn);
 
     // Admin — no-op placeholder

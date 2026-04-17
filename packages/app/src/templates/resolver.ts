@@ -198,5 +198,8 @@ export function resolveTemplate(
     stylesheet,
     title,
     version,
+    // mode defaults to 'fullscreen'; IIFEApp / React driver may overwrite
+    // this post-resolve to reflect the caller's MountOptions.mode.
+    mode: 'fullscreen',
   };
 }

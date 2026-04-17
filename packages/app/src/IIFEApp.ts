@@ -19,7 +19,7 @@ import type {
 } from './types';
 import type {
   TemplateOverrides, TemplateConfig, AppState, AppEvent, SlotProps, SlotData, PatchLogEntry,
-  VanillaSlotInstance,
+  VanillaSlotInstance, FeatureFlags,
 } from './templates/types';
 import {
   buildDepthMap, buildTasks, buildTasksEpic, applyFilter, computeStats,
@@ -260,16 +260,81 @@ export interface TemplateAwareMountOptions extends MountOptions {
   engineOnly?: boolean;
 }
 
+/**
+ * Chrome features forced OFF in embedded mode. Behaviour-only flags
+ * (dragReparent, depthShading, groupByToggle, hideCompletedToggle) are
+ * intentionally left alone so the canvas remains interactive.
+ */
+const EMBEDDED_FEATURE_OVERRIDES: Partial<FeatureFlags> = {
+  titleBar: false,
+  statsPanel: false,
+  filterBar: false,
+  zoomBar: false,
+  sidebar: false,
+  detailPanel: false,
+  auditPanel: false,
+  hrsWkStrip: false,
+};
+
+/**
+ * Render the floating "↗ Full Screen" button for embedded mode. Inlined styles
+ * keep it self-contained — it renders before the template stylesheet arrives
+ * and doesn't require any Tailwind classes to resolve. The button is absolutely
+ * positioned top-right of the container.
+ */
+function renderEmbeddedFullscreenButton(
+  container: HTMLElement,
+  onClick: () => void,
+): () => void {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-nga-fullscreen-enter', '1');
+  btn.textContent = '\u2197 Full Screen';
+  btn.style.cssText = [
+    'position:absolute',
+    'top:8px',
+    'right:8px',
+    'z-index:50',
+    'padding:6px 10px',
+    'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+    'font-size:11px',
+    'font-weight:600',
+    'color:#1f2937',
+    'background:#ffffff',
+    'border:1px solid #e5e7eb',
+    'border-radius:6px',
+    'box-shadow:0 1px 2px rgba(0,0,0,0.04)',
+    'cursor:pointer',
+  ].join(';');
+  btn.addEventListener('click', onClick);
+  // container is the gantt host; make sure it positions our button correctly.
+  if (!container.style.position) container.style.position = 'relative';
+  container.appendChild(btn);
+  return () => { try { btn.remove(); } catch (_e) { /* ok */ } };
+}
+
 export class IIFEApp {
   static mount(container: HTMLElement, options: TemplateAwareMountOptions): AppInstance {
     IIFEApp.unmount(container);
 
     const templateName = options.template || 'cloudnimbus';
+    const mode = options.mode || 'fullscreen';
     const overrides: TemplateOverrides = options.overrides ? { ...options.overrides } : {};
     // Legacy title/version passthrough
     if (options.config?.title !== undefined)   overrides.title   = options.config.title;
     if (options.config?.version !== undefined) overrides.version = options.config.version;
     if (options.config?.buckets) overrides.buckets = options.config.buckets;
+
+    // Embedded mode: force chrome feature flags off before template
+    // resolution so no slot wastes work rendering + destroying. Consumer
+    // overrides still win on top (rare — if an LWC wanted embedded mode
+    // with e.g. a stats panel, it would pass features.statsPanel=true).
+    if (mode === 'embedded') {
+      overrides.features = {
+        ...EMBEDDED_FEATURE_OVERRIDES,
+        ...(overrides.features || {}),
+      };
+    }
 
     let tplConfig: TemplateConfig;
     try {
@@ -279,6 +344,10 @@ export class IIFEApp {
       // Fallback to cloudnimbus defaults silently
       tplConfig = resolveTemplate('cloudnimbus', overrides);
     }
+    tplConfig.mode = mode;
+    if (options.onEnterFullscreen) tplConfig.onEnterFullscreen = options.onEnterFullscreen;
+    if (options.onExitFullscreen)  tplConfig.onExitFullscreen  = options.onExitFullscreen;
+    if (options.cssUrl) tplConfig.stylesheet = { ...tplConfig.stylesheet, url: options.cssUrl };
     if (options.engine) tplConfig.engine = options.engine;
 
     /* ── engineOnly: React owns chrome — just run the gantt engine ──── */
@@ -798,10 +867,22 @@ export class IIFEApp {
     renderSlots();
     if (ganttHost) initGantt(ganttHost);
 
+    /* ── Embedded-mode fullscreen button ────────────────────────────── */
+    // Renders a single floating "↗ Full Screen" button top-right of the
+    // container. Library does NOT navigate — it just invokes the callback.
+    let cleanupEmbeddedBtn: (() => void) | null = null;
+    if (mode === 'embedded' && options.onEnterFullscreen) {
+      cleanupEmbeddedBtn = renderEmbeddedFullscreenButton(
+        container,
+        () => options.onEnterFullscreen?.(),
+      );
+    }
+
     /* ── Registry + AppInstance ─────────────────────────────────────── */
     const cleanup = () => {
       if (cleanupShading) cleanupShading();
       if (cleanupDrag)    cleanupDrag();
+      if (cleanupEmbeddedBtn) cleanupEmbeddedBtn();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (ganttInst) { try { (ganttInst as any).destroy(); } catch (_e) { /* ok */ void 0; } }
       slotInstances.forEach((inst) => inst.destroy());

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, createElement, Fra
 import type { CSSProperties } from 'react';
 import type {
   Template, TemplateOverrides, TemplateConfig, SlotProps, SlotData, AppEvent,
-  AuditSubmitHandler,
+  AuditSubmitHandler, FeatureFlags, AppMode,
 } from './templates/types';
 import type { NormalizedTask, TaskPatch, NimbusGanttEngine, ScreenPos, TaskClickSource } from './types';
 import { resolveTemplate } from './templates/resolver';
@@ -25,12 +25,31 @@ import { IIFEApp } from './IIFEApp';
 import './templates/cloudnimbus';
 import './templates/minimal';
 
+const EMBEDDED_FEATURE_OVERRIDES: Partial<FeatureFlags> = {
+  titleBar: false,
+  statsPanel: false,
+  filterBar: false,
+  zoomBar: false,
+  sidebar: false,
+  detailPanel: false,
+  auditPanel: false,
+  hrsWkStrip: false,
+};
+
 export interface NimbusGanttAppProps {
   template?: 'cloudnimbus' | 'minimal' | (string & {}) | Template;
   data?: NormalizedTask[];
   /** Legacy alias for `data`. */
   tasks?: NormalizedTask[];
   onPatch: (patch: TaskPatch) => void | Promise<void>;
+  /** Render mode — 'fullscreen' (default) or 'embedded'. Embedded suppresses
+   *  all chrome slots and shows a single "↗ Full Screen" button overlay. */
+  mode?: AppMode;
+  /** Fired when the user clicks the embedded-mode "↗ Full Screen" button. */
+  onEnterFullscreen?: () => void;
+  /** Fired when the user clicks the fullscreen-mode "← Exit Full Screen"
+   *  button in TitleBar. */
+  onExitFullscreen?: () => void;
   /** Optional runtime audit-submit handler. When present, AuditPanel's
    *  Submit+commit button calls this; when absent, commit is local-only. */
   onAuditSubmit?: AuditSubmitHandler;
@@ -54,16 +73,32 @@ export interface NimbusGanttAppProps {
 export function NimbusGanttApp(props: NimbusGanttAppProps) {
   const tasks = props.data ?? props.tasks ?? [];
   const tplInput = props.template ?? 'cloudnimbus';
+  const mode: AppMode = props.mode ?? 'fullscreen';
 
   const tplConfig: TemplateConfig = useMemo(
     () => {
-      const cfg = resolveTemplate(tplInput as string | Template, props.overrides);
+      // Embedded mode overlays feature=off for all chrome slots BEFORE
+      // template resolution so SLOT_ORDER iteration skips them entirely.
+      // Consumer overrides still win on top.
+      const resolvedOverrides: TemplateOverrides = mode === 'embedded'
+        ? {
+            ...(props.overrides || {}),
+            features: {
+              ...EMBEDDED_FEATURE_OVERRIDES,
+              ...(props.overrides?.features || {}),
+            },
+          }
+        : (props.overrides || {});
+      const cfg = resolveTemplate(tplInput as string | Template, resolvedOverrides);
+      cfg.mode = mode;
       if (props.engine) cfg.engine = props.engine;
       if (props.onAuditSubmit) cfg.onAuditSubmit = props.onAuditSubmit;
       if (props.isDirty !== undefined) cfg.isDirty = props.isDirty;
+      if (props.onEnterFullscreen) cfg.onEnterFullscreen = props.onEnterFullscreen;
+      if (props.onExitFullscreen)  cfg.onExitFullscreen  = props.onExitFullscreen;
       return cfg;
     },
-    [tplInput, props.overrides, props.engine, props.onAuditSubmit, props.isDirty],
+    [tplInput, mode, props.overrides, props.engine, props.onAuditSubmit, props.isDirty, props.onEnterFullscreen, props.onExitFullscreen],
   );
 
   const [state, rawDispatch] = useReducer(reduceAppState, INITIAL_STATE);
@@ -209,13 +244,46 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
     children.push(createElement(slotDef.react, { ...slotProps, key: slotName }));
   });
 
+  // Embedded-mode floating "↗ Full Screen" button. Rendered INSIDE the root
+  // div so it overlays ContentArea. Host owns navigation — library only
+  // invokes the callback.
+  if (mode === 'embedded' && props.onEnterFullscreen) {
+    children.push(
+      createElement(
+        'button',
+        {
+          key: '__nga_embedded_fs',
+          type: 'button',
+          'data-nga-fullscreen-enter': '1',
+          onClick: () => props.onEnterFullscreen?.(),
+          style: {
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            zIndex: 50,
+            padding: '6px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#1f2937',
+            background: '#ffffff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 6,
+            boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+            cursor: 'pointer',
+          },
+        },
+        '\u2197 Full Screen',
+      ),
+    );
+  }
+
   return createElement(
     'div',
     {
       ref: rootRef,
       className: rootClassName,
       'data-template': tplConfig.templateName,
-      style,
+      style: { ...style, position: (style.position as 'relative' | undefined) || 'relative' },
     },
     createElement(Fragment, null, ...children),
   );

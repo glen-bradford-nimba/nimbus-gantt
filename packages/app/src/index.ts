@@ -23,6 +23,7 @@ export type {
   NimbusGanttEngine,
   ScreenPos,
   TaskClickSource,
+  AppMode,
 } from './types';
 
 export {

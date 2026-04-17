@@ -10,12 +10,27 @@
  * Usage:
  *   window.NimbusGanttApp.mount(container, {
  *     template: 'cloudnimbus',       // optional; defaults to cloudnimbus
+ *     mode: 'fullscreen',            // 'embedded' | 'fullscreen' (default)
  *     tasks, onPatch,
+ *     onEnterFullscreen: () => { ... host nav to fullscreen page ... },
+ *     onExitFullscreen:  () => { ... host nav back to embedded tab ... },
+ *     cssUrl: CLOUDNIMBUS_TEMPLATE_CSS_URL, // optional SF static resource
  *     overrides: { features: { auditPanel: false } },
  *     engine: window.NimbusGantt,
  *   });
  *   window.NimbusGanttApp.unmount(container);
  *   window.NimbusGanttApp.listTemplates(); // ['cloudnimbus', 'minimal', ...]
+ *
+ * Mode contract (Phase 0.5):
+ *   - 'fullscreen' (default): renders full chrome — TitleBar, FilterBar,
+ *     ZoomBar, StatsPanel, Sidebar, AuditPanel, HrsWkStrip, DetailPanel.
+ *     When `onExitFullscreen` is also set, TitleBar's Fullscreen button
+ *     becomes "← Exit Full Screen" and invokes the callback instead of
+ *     the local TOGGLE_FULLSCREEN toggle.
+ *   - 'embedded': suppresses ALL chrome (feature flags forced off).
+ *     Renders ContentArea + a single floating top-right "↗ Full Screen"
+ *     button that invokes `onEnterFullscreen`. Library NEVER navigates —
+ *     the Salesforce LWC / web host owns all navigation between pages.
  */
 import { IIFEApp } from './IIFEApp';
 import { registerTemplate, listTemplates, getTemplate } from './templates/registry';

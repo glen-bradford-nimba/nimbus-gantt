@@ -147,6 +147,16 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
       )}
       <div className={CLS_TB_FILL} />
       <span className={CLS_TB_SUMMARY}>{summary}</span>
+      {config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function' ? (
+        <button
+          type="button"
+          data-nga-fullscreen-exit="1"
+          className={CLS_PILL_BTN_BASE + ' bg-slate-700 text-white border-slate-700'}
+          onClick={() => config.onExitFullscreen!()}
+        >
+          ← Exit Full Screen
+        </button>
+      ) : null}
     </div>
   );
 }
