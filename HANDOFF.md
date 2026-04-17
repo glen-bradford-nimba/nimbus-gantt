@@ -10,19 +10,22 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `330eba7b162964bf08fa58eda05bbb88dc32344b` |
-| Commit subject | `fix(app): stop clobbering consumer inline styles on mount + fullscreen viewport floor` |
-| Previous regression patch | `c9c765d40fe086f7b75d6a28741d966f751d5bab` (AuditPanel dedup + critical flex CSS) |
+| Commit SHA (source — latest) | `b202a85c14181f8b5d307ab8a33877ea97e72d96` |
+| Commit subject | `feat(app): opt-in structured diagnostic emitter for Cowork verification` |
+| Zoombar dedup | `268354225c2457cac454436fcc19d9f7f636a263` |
+| Non-destructive mount + vh floor | `330eba7b162964bf08fa58eda05bbb88dc32344b` |
+| Audit dedup + critical CSS | `c9c765d40fe086f7b75d6a28741d966f751d5bab` |
 | Phase 0.5 base commit | `fa6a25e2d40cac07390cbfbe9ba2a2f51d7c0525` |
 | Parent commit | `a49a130eda7f38d84ef3ed143e6bee8e76bb8037` |
 
-**If you copied any earlier bundle (`fa6a25e` or `c9c765d`), re-copy from `330eba7`.**
-The `nimbusganttapp.resource` sha256 changed; `nimbusgantt.resource` has been
-unchanged since `fa6a25e`.
+**If you copied any earlier bundle, re-copy from `b202a85`.** The
+`nimbusganttapp.resource` sha256 changed; `nimbusgantt.resource` has been
+unchanged since `fa6a25e`. This bundle bundles two changes versus `330eba7`:
+the zoombar dedup **and** the opt-in diagnostic emitter.
 
 ## Bundle artifacts
 
-Both IIFE bundles are built from commit `330eba7`. Absolute paths, byte
+Both IIFE bundles are built from commit `2683542`. Absolute paths, byte
 sizes, and sha256 digests below. `dist/` is gitignored — Delivery-Hub CC
 copies these bytes into `force-app/main/default/staticresources/…` as the
 deploy step.
@@ -37,9 +40,9 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **135,693 bytes** (~133 KB)
-- sha256: `e9f835e92b30063d2754dbd1827f6d5d0a79baf687c5bfde39e3921823184899`
-- **Replaces** prior bundles (sha256 `22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`).
+- Size: **140,802 bytes** (~138 KB)
+- sha256: `5a2210babfdb19f2531176ab901feb2eccc5da62f911bdfe315670e3b820bf29`
+- **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`).
 
 Copy mapping (Delivery-Hub CC):
 
@@ -151,7 +154,59 @@ v12 wraps the mount container in `<div style={{ position: 'fixed', inset: 0, zIn
 After `330eba7` this is preserved, so `.nga-root` is 100 vw × 100 vh and
 ContentArea claims all the surplus below the chrome strips.
 
+## Opt-in diagnostic emitter (new in `b202a85`)
+
+Cowork's `C:\Projects\nga-verify.js` can cross-reference DOM state with
+library lifecycle events. Default OFF — zero runtime cost on prod.
+
+**Enable before the bundle loads** via any of:
+
+```js
+// 1. persistent (survives refresh)
+localStorage.setItem('NGA_DIAG', '1');
+
+// 2. per-session (set before <script> tags load)
+window.NGA_DIAG = true;
+
+// 3. URL flag
+// cloudnimbusllc.com/mf/delivery-timeline-v12?nga_diag=1
+```
+
+For console echoing, also set `window.NGA_DIAG_VERBOSE = true`.
+
+**Consume events** from `window.__nga_diag` (array of `{t, kind, ...data}`):
+
+| `kind` | Fires when | Key fields |
+|---|---|---|
+| `lib:loaded` | bundle module load | `app` (version — currently 'unknown') |
+| `mount:start` | `NimbusGanttApp.mount()` entry | `containerRect`, `mode`, `hasOnExit`, `hasOnEnter`, `engineOnly` |
+| `mount:styles-applied` | after non-destructive style writes | `propsWritten[]`, `preservedConsumer{height,width,position}` |
+| `mount:data-mode` | after `data-mode` attribute set | `mode` |
+| `mount:slots-rendered` | after first `renderSlots()` | `slotOrder`, `rendered[]`, `features` |
+| `mount:chrome-heights` | after rAF (post-layout) | `root`, `titlebar`, `stats`, `filterbar`, `zoombar`, `audit`, `hrswkstrip`, `contentOuter`, `content` |
+| `mount:init-gantt` | canvas initialised | `canvasW`, `canvasH`, `cssW`, `cssH` |
+| `mount:complete` | layout + canvas measurements done | `taskCount`, `durationMs` |
+| `warn:zero-height` | canvas < 64 px sanity trip | `canvasH` |
+| `warn:no-canvas` | canvas missing | — |
+| `err:post-mount` | caught layout errors | `message` |
+
+**Schema:** every event is `{ t: number (perf.now()), kind: string, ...data }`.
+Push order is emission order — grep by `kind` or slice by `t` to correlate
+with page events.
+
 ## Regression fixes
+
+### `2683542` — zoom-pill dup
+
+`/v12` DOM probe post-`330eba7` showed 8 zoom buttons instead of 4 — one
+inline set in `.nga-titlebar`, one standalone `.nga-zoombar` row. Same
+latent-vanilla-path pattern as `c9c765d`: cloudnimbus template defaults
+had `zoomBar: true`, `TitleBar` renders the pills inline, top-level
+`ZoomBar` slot renders a second set. React escaped via the
+`features: { zoomBar: false }` override in `DeliveryTimelineV10.tsx`;
+/v12 passes no overrides so the dup landed. Fix: flip the cloudnimbus
+default to `false` in BOTH `index.ts` (React path) and `index.vanilla.ts`
+(IIFE path — the one the Salesforce bundle actually imports).
 
 ### `330eba7` — canvas still 0 px post-`c9c765d`
 
@@ -195,7 +250,9 @@ consumer (v10 used the React driver, which had already corrected both).
 |---|---|---|
 | Phase 0.5 (mode prop) | ✅ done | `fa6a25e` |
 | Regression patch (audit dup + critical CSS) | ✅ done | `c9c765d` |
-| Regression patch (non-destructive mount + vh floor) | ✅ done | `330eba7` — this release |
+| Regression patch (non-destructive mount + vh floor) | ✅ done | `330eba7` |
+| Zoombar dedup | ✅ done | `2683542` |
+| Opt-in diagnostic emitter | ✅ done | `b202a85` — this release |
 | A3 (CSS port, strip `!important` + `mf-depth-check`) | ⏳ next | largest visual delta |
 | A1 (multi-view switcher) | pending | v10 currently ships `CLOUD_NIMBUS_VIEWS = ['gantt']` |
 | A2 (top-bar controls) | pending | Unpin/Admin/Advisor/v3/API-docs wiring |
