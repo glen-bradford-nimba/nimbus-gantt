@@ -67,6 +67,15 @@ const GANTT_COLS = [
   { field: 'hoursLabel', header: '', width: 85,  align: 'right' },
 ];
 
+/**
+ * Initial viewport offset from today — gantt scrolls to `today - 14 days`
+ * on mount so users see ~2 weeks of recent past context rather than today
+ * flush at the left edge. Matches v9 default. If a future consumer needs
+ * configurability, expose `initialViewportOffsetDays` on MountOptions and
+ * derive this value from it; the library-side default here stays.
+ */
+const INITIAL_VIEWPORT_OFFSET_MS = 14 * 24 * 60 * 60 * 1000;
+
 /* ── Legacy gantt-CSS injection (kept from v5 for library class overrides) ──
  *
  * Also carries CRITICAL template-flex rules so the gantt canvas measures the
@@ -539,9 +548,11 @@ export class IIFEApp {
       }
       inst.setData(gtasks, []);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
-      // Scroll to today after a tick so the canvas has its final dimensions
+      // Scroll to (today - 14 days) after a tick so the canvas has its final
+      // dimensions. v9 parity — initial viewport shows ~2 weeks of recent
+      // past context rather than putting today flush at the left edge.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setTimeout(() => { try { (inst as any).scrollToDate?.(new Date()); } catch (_e) { /* ok */ } }, 50);
+      setTimeout(() => { try { (inst as any).scrollToDate?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS)); } catch (_e) { /* ok */ } }, 50);
 
       let cleanupShading: (() => void) | null = null;
       let cleanupDrag: (() => void) | null = null;
@@ -960,6 +971,13 @@ export class IIFEApp {
 
       ganttInst.setData(gtasks, []);
       try { ganttInst.expandAll(); } catch (_e) { /* ok */ void 0; }
+
+      // Scroll to (today - 14 days) after a tick so the canvas has final
+      // dimensions. Same v9-parity initial viewport as the engineOnly path
+      // above — without this, the chrome path (SF fullscreen + v12 IIFE)
+      // opened flush on today with zero past context.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setTimeout(() => { try { (ganttInst as any).scrollToDate?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS)); } catch (_e) { /* ok */ void 0; } }, 50);
 
       if (cleanupShading) cleanupShading();
       if (cleanupDrag)    cleanupDrag();

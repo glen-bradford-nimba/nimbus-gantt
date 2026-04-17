@@ -36,6 +36,17 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
   function render(p: SlotProps) {
     clear(root);
     inputEl = null;
+    // State-gated visibility — matches StatsPanel.vanilla.ts:48 pattern.
+    // The slot itself is always mounted (slot-rendering is feature-gated
+    // via shouldRenderSlot → features.auditPanel), but visibility is
+    // driven by state.auditPanelOpen so the Audit pill in TitleBar
+    // toggles the strip cleanly. Without this gate the Audit pill would
+    // flip its own active/idle class but the panel stayed visible no
+    // matter what — the Blocker 2 bug reported on v12 localhost
+    // 2026-04-17. INITIAL_STATE.auditPanelOpen = true preserves v9
+    // parity (Audit strip open by default).
+    root.style.display = p.state.auditPanelOpen ? '' : 'none';
+    if (!p.state.auditPanelOpen) return;
     const dirty = p.state.pendingPatchCount > 0;
 
     const inner = el('div', 'flex flex-wrap items-center gap-2');
