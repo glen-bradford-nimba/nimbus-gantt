@@ -10,8 +10,9 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `3ffd7d327a1276315b86fd23c999e5cca1b40bcc` |
-| Commit subject | `fix(app): 0.181 cut blockers — revert A1 unlock, AuditPanel state-gate, today-14d viewport` |
+| Commit SHA (source — latest) | `31c066f2327104e7b9823429c2c7be819e4455da` |
+| Commit subject | `fix(app): surgical revert of 9ee5426 diag-v2 surface — 0.181 hotfix bisect` |
+| 0.181 cut blocker fixes | `3ffd7d327a1276315b86fd23c999e5cca1b40bcc` |
 | A1 stage-1 + diag v2 (A1 REVERTED in this release; diag stays) | `9ee542608fe327d419cce972799c2bedf6d2a7af` |
 | Diag emitter v1 | `b202a85c14181f8b5d307ab8a33877ea97e72d96` |
 | Zoombar dedup | `268354225c2457cac454436fcc19d9f7f636a263` |
@@ -44,8 +45,8 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **144,718 bytes** (~141 KB)
-- sha256: `6f1846aebd406883f75170a03c969049be40f1149834d3f11f75b31e1b013f69`
+- Size: **141,106 bytes** (~138 KB)
+- sha256: `6e2e777514ce9c6c22cbcecf6c4b9b1e426d0a7c97dcae603b029bc0437102a5`
 - **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`, `2ed90644…a200` at `9ee5426`).
 
 Copy mapping (Delivery-Hub CC):
