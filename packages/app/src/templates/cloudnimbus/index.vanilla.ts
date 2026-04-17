@@ -36,7 +36,14 @@ export const cloudnimbusTemplate: Template = defineTemplate({
       titleBar: true,
       statsPanel: true,
       filterBar: true,
-      zoomBar: true,
+      // zoomBar default OFF — TitleBar already renders inline zoom pills
+      // (Day/Week/Month/Quarter), matching v9's gold-standard layout. The
+      // standalone ZoomBar slot exists for minimal-template consumers that
+      // skip TitleBar; cloudnimbus consumers would render it twice. Observed
+      // 2026-04-16 on /v12 (8 zoom buttons instead of 4). Same class of
+      // dup as the AuditPanel fix at c9c765d.
+      // KEEP IN SYNC with index.ts — the React variant.
+      zoomBar: false,
       sidebar: true,
       detailPanel: true,
       auditPanel: true,
