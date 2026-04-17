@@ -10,17 +10,19 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `c9c765d40fe086f7b75d6a28741d966f751d5bab` |
-| Commit subject | `fix(app): dedupe AuditPanel + inject critical flex CSS synchronously` |
+| Commit SHA (source — latest) | `330eba7b162964bf08fa58eda05bbb88dc32344b` |
+| Commit subject | `fix(app): stop clobbering consumer inline styles on mount + fullscreen viewport floor` |
+| Previous regression patch | `c9c765d40fe086f7b75d6a28741d966f751d5bab` (AuditPanel dedup + critical flex CSS) |
 | Phase 0.5 base commit | `fa6a25e2d40cac07390cbfbe9ba2a2f51d7c0525` |
 | Parent commit | `a49a130eda7f38d84ef3ed143e6bee8e76bb8037` |
 
-**If you copied the Phase 0.5 bundle at `fa6a25e`, re-copy from `c9c765d`.**
-The `nimbusganttapp.resource` sha256 changed; `nimbusgantt.resource` did not.
+**If you copied any earlier bundle (`fa6a25e` or `c9c765d`), re-copy from `330eba7`.**
+The `nimbusganttapp.resource` sha256 changed; `nimbusgantt.resource` has been
+unchanged since `fa6a25e`.
 
 ## Bundle artifacts
 
-Both IIFE bundles are built from commit `c9c765d`. Absolute paths, byte
+Both IIFE bundles are built from commit `330eba7`. Absolute paths, byte
 sizes, and sha256 digests below. `dist/` is gitignored — Delivery-Hub CC
 copies these bytes into `force-app/main/default/staticresources/…` as the
 deploy step.
@@ -30,14 +32,14 @@ deploy step.
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
 - Size: **267,674 bytes** (~261 KB)
 - sha256: `1851cad1b99ad8b98753be4667a1973592851192d698624bbc85d2cca96e0bbf`
-- **Unchanged** from Phase 0.5 (`fa6a25e`) — no core source edits in `c9c765d`.
+- **Unchanged** since Phase 0.5 (`fa6a25e`) — no core source edits.
 
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **134,983 bytes** (~132 KB)
-- sha256: `8394edb3f6a1f603bfd01fc5df5610b5f7192ea4cfd464641a86c44774a63fc0`
-- **Replaces** the `fa6a25e` app bundle (old sha256 `22c505b9…8606`).
+- Size: **135,693 bytes** (~133 KB)
+- sha256: `e9f835e92b30063d2754dbd1827f6d5d0a79baf687c5bfde39e3921823184899`
+- **Replaces** prior bundles (sha256 `22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`).
 
 Copy mapping (Delivery-Hub CC):
 
@@ -110,7 +112,60 @@ Cowork DOM inspection should show:
 
 Both compositions ship from the same `.resource` bytes — no dual-build.
 
-## Regression fixes in `c9c765d` (on top of Phase 0.5)
+## Consumer contract (mount container sizing)
+
+The library no longer clobbers the mount container's inline styles. Since
+`330eba7`, `IIFEApp.mount` sets only `display: flex; flex-direction: column;
+overflow: hidden; background; font-family` via individual property writes —
+height/width/position are untouched.
+
+**The consumer MUST give the mount container a real height.** Any of:
+
+1. Position out-of-flow — `position: fixed; inset: 0` (v12's approach) or
+   `position: absolute; inset: 0` inside a positioned parent.
+2. Explicit pixel height — `height: 600px` or similar.
+3. Flex/grid child with defined height — parent is `display: flex` with
+   height, container is a flex item that stretches.
+4. `height: 100%` with a full chain up to the viewport.
+
+### Salesforce-specific
+
+`deliveryProFormaTimeline.css` already has the right shape:
+
+```css
+:host { display: block; height: 100%; min-height: 600px; }
+.timeline-root { height: 100%; width: 100%; overflow: hidden; position: relative; }
+.timeline-container { height: 100%; width: 100%; overflow: hidden; }
+```
+
+As a safety floor, the library adds
+`.nga-root[data-mode="fullscreen"] { min-height: 100vh }` in its critical
+synchronous CSS. This catches cases where the Lightning app page layout
+doesn't resolve `:host` to a real viewport height — the canvas will still
+get 100 vh to work with. Embedded mode is NOT floored — embedded consumers
+opt into small container sizes by design.
+
+### Web-specific
+
+v12 wraps the mount container in `<div style={{ position: 'fixed', inset: 0, zIndex: 100 }} />`.
+After `330eba7` this is preserved, so `.nga-root` is 100 vw × 100 vh and
+ContentArea claims all the surplus below the chrome strips.
+
+## Regression fixes
+
+### `330eba7` — canvas still 0 px post-`c9c765d`
+
+`c9c765d` added the critical flex rules but the canvas was still 0 px on
+/v12 and SF because `IIFEApp.mount` was destroying the consumer's inline
+positioning via `container.style.cssText = ...`. On /v12 this wiped
+`position: fixed; inset: 0`, collapsing `.nga-root` to the 240 px
+chrome-sum content height — ContentArea's `flex: 1` had zero surplus.
+
+Fix: replaced both `cssText =` sites with individual property writes that
+preserve consumer styles, added `data-mode` attribute + the fullscreen
+viewport floor.
+
+### `c9c765d` — on top of Phase 0.5
 
 Diagnosed against `/v12` DOM inspection 2026-04-16. Both bugs pre-existed
 Phase 0.5 but only surfaced when /v12 became the first real IIFE-path
@@ -139,7 +194,8 @@ consumer (v10 used the React driver, which had already corrected both).
 | Track | Status | Notes |
 |---|---|---|
 | Phase 0.5 (mode prop) | ✅ done | `fa6a25e` |
-| Regression patch (audit dup + canvas height) | ✅ done | `c9c765d` — this release |
+| Regression patch (audit dup + critical CSS) | ✅ done | `c9c765d` |
+| Regression patch (non-destructive mount + vh floor) | ✅ done | `330eba7` — this release |
 | A3 (CSS port, strip `!important` + `mf-depth-check`) | ⏳ next | largest visual delta |
 | A1 (multi-view switcher) | pending | v10 currently ships `CLOUD_NIMBUS_VIEWS = ['gantt']` |
 | A2 (top-bar controls) | pending | Unpin/Admin/Advisor/v3/API-docs wiring |
