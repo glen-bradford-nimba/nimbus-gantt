@@ -34,11 +34,18 @@ import { INITIAL_STATE, reduceAppState } from './templates/state';
 import { SLOT_ORDER, shouldRenderSlot } from './templates/slots';
 import { ensureTemplateCss, removeTemplateCss } from './templates/stylesheet-loader';
 import { themeToScopedCss } from './templates/css';
+import { diag } from './diag';
 
 // Ensure built-in templates self-register on module load.
 // CRITICAL: Use .vanilla variants — React imports break Locker Service.
 import './templates/cloudnimbus/index.vanilla';
 import './templates/minimal/index.vanilla';
+
+// One-shot emitter — fires when the bundle is loaded. Cowork correlates
+// diag events with the HANDOFF commit SHA on the consumer side; the app
+// field is reserved for a build-time version string once vite.config.ts
+// grows a define. For now, 'unknown' is fine — SHA lives in HANDOFF.md.
+diag('lib:loaded', { app: 'unknown' });
 
 /* ── Theme (V3_MATCH_THEME — used by the gantt engine) ──────────────────── */
 const V3_THEME = {
@@ -337,10 +344,24 @@ function renderEmbeddedFullscreenButton(
 
 export class IIFEApp {
   static mount(container: HTMLElement, options: TemplateAwareMountOptions): AppInstance {
+    const mountStartedAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     IIFEApp.unmount(container);
 
     const templateName = options.template || 'cloudnimbus';
     const mode = options.mode || 'fullscreen';
+
+    try {
+      const r = container.getBoundingClientRect();
+      diag('mount:start', {
+        containerRect: { x: r.x, y: r.y, w: r.width, h: r.height },
+        mode,
+        engineVersion: (options.engine && (options.engine as { version?: string }).version) || 'unknown',
+        hasOnExit: typeof options.onExitFullscreen === 'function',
+        hasOnEnter: typeof options.onEnterFullscreen === 'function',
+        engineOnly: !!options.engineOnly,
+        template: templateName,
+      });
+    } catch (_e) { /* diag never throws */ }
     const overrides: TemplateOverrides = options.overrides ? { ...options.overrides } : {};
     // Legacy title/version passthrough
     if (options.config?.title !== undefined)   overrides.title   = options.config.title;
@@ -597,6 +618,15 @@ export class IIFEApp {
     container.style.overflow = 'hidden';
     container.style.background = tplConfig.theme.bg;
     container.style.fontFamily = tplConfig.theme.fontFamily;
+    diag('mount:styles-applied', {
+      propsWritten: ['display', 'flex-direction', 'overflow', 'background', 'font-family'],
+      preservedConsumer: {
+        height: container.style.height || '(inherits)',
+        width: container.style.width || '(inherits)',
+        position: container.style.position || '(inherits)',
+      },
+    });
+    diag('mount:data-mode', { mode });
 
     /* ── Dispatch + data helpers ────────────────────────────────────── */
     const _patchRefreshTimer: { t: ReturnType<typeof setTimeout> | null } = { t: null };
@@ -910,7 +940,68 @@ export class IIFEApp {
 
     /* ── First render ───────────────────────────────────────────────── */
     renderSlots();
+    try {
+      const renderedSlots: string[] = [];
+      slotInstances.forEach((_inst, name) => renderedSlots.push(name));
+      diag('mount:slots-rendered', {
+        slotOrder: SLOT_ORDER,
+        rendered: renderedSlots,
+        features: tplConfig.features,
+      });
+    } catch (_e) { /* diag never throws */ }
     if (ganttHost) initGantt(ganttHost);
+
+    /* ── Post-mount layout + canvas diagnostics ─────────────────────── */
+    // Defer one animation frame so browser layout has settled. Gives Cowork
+    // real measured heights rather than pre-layout zeros.
+    try {
+      const raf = (typeof requestAnimationFrame === 'function')
+        ? requestAnimationFrame
+        : (fn: FrameRequestCallback) => setTimeout(() => fn(Date.now()), 16) as unknown as number;
+      raf(() => {
+        try {
+          const measure = (sel: string): number => {
+            const elSel = container.querySelector<HTMLElement>(sel);
+            return elSel ? Math.round(elSel.getBoundingClientRect().height) : 0;
+          };
+          diag('mount:chrome-heights', {
+            root:        Math.round(container.getBoundingClientRect().height),
+            titlebar:    measure('.nga-titlebar'),
+            stats:       measure('.nga-stats'),
+            filterbar:   measure('.nga-filterbar'),
+            zoombar:     measure('.nga-zoombar'),
+            audit:       measure('.nga-audit'),
+            hrswkstrip:  measure('.nga-hrswkstrip'),
+            contentOuter: measure('.nga-content-outer'),
+            content:     measure('.nga-content'),
+          });
+          const canvasEl = container.querySelector<HTMLCanvasElement>('canvas');
+          if (canvasEl) {
+            diag('mount:init-gantt', {
+              canvasW:   canvasEl.width,
+              canvasH:   canvasEl.height,
+              cssW:      Math.round(canvasEl.getBoundingClientRect().width),
+              cssH:      Math.round(canvasEl.getBoundingClientRect().height),
+              // pxPerWeek / visibleWeeks are engine-internal; omitted until
+              // the engine exposes a getState() surface.
+            });
+            if (canvasEl.height < 64) {
+              diag('warn:zero-height', { surface: 'canvas', canvasH: canvasEl.height });
+            }
+          } else {
+            diag('warn:no-canvas', {});
+          }
+          const durationMs = ((typeof performance !== 'undefined' && performance.now)
+            ? performance.now() : Date.now()) - mountStartedAt;
+          diag('mount:complete', {
+            taskCount: allTasks.length,
+            durationMs: Math.round(durationMs),
+          });
+        } catch (err) {
+          diag('err:post-mount', { message: (err as Error)?.message || String(err) });
+        }
+      });
+    } catch (_e) { /* ignore — diag is best-effort */ }
 
     /* ── Embedded-mode fullscreen button ────────────────────────────── */
     // Renders a single floating "↗ Full Screen" button top-right of the
