@@ -10,22 +10,25 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `b202a85c14181f8b5d307ab8a33877ea97e72d96` |
-| Commit subject | `feat(app): opt-in structured diagnostic emitter for Cowork verification` |
+| Commit SHA (source — latest) | `9ee542608fe327d419cce972799c2bedf6d2a7af` |
+| Commit subject | `feat(app): A1 stage-1 view-mode unlock + diag observability patches` |
+| Diag emitter v1 | `b202a85c14181f8b5d307ab8a33877ea97e72d96` |
 | Zoombar dedup | `268354225c2457cac454436fcc19d9f7f636a263` |
 | Non-destructive mount + vh floor | `330eba7b162964bf08fa58eda05bbb88dc32344b` |
 | Audit dedup + critical CSS | `c9c765d40fe086f7b75d6a28741d966f751d5bab` |
 | Phase 0.5 base commit | `fa6a25e2d40cac07390cbfbe9ba2a2f51d7c0525` |
 | Parent commit | `a49a130eda7f38d84ef3ed143e6bee8e76bb8037` |
 
-**If you copied any earlier bundle, re-copy from `b202a85`.** The
+**If you copied any earlier bundle, re-copy from `9ee5426`.** The
 `nimbusganttapp.resource` sha256 changed; `nimbusgantt.resource` has been
-unchanged since `fa6a25e`. This bundle bundles two changes versus `330eba7`:
-the zoombar dedup **and** the opt-in diagnostic emitter.
+unchanged since `fa6a25e`. This bundle adds: (1) A1 stage-1 view-mode
+unlock — all six view pills now render in TitleBar, (2) three diag
+observability patches — engineOnly path + engine-missing errors + unmount
+event.
 
 ## Bundle artifacts
 
-Both IIFE bundles are built from commit `2683542`. Absolute paths, byte
+Both IIFE bundles are built from commit `9ee5426`. Absolute paths, byte
 sizes, and sha256 digests below. `dist/` is gitignored — Delivery-Hub CC
 copies these bytes into `force-app/main/default/staticresources/…` as the
 deploy step.
@@ -40,9 +43,9 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **140,802 bytes** (~138 KB)
-- sha256: `5a2210babfdb19f2531176ab901feb2eccc5da62f911bdfe315670e3b820bf29`
-- **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`).
+- Size: **144,353 bytes** (~141 KB)
+- sha256: `2ed90644615c3712f95c1f9623a69d1398bf4e2ccb964a75537ccad7b87da200`
+- **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`).
 
 Copy mapping (Delivery-Hub CC):
 
@@ -179,22 +182,50 @@ For console echoing, also set `window.NGA_DIAG_VERBOSE = true`.
 | `kind` | Fires when | Key fields |
 |---|---|---|
 | `lib:loaded` | bundle module load | `app` (version — currently 'unknown') |
-| `mount:start` | `NimbusGanttApp.mount()` entry | `containerRect`, `mode`, `hasOnExit`, `hasOnEnter`, `engineOnly` |
-| `mount:styles-applied` | after non-destructive style writes | `propsWritten[]`, `preservedConsumer{height,width,position}` |
-| `mount:data-mode` | after `data-mode` attribute set | `mode` |
-| `mount:slots-rendered` | after first `renderSlots()` | `slotOrder`, `rendered[]`, `features` |
-| `mount:chrome-heights` | after rAF (post-layout) | `root`, `titlebar`, `stats`, `filterbar`, `zoombar`, `audit`, `hrswkstrip`, `contentOuter`, `content` |
-| `mount:init-gantt` | canvas initialised | `canvasW`, `canvasH`, `cssW`, `cssH` |
-| `mount:complete` | layout + canvas measurements done | `taskCount`, `durationMs` |
-| `warn:zero-height` | canvas < 64 px sanity trip | `canvasH` |
-| `warn:no-canvas` | canvas missing | — |
-| `err:post-mount` | caught layout errors | `message` |
+| `mount:start` | `NimbusGanttApp.mount()` entry | `containerId`, `containerRect`, `mode`, `hasOnExit`, `hasOnEnter`, `engineOnly`, `template` |
+| `mount:styles-applied` | after non-destructive style writes (chrome path only) | `containerId`, `propsWritten[]`, `preservedConsumer{height,width,position}` |
+| `mount:data-mode` | after `data-mode` attribute set (chrome path only) | `containerId`, `mode` |
+| `mount:slots-rendered` | after first `renderSlots()` (chrome path only) | `containerId`, `slotOrder`, `rendered[]`, `features` |
+| `mount:chrome-heights` | after rAF (both paths — zeros in engineOnly) | `containerId`, `engineOnly`, `root`, `titlebar`, `stats`, `filterbar`, `zoombar`, `audit`, `hrswkstrip`, `contentOuter`, `content` |
+| `mount:init-gantt` | canvas initialised (both paths) | `containerId`, `engineOnly`, `canvasW`, `canvasH`, `cssW`, `cssH` |
+| `mount:complete` | layout + canvas measurements done (both paths) | `containerId`, `engineOnly`, `taskCount`, `durationMs` |
+| `warn:zero-height` | canvas < 64 px sanity trip | `containerId`, `canvasH` |
+| `warn:no-canvas` | canvas missing | `containerId` |
+| `err:engine-missing` | `window.NimbusGantt` not loaded when mount ran (both paths) | `containerId`, `path` (`'engineOnly'` or `'chrome'`) |
+| `err:post-mount` | caught layout errors | `containerId`, `message` |
+| `unmount` | `IIFEApp.unmount()` completed | `containerId`, `hadGantt`, `mode` |
 
 **Schema:** every event is `{ t: number (perf.now()), kind: string, ...data }`.
 Push order is emission order — grep by `kind` or slice by `t` to correlate
 with page events.
 
 ## Regression fixes
+
+### `9ee5426` — A1 stage-1 + diag observability patches
+
+**A1 stage-1 (view-mode unlock, 1-line flip of `CLOUD_NIMBUS_VIEWS`).** The
+alt-view renderers (List / Treemap / Bubbles / Calendar / Flow) have been
+wired in `IIFEApp.ts:137-242` since Phase 2, and `rebuildView()` already
+dispatches to the correct renderer based on `state.viewMode`. The gantt-only
+default was the only thing hiding them from the TitleBar UI (which renders
+pills only when `enabledViews.length > 1`). Flipping the array to all six
+gets the `6 view modes (A1)` soft-fail on `nga-verify.js` flipped to pass.
+Stage-2 work — keyboard shortcuts + URL/localStorage persistence — follows
+separately.
+
+**Diag observability patches** (3 gaps identified by `MORNING_BRIEF.md`):
+
+1. `engineOnly` branch (React driver) now emits a symmetric rAF-deferred
+   `mount:chrome-heights` + `mount:init-gantt` + `mount:complete` block.
+   /v10 (once re-synced) gets the same 8-event signature as /v12.
+2. Engine-missing error paths (both `engineOnly` and chrome) emit
+   `err:engine-missing` with `{ path: 'engineOnly' | 'chrome' }`.
+3. `IIFEApp.unmount()` emits `unmount` with `{ containerId, hadGantt, mode }`.
+
+Support changes: `Registry` entries gained `hadGantt`, `mode`,
+`containerId`; a `mountSeq` counter tags each mount with `data-nga-id="nga-N"`;
+all existing diag events gained a `containerId` field so Cowork probes can
+correlate multi-mount pages.
 
 ### `2683542` — zoom-pill dup
 
@@ -252,8 +283,10 @@ consumer (v10 used the React driver, which had already corrected both).
 | Regression patch (audit dup + critical CSS) | ✅ done | `c9c765d` |
 | Regression patch (non-destructive mount + vh floor) | ✅ done | `330eba7` |
 | Zoombar dedup | ✅ done | `2683542` |
-| Opt-in diagnostic emitter | ✅ done | `b202a85` — this release |
-| A3 (CSS port, strip `!important` + `mf-depth-check`) | ⏳ next | largest visual delta |
+| Opt-in diagnostic emitter (v1) | ✅ done | `b202a85` |
+| A1 stage-1 view-mode unlock + diag patches | ✅ done | `9ee5426` — this release |
+| A1 stage-2 (keyboard shortcuts + view-mode persistence) | ⏳ pending | separate from unlock |
+| A3 (CSS port, strip `!important` + `mf-depth-check`) | ⏳ next phase | largest visual delta |
 | A1 (multi-view switcher) | pending | v10 currently ships `CLOUD_NIMBUS_VIEWS = ['gantt']` |
 | A2 (top-bar controls) | pending | Unpin/Admin/Advisor/v3/API-docs wiring |
 | A6 (progress % toggle) | pending | |
