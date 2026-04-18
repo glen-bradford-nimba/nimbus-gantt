@@ -10,8 +10,9 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `f203c8f6903e7adf120521c4fedafd3fa62646e2` |
-| Commit subject | `fix(app): scrollToDate(today-14d) lands at left edge — 0.182 Blocker 3` |
+| Commit SHA (source — latest) | `a352a8c80baa41b7375df36f4dbbfcf045c8ccb8` |
+| Commit subject | `feat(app): 0.182 A3 + A2 + A1 stage-1 — CSS port, API docs link, view-pill re-unlock` |
+| 0.182 Blocker 3 (today-14d viewport) | `f203c8f6903e7adf120521c4fedafd3fa62646e2` |
 | 0.181 cut candidate (frozen) | `2a2af312ea6904c372091d7c0ee0fc52bf48706d` |
 | Diagnostic-trace build (stripped by 2a2af31) | `33896c3ca2a1aa7f771e5ea7ede0ffc4c2e22a66` |
 | Bisect baseline (bit-identical to 2a2af31) | `31c066f2327104e7b9823429c2c7be819e4455da` |
@@ -48,12 +49,13 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **141,585 bytes** (~138 KB)
-- sha256: `8e98adb0243b09265baa49f66b0a8f0887a806a5722f24652387140e55cbd138`
-- **0.182-prep — Blocker 3 fix only.** Replaces the centering `scrollToDate`
-  call with v9's `dateToX` + `scrollToX` direct pattern at both mount paths.
-  `today-14d` now lands at the LEFT edge of the viewport (matches v9 gold).
-  All other surface bit-identical to the `2a2af31` 0.181 cut candidate.
+- Size: **135,589 bytes** (~132 KB)
+- sha256: `b7cb58929a6fad198e2c9f10de4a9a8340d4e719b847995055ca69f5abdb595a`
+- **0.182-prep — A3 CSS port + A2 API docs link + A1 stage-1 view pills.**
+  Bundle shrank ~6 KB from `f203c8f` because the 5 legacy alt-view stub
+  renderers (renderList/Treemap/Bubbles/Calendar/Flow) were replaced by
+  one unified `renderComingSoon` placeholder. CSS strip + chrome additions
+  net out smaller. Reviewer agent green-lit (0 blockers).
 - **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`, `2ed90644…a200` at `9ee5426`).
 
 Copy mapping (Delivery-Hub CC):
