@@ -10,8 +10,9 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `abc5fe0a0e7f07d90c4db0186a9a86af19123d8b` |
-| Commit subject | `fix(app): 2-row TitleBar when view pills render — 0.182 toolbar density polish` |
+| Commit SHA (source — latest) | `7ea10aa6cf8f0c53ae76a8cf3674a5c780fcaa43` |
+| Commit subject | `fix(css): defensive pill-size rule — bracket-free selector survives VF path` |
+| 0.182 2-row TitleBar | `abc5fe0a0e7f07d90c4db0186a9a86af19123d8b` |
 | 0.182 AuditListView v0 | `60d9891943632a2789017e9ad01abfb267f69aaa` |
 | 0.182 A3+A2+A1 stage-1 | `a352a8c80baa41b7375df36f4dbbfcf045c8ccb8` |
 | 0.182 Blocker 3 (today-14d viewport) | `f203c8f6903e7adf120521c4fedafd3fa62646e2` |
@@ -53,20 +54,22 @@ deploy step.
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
 - Size: **163,958 bytes** (~160 KB)
 - sha256: `ec880f1bef0c4f72c6b9ee28e8dce64d7f11b7c300dafd81b1e84fdf4de637ad`
-- **0.182-prep — TitleBar density polish (2-row layout).** Root flex
-  direction flipped to column; Row 1 (view pills, conditional on
-  `enabledViews.length > 1`) stacks above Row 2 (brand + version +
-  toggles + zoom + group + summary + right-side). Single-view configs
-  hide Row 1 and visually match v12 prod's single-row titlebar.
-  Cowork DOM selectors: `[data-nga-titlebar-row="views"]` (conditional)
-  and `[data-nga-titlebar-row="main"]` (always). +384 B vs `60d9891`.
-- **Important for Salesforce deploy:** `cloudnimbustemplatecss.resource`
-  must be refreshed from `packages/app/src/templates/cloudnimbus/styles.css`
-  alongside the app bundle swap — this release also updates the
-  `.nga-titlebar` CSS rule to `flex-direction: column` and adds the
-  `.nga-titlebar-row` rule. Stale CSS static resource on SF would leave
-  the titlebar in row-flex mode → Row 1 and Row 2 would render inline
-  instead of stacked. Same copy path as prior A3 CSS strip releases.
+- **Unchanged** since `abc5fe0`. The latest commit (`7ea10aa`) is
+  CSS-only — app bundle does NOT need re-copy if DH already has
+  `ec880f1b…37ad`.
+
+### `cloudnimbustemplatecss.resource` source (Salesforce) / v12 stylesheet path
+
+- Path: `C:\Projects\nimbus-gantt\packages\app\src\templates\cloudnimbus\styles.css`
+- Size: **51,369 bytes**
+- sha256: `9aedada5f433305d9766f4165d47f464cad98b2432b777d6f54cea31aedecabd`
+- **Must re-copy** — `7ea10aa` added two defensive CSS rules for
+  titlebar pill sizing. Without the refresh, Full_Bleed (VF + Lightning
+  Out path) renders pill buttons at 13px/400 instead of 10px/600
+  because the Tailwind `.text-\[10px\]` escaped-bracket selector fails
+  to match in the VF pipeline. The `abc5fe0` 2-row layout rule
+  (`.nga-titlebar { flex-direction: column }`) is also in this file
+  and still needs its first deploy.
 - **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`, `2ed90644…a200` at `9ee5426`).
 
 Copy mapping (Delivery-Hub CC):
