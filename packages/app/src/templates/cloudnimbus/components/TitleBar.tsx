@@ -147,6 +147,16 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
       )}
       <div className={CLS_TB_FILL} />
       <span className={CLS_TB_SUMMARY}>{summary}</span>
+      {config.apiDocsUrl ? (
+        <a
+          href={config.apiDocsUrl}
+          title="API docs — how to automate submits"
+          className="text-[10px] text-slate-500 hover:text-fuchsia-600 underline decoration-dotted shrink-0"
+          data-nga-api-docs="1"
+        >
+          API docs
+        </a>
+      ) : null}
       {config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function' ? (
         <button
           type="button"

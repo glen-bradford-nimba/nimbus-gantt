@@ -148,6 +148,7 @@ export function resolveTemplate(
   let stylesheet: TemplateStylesheet = {};
   let title = 'Nimbus Gantt';
   let version = '';
+  let apiDocsUrl: string | undefined;
 
   // Apply each template in the chain (root-first).
   chain.forEach((tpl) => {
@@ -159,6 +160,7 @@ export function resolveTemplate(
     if (d.views)    views    = d.views;   // replace
     if (d.title !== undefined)   title   = d.title;
     if (d.version !== undefined) version = d.version;
+    if (d.apiDocsUrl !== undefined) apiDocsUrl = d.apiDocsUrl;
     if (tpl.stylesheet && (tpl.stylesheet.url || tpl.stylesheet.inline || tpl.stylesheet.importedByBundler)) {
       stylesheet = tpl.stylesheet; // outermost (leaf) wins because chain is root-first
     }
@@ -176,6 +178,7 @@ export function resolveTemplate(
     if (overrides.views)    views    = overrides.views;
     if (overrides.title !== undefined)   title   = overrides.title;
     if (overrides.version !== undefined) version = overrides.version;
+    if (overrides.apiDocsUrl !== undefined) apiDocsUrl = overrides.apiDocsUrl;
     if (overrides.components) {
       components = mergeComponents(components, overrides.components);
     }
@@ -198,6 +201,7 @@ export function resolveTemplate(
     stylesheet,
     title,
     version,
+    apiDocsUrl,
     // mode defaults to 'fullscreen'; IIFEApp / React driver may overwrite
     // this post-resolve to reflect the caller's MountOptions.mode.
     mode: 'fullscreen',

@@ -714,13 +714,8 @@
         .ng-grid-row:not(.ng-group-row)
           .ng-tree-cell[style*="padding-left: 88px"] { padding-left: 38px !important; }
         /*
-         * DEPTH-INDENT FALLBACK via CSS animation trick.
-         * The JS chunk may be cached — this animation fires onAnimationStart which
-         * the shading useEffect intercepts to re-apply correct indentation.
-         * Animation name is deliberately unique so it only targets our container.
+         * mf-depth-check @keyframes hack from v5 deleted in 0.182.
+         * See styles.css for full rationale. depthShading.ts uses
+         * MutationObserver — animation event dependency was a v5-cache hack.
          */
-        @keyframes mf-depth-check { from { outline-color: transparent; } to { outline-color: transparent; } }
-        .ng-gantt-container {
-          animation: mf-depth-check 0.001s linear 1 !important;
-        }
       

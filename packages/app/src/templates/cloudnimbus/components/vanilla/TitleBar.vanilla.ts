@@ -243,6 +243,20 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     });
     root.appendChild(advisorBtn);
 
+    // API docs link — only renders when config.apiDocsUrl is set. v9 parity
+    // anchor in top chrome (DeliveryTimelineV5.tsx:2290-2296). Salesforce
+    // consumers leave apiDocsUrl unset → link absent. cloudnimbusllc.com sets
+    // it to '/mf/delivery-timeline-v8-api' for v9 parity.
+    if (config.apiDocsUrl) {
+      const apiDocs = el('a',
+        'text-[10px] text-slate-500 hover:text-fuchsia-600 underline decoration-dotted shrink-0');
+      (apiDocs as HTMLAnchorElement).href = config.apiDocsUrl;
+      apiDocs.title = 'API docs — how to automate submits';
+      apiDocs.setAttribute('data-nga-api-docs', '1');
+      apiDocs.textContent = 'API docs';
+      root.appendChild(apiDocs);
+    }
+
     // v3 link-badge
     const v3 = el('a', CLS_V3_LINK);
     (v3 as HTMLAnchorElement).href = '#';

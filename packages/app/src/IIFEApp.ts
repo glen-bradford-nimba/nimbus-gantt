@@ -25,7 +25,6 @@ import {
   buildDepthMap, buildTasks, buildTasksEpic, applyFilter, computeStats,
   DONE_STAGES, STAGE_COLORS, STAGE_TO_CATEGORY_COLOR, isBucketId,
 } from './pipeline';
-import type { PriorityBucket } from './types';
 import { startDepthShading } from './depthShading';
 import { startDragReparent } from './dragReparent';
 
@@ -143,136 +142,50 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, css?: string): HTMLEl
   return e;
 }
 
-function renderList(container: HTMLElement, tasks: ReturnType<typeof buildTasks>, buckets: PriorityBucket[]): void {
+/**
+ * Unified "Coming Soon" placeholder for non-Gantt views (A1 stage-1, 0.182).
+ *
+ * v9 has six functional view-mode renderers — Gantt + List + Treemap + Bubbles
+ * + Calendar + Flow. We ship Gantt as the only fully-ported view in 0.182.
+ * Per HQ scope decision (2026-04-18 option b for visual parity), the pill
+ * row in TitleBar shows all six labels — clicking a non-Gantt pill lands
+ * here instead of a half-working stub.
+ *
+ * 0.183 ports: AuditListView (List), then wire the proper renderers from
+ * packages/app/src/renderers/{treemap,bubble}.ts (which are real squarified
+ * + bubble implementations, ~170-180 lines each, just need the right call
+ * signatures). Calendar + Flow get fresh ports.
+ *
+ * Removed in this edit: the v5-era inline 30-line stubs for renderList /
+ * renderTreemap / renderBubbles / renderCalendar / renderFlow. Per the
+ * "stubs are worse than absence in cut context" feedback principle, those
+ * stubs created a worse first impression than an honest placeholder.
+ */
+function renderComingSoon(container: HTMLElement, viewLabel: string): void {
   container.innerHTML = '';
-  const wrap = el('div', 'height:100%;overflow:auto;font-family:sans-serif;font-size:12px');
-  const byGroup: Record<string, typeof tasks> = {};
-  const noGroup: typeof tasks = [];
-  tasks.forEach(t => {
-    if (t.parentId) return;
-    if (t.groupId) {
-      if (!byGroup[t.groupId]) byGroup[t.groupId] = [];
-      byGroup[t.groupId].push(t);
-    } else { noGroup.push(t); }
-  });
-  buckets.forEach(b => {
-    const members = byGroup[b.id] || [];
-    if (!members.length) return;
-    const hdr = el('div', 'background:' + b.bgTint + ';color:#fff;font-weight:700;font-size:11px;padding:7px 14px;text-transform:uppercase;position:sticky;top:0;z-index:1');
-    hdr.textContent = b.label + ' — ' + members.length + ' items';
-    wrap.appendChild(hdr);
-    members.forEach(t => {
-      const row = el('div', 'display:flex;align-items:center;padding:5px 14px;gap:8px;border-bottom:1px solid #f3f4f6');
-      const dot = el('span', 'width:7px;height:7px;border-radius:50%;background:' + (STAGE_COLORS[t.status] || '#94a3b8'));
-      row.appendChild(dot);
-      const title = el('span', 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#1f2937');
-      title.textContent = t.title; row.appendChild(title);
-      if (t.hoursLabel) {
-        const h = el('span', 'font-size:10px;color:#94a3b8;font-family:monospace'); h.textContent = t.hoursLabel; row.appendChild(h);
-      }
-      wrap.appendChild(row);
-    });
-  });
-  container.appendChild(wrap);
-}
-
-function renderTreemap(container: HTMLElement, tasks: ReturnType<typeof buildTasks>, buckets: PriorityBucket[]): void {
-  container.innerHTML = '';
-  const wrap = el('div', 'height:100%;overflow:auto;padding:8px;font-family:sans-serif;background:#f8fafc');
-  const leaves = tasks.filter(t => !(t as { isParent?: boolean }).isParent && (t.metadata?.hoursHigh || 0) > 0);
-  const total  = leaves.reduce((s, t) => s + (t.metadata?.hoursHigh || 0), 0);
-  if (!total) { wrap.textContent = 'No hours to show'; container.appendChild(wrap); return; }
-  const grouped: Record<string, typeof leaves> = {};
-  leaves.forEach(t => { const g = t.groupId || 'other'; (grouped[g] = grouped[g] || []).push(t); });
-  buckets.forEach(b => {
-    const members = grouped[b.id] || [];
-    if (!members.length) return;
-    const sec = el('div', 'margin-bottom:8px');
-    const hdr = el('div', 'font-size:10px;font-weight:700;color:#fff;padding:3px 8px;border-radius:4px;display:inline-block;margin-bottom:3px;background:' + b.bgTint);
-    hdr.textContent = b.label;
-    sec.appendChild(hdr);
-    const row = el('div', 'display:flex;flex-wrap:wrap;gap:3px');
-    members.forEach(t => {
-      const tile = el('div', 'background:' + (t.color || '#94a3b8') + '44;border:1px solid ' + (t.color || '#94a3b8') + ';padding:4px 6px;border-radius:4px;font-size:10px');
-      tile.textContent = t.title.slice(0, 20) + ' ' + (t.metadata?.hoursHigh || 0) + 'h';
-      row.appendChild(tile);
-    });
-    sec.appendChild(row);
-    wrap.appendChild(sec);
-  });
-  container.appendChild(wrap);
-}
-
-function renderBubbles(container: HTMLElement, tasks: ReturnType<typeof buildTasks>): void {
-  container.innerHTML = '';
-  const leaves = tasks.filter(t => !(t as { isParent?: boolean }).isParent && (t.metadata?.hoursHigh || 0) > 0);
-  const wrap = el('div', 'height:100%;overflow:auto;padding:10px;font-family:sans-serif;background:#f8fafc');
-  if (!leaves.length) { wrap.textContent = 'No tasks'; container.appendChild(wrap); return; }
-  const maxH = Math.max(1, ...leaves.map(t => t.metadata?.hoursHigh || 0));
-  leaves.forEach(t => {
-    const r = Math.max(20, Math.sqrt((t.metadata?.hoursHigh || 0) / maxH) * 60);
-    const bub = el('div', 'display:inline-block;width:' + r*2 + 'px;height:' + r*2 + 'px;border-radius:50%;background:' + (t.color || '#94a3b8') + '55;border:1.5px solid ' + (t.color || '#94a3b8') + ';margin:4px;text-align:center;line-height:' + r*2 + 'px;font-size:10px;color:#1f2937');
-    bub.textContent = t.title.slice(0, 8);
-    wrap.appendChild(bub);
-  });
-  container.appendChild(wrap);
-}
-
-function renderCalendar(container: HTMLElement, tasks: ReturnType<typeof buildTasks>): void {
-  container.innerHTML = '';
-  const wrap = el('div', 'height:100%;overflow:auto;padding:10px;font-family:sans-serif');
-  const today = new Date();
-  const monday = new Date(today);
-  const dow = today.getDay();
-  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
-  monday.setHours(0,0,0,0);
-  const WEEK_MS = 7 * 86400000;
-  for (let i = 0; i < 8; i++) {
-    const wkStart = new Date(monday.getTime() + i * WEEK_MS);
-    const wkEnd   = new Date(wkStart.getTime() + WEEK_MS);
-    const wkTasks = tasks.filter(t => {
-      if (!t.startDate || !t.endDate) return false;
-      const tS = new Date(t.startDate + 'T00:00:00').getTime();
-      const tE = new Date(t.endDate   + 'T00:00:00').getTime();
-      return tE > wkStart.getTime() && tS < wkEnd.getTime();
-    });
-    const row = el('div', 'display:flex;gap:4px;padding:6px;border-bottom:1px solid #e5e7eb');
-    const lbl = el('div', 'width:80px;font-size:10px;color:#64748b');
-    lbl.textContent = wkStart.toISOString().slice(0,10);
-    row.appendChild(lbl);
-    const cnt = el('div', 'flex:1;font-size:10px;color:#1f2937');
-    cnt.textContent = wkTasks.length + ' task' + (wkTasks.length === 1 ? '' : 's');
-    row.appendChild(cnt);
-    wrap.appendChild(row);
-  }
-  container.appendChild(wrap);
-}
-
-function renderFlow(container: HTMLElement, tasks: ReturnType<typeof buildTasks>): void {
-  container.innerHTML = '';
-  const wrap = el('div', 'height:100%;overflow-x:auto;display:flex;gap:8px;padding:8px;background:#f8fafc;font-family:sans-serif');
-  const cols: Array<{ label: string; color: string; match: (c: string) => boolean }> = [
-    { label: 'Backlog',   color: '#f59e0b', match: c => c === '#f59e0b' },
-    { label: 'Next Up',   color: '#3b82f6', match: c => c === '#3b82f6' },
-    { label: 'In Flight', color: '#10b981', match: c => c === '#10b981' },
-    { label: 'Blocked',   color: '#ef4444', match: c => c === '#ef4444' },
-    { label: 'Done',      color: '#cbd5e1', match: c => c === '#cbd5e1' },
-  ];
-  const leaves = tasks.filter(t => !(t as { isParent?: boolean }).isParent);
-  cols.forEach(c => {
-    const colEl = el('div', 'width:200px;flex-shrink:0');
-    const hdr = el('div', 'background:' + c.color + '22;color:' + c.color + ';padding:5px 8px;font-size:11px;font-weight:700;border-radius:4px 4px 0 0');
-    hdr.textContent = c.label;
-    colEl.appendChild(hdr);
-    const inner = el('div', 'border:1px solid ' + c.color + '55;border-radius:0 0 4px 4px;padding:4px');
-    leaves.filter(t => c.match(t.color || '')).forEach(t => {
-      const card = el('div', 'background:#fff;border-left:3px solid ' + (t.color || '#94a3b8') + ';padding:5px 8px;margin-bottom:3px;font-size:10px;border-radius:4px');
-      card.textContent = t.title;
-      inner.appendChild(card);
-    });
-    colEl.appendChild(inner);
-    wrap.appendChild(colEl);
-  });
+  const wrap = el('div', [
+    'height:100%',
+    'width:100%',
+    'display:flex',
+    'flex-direction:column',
+    'align-items:center',
+    'justify-content:center',
+    'gap:12px',
+    'padding:32px',
+    'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+    'color:#475569',
+    'background:#f8fafc',
+    'text-align:center',
+  ].join(';'));
+  const title = el('div', 'font-size:18px;font-weight:700;color:#1f2937');
+  title.textContent = viewLabel + ' view — coming in 0.183';
+  wrap.appendChild(title);
+  const msg = el('div', 'font-size:13px;color:#64748b;max-width:480px;line-height:1.5');
+  msg.textContent =
+    'Only the Gantt view is fully ported in this release. Switch back to ' +
+    'Gantt to see the timeline. The other views are planned for the next ' +
+    'cut alongside the AuditListView port.';
+  wrap.appendChild(msg);
   container.appendChild(wrap);
 }
 
@@ -961,17 +874,18 @@ export class IIFEApp {
         ganttInst = null;
       }
       ganttHost.innerHTML = '';
-      const filtered = applyFilter(allTasks, state.filter as 'active', state.search);
-      const maybeHide = state.hideCompleted
-        ? filtered.filter((t) => !DONE_STAGES[t.stage || ''])
-        : filtered;
-      const mapped = buildTasks(maybeHide);
-      if      (state.viewMode === 'gantt')    initGantt(ganttHost);
-      else if (state.viewMode === 'flow')     renderFlow(ganttHost, mapped);
-      else if (state.viewMode === 'calendar') renderCalendar(ganttHost, mapped);
-      else if (state.viewMode === 'treemap')  renderTreemap(ganttHost, mapped, tplConfig.buckets);
-      else if (state.viewMode === 'bubbles')  renderBubbles(ganttHost, mapped);
-      else                                    renderList(ganttHost, mapped, tplConfig.buckets);
+      // A1 stage-1 (0.182): only Gantt has a real renderer. Other view-mode
+      // pills route through renderComingSoon (honest placeholder, not stub).
+      // Full alt-view ports follow in 0.183 — see renderComingSoon comment.
+      if (state.viewMode === 'gantt') {
+        initGantt(ganttHost);
+      } else {
+        const labelMap: Record<string, string> = {
+          list: 'List', treemap: 'Treemap', bubbles: 'Bubbles',
+          calendar: 'Calendar', flow: 'Flow',
+        };
+        renderComingSoon(ganttHost, labelMap[state.viewMode] || state.viewMode);
+      }
       renderSlots();
     }
 

@@ -150,6 +150,11 @@ export interface TemplateDefaults {
   views: ViewMode[];
   title?: string;
   version?: string;
+  /** Optional URL for the "API docs" anchor in TitleBar. When unset, the
+   *  link is not rendered. v9 parity wires this on cloudnimbusllc.com to
+   *  '/mf/delivery-timeline-v8-api'. Salesforce consumers leave it unset
+   *  unless they have a hosted docs page reachable from Lightning. */
+  apiDocsUrl?: string;
 }
 
 export interface TemplateStylesheet {
@@ -179,6 +184,7 @@ export interface TemplateOverrides {
   views?: ViewMode[];
   title?: string;
   version?: string;
+  apiDocsUrl?: string;
 }
 
 export interface AuditSubmitResult {
@@ -201,6 +207,8 @@ export interface TemplateConfig {
   stylesheet: TemplateStylesheet;
   title: string;
   version: string;
+  /** Optional URL for the "API docs" anchor in TitleBar. See TemplateDefaults. */
+  apiDocsUrl?: string;
   /** Render mode — default 'fullscreen'. When 'embedded', chrome feature
    *  flags are forced off before resolution, leaving ContentArea only. */
   mode: AppMode;
