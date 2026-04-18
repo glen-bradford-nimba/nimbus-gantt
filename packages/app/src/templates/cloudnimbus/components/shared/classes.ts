@@ -24,7 +24,7 @@ export const CLS_SEP = 'text-slate-200';
 export const CLS_TB_FILL = 'flex-1';
 export const CLS_TB_SUMMARY = 'text-[10px] text-slate-500 font-mono';
 export const CLS_PILL_BTN_BASE =
-  'text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors';
+  'text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors cursor-pointer';
 export const CLS_PILL_BTN_ACTIVE_VIOLET = 'bg-violet-600 text-white border-violet-600';
 export const CLS_PILL_BTN_IDLE_VIOLET =
   'bg-white text-slate-500 border-slate-200 hover:border-violet-300';

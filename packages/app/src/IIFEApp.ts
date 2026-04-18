@@ -162,6 +162,13 @@ function injectLegacyNgCss(): void {
     '.ng-grid-row:not(.ng-group-row) .ng-tree-cell[style*="padding-left: 48px"]{padding-left:18px!important}',
     '.ng-grid-row:not(.ng-group-row) .ng-tree-cell[style*="padding-left: 68px"]{padding-left:28px!important}',
     '.ng-grid-row:not(.ng-group-row) .ng-tree-cell[style*="padding-left: 88px"]{padding-left:38px!important}',
+    /* 0.183.1 — chrome button cursor. CLS_PILL_BTN_BASE (Tailwind) doesn't
+     * declare cursor, so the UA default for <button> (which is 'default'
+     * per spec, regardless of Chrome's old override) renders a non-click-
+     * signal arrow. Force pointer inside every chrome surface so users
+     * read the buttons as interactive. VF/Locker-safe — bare selector,
+     * no Tailwind arbitrary-value syntax. */
+    '.nga-titlebar button,.nga-filterbar button,.nga-zoombar button,.nga-audit button,.nga-stats button,.nga-sidebar button{cursor:pointer}',
   ].join('');
   document.head.appendChild(s);
 }
@@ -623,6 +630,17 @@ export class IIFEApp {
       }
     }
     applyChromeVisibility();
+    // 0.183.1 — expose toggleChrome via tplConfig so slots (TitleBar Unpin
+    // button) can hit it without needing the mount handle in scope.
+    // handle.toggleChrome below delegates through this same closure.
+    function runToggleChrome(visible?: boolean): void {
+      const next = typeof visible === 'boolean' ? visible : !chromeVisible;
+      if (next === chromeVisible) return;
+      chromeVisible = next;
+      applyChromeVisibility();
+      renderSlots();
+    }
+    tplConfig.toggleChrome = runToggleChrome;
 
     /* ── Root shell ─────────────────────────────────────────────────── */
     injectLegacyNgCss();
@@ -843,9 +861,21 @@ export class IIFEApp {
       }
 
       try {
+        // 0.183.1 — payload carries all three fields the coalesced patch
+        // collected (sortOrder, parentId, priorityGroup). newIndex always
+        // present (dragReparent always dispatches sortOrder). newParentId
+        // and newPriorityGroup are optional — omitted when the drop
+        // didn't change those axes. DH's handler ignores fields it
+        // doesn't care about.
         const newIndex = typeof patch.sortOrder === 'number' ? patch.sortOrder : 0;
-        const newParentId = patch.parentId !== undefined ? patch.parentId : undefined;
-        await options.onItemReorder(taskId, { newIndex, newParentId });
+        const reorderPayload: {
+          newIndex: number;
+          newParentId?: string | null;
+          newPriorityGroup?: string;
+        } = { newIndex };
+        if (patch.parentId !== undefined) reorderPayload.newParentId = patch.parentId;
+        if (patch.priorityGroup !== undefined) reorderPayload.newPriorityGroup = patch.priorityGroup;
+        await options.onItemReorder(taskId, reorderPayload);
         const current = pendingReorders.get(taskId);
         if (!current || current.seq !== seq) return; // stale
         pendingReorders.delete(taskId);
@@ -878,7 +908,23 @@ export class IIFEApp {
      *  the IM-4 async path when `onItemReorder` is wired; date-only patches
      *  continue to land on legacy onTaskPatch (IM-1/2/3 date patches take
      *  the dedicated onTaskEditAsync branch inside the engine Ctor bindings,
-     *  so they never reach this interceptor). */
+     *  so they never reach this interceptor).
+     *
+     *  0.183.1 — dragReparent fires up to 3 structural patches per drop
+     *  (priorityGroup, parentId, sortOrder) in the same tick. We coalesce
+     *  them per-taskId via a microtask flush so `onItemReorder` receives
+     *  one merged `{ newIndex, newParentId?, newPriorityGroup? }` payload
+     *  per drop instead of 3 racing async calls (which would each pick up
+     *  a different seq and trip the stale-settle guard).
+     */
+    const _reorderBuffer = new Map<string, TaskPatch>();
+    let _reorderFlushScheduled = false;
+    function flushReorderBuffer(): void {
+      _reorderFlushScheduled = false;
+      const merged = Array.from(_reorderBuffer.values());
+      _reorderBuffer.clear();
+      merged.forEach((p) => onTaskReorderAsync(p));
+    }
     function interceptedOnPatch(patch: TaskPatch): void {
       const hasStructural =
         patch.parentId !== undefined ||
@@ -887,7 +933,12 @@ export class IIFEApp {
       const hasDates =
         patch.startDate !== undefined || patch.endDate !== undefined;
       if (hasStructural && !hasDates) {
-        onTaskReorderAsync(patch);
+        const prev = _reorderBuffer.get(patch.id);
+        _reorderBuffer.set(patch.id, prev ? { ...prev, ...patch } : { ...patch });
+        if (!_reorderFlushScheduled) {
+          _reorderFlushScheduled = true;
+          Promise.resolve().then(flushReorderBuffer);
+        }
       } else {
         onTaskPatch(patch);
       }
@@ -1412,13 +1463,11 @@ export class IIFEApp {
        *  flips current state; boolean arg sets explicitly. Embedded-mode
        *  mounts cannot re-show chrome this way because features were
        *  scrubbed at resolve time (mount with mode='fullscreen' first if
-       *  runtime re-show is needed). */
+       *  runtime re-show is needed). Delegates to runToggleChrome so
+       *  slot-dispatched toggles (TitleBar Unpin) and handle-dispatched
+       *  toggles share one code path. */
       toggleChrome(visible?: boolean) {
-        const next = typeof visible === 'boolean' ? visible : !chromeVisible;
-        if (next === chromeVisible) return;
-        chromeVisible = next;
-        applyChromeVisibility();
-        renderSlots();
+        runToggleChrome(visible);
       },
       destroy() { IIFEApp.unmount(container); },
     };

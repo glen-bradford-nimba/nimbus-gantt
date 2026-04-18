@@ -196,16 +196,25 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     rowMain.appendChild(summary);
 
     /* 14. Right-side action buttons */
-    // Unpin — placeholder (toggles chromeVisible in v9). Show as toggleable pill.
+    // Unpin — 0.183.1: wired to config.toggleChrome (CH-1). Click hides
+    // chrome entirely; re-show is programmatic via handle.toggleChrome(true)
+    // since the button that hid chrome is itself hidden with the rest. UI
+    // polish for two-way in-chrome toggle is a follow-up (floating "show
+    // toolbar" affordance when chromeVisible=false).
     const unpinBtn = el('button',
-      CLS_PILL_BTN_BASE + ' ' + (unpinOn ? CLS_RIGHT_UNPIN_ON : CLS_RIGHT_UNPIN_OFF));
-    unpinBtn.textContent = unpinOn ? 'Pin' : 'Unpin';
-    unpinBtn.title = unpinOn ? 'Pin toolbar' : 'Unpin toolbar';
+      CLS_PILL_BTN_BASE + ' ' + CLS_RIGHT_UNPIN_OFF);
+    unpinBtn.textContent = 'Unpin';
+    unpinBtn.title = 'Hide toolbar';
+    unpinBtn.setAttribute('data-nga-unpin', '1');
     unpinBtn.addEventListener('click', () => {
-      unpinOn = !unpinOn;
-      // eslint-disable-next-line no-console
-      console.log('[TitleBar] unpin toggled →', unpinOn);
-      render(currentProps);
+      if (typeof config.toggleChrome === 'function') {
+        config.toggleChrome(false);
+      } else {
+        // Fallback for consumers on pre-0.183.1 bundles — stays a no-op
+        // placeholder so the button doesn't throw.
+        unpinOn = !unpinOn;
+        render(currentProps);
+      }
     });
     rowMain.appendChild(unpinBtn);
 
