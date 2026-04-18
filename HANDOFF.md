@@ -12,8 +12,10 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `41ec401` *(0.183 interaction cut)* |
-| Commit subject | `feat(0.183): interaction model cut — IM-1..7 + DM-3/4/5 + CH-1` |
+| Commit SHA (source — latest) | `b2e22ef` *(0.183.1 hotfix)* |
+| Commit subject | `fix(0.183.1): reorder coalescing + titlebar cursor + Unpin→toggleChrome` |
+| 0.183 interaction cut (source) | `41ec401eac5ce8…` |
+| 0.183 HANDOFF bump | `5d509af…` |
 | 0.182 four-change polish bundle | `639655645549d939caae769ded7daf18a78ff91e` |
 | 0.182 VF pill-size defensive CSS | `7ea10aa6cf8f0c53ae76a8cf3674a5c780fcaa43` |
 | 0.182 2-row TitleBar | `abc5fe0a0e7f07d90c4db0186a9a86af19123d8b` |
@@ -61,9 +63,22 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **179,076 bytes** (~175 KB)
-- sha256: `55f9c2dc7d7eb6c6b9a9261ee0585f3b1addf4b70dd52eb8867589afb6ecee91`
-- **Must re-copy.** `41ec401` (0.183) adds:
+- Size: **180,571 bytes** (~176 KB)
+- sha256: `81a872761b04f6574e572500ff75d374f28c3afa2fd8cdae19adba66c329200a`
+- **Must re-copy.** `b2e22ef` (0.183.1 hotfix) adds:
+  - **Reorder patch coalescing** — onItemReorder now fires exactly once
+    per drop with `{ newIndex, newParentId?, newPriorityGroup? }` merged
+    payload. Was firing up to 3 times with partial payloads (priorityGroup,
+    parentId, sortOrder each triggered their own stale-settle race).
+  - **cursor: pointer** on all chrome buttons via injectLegacyNgCss +
+    CLS_PILL_BTN_BASE. UA default for `<button>` is `cursor: default` per
+    HTML spec; this forces pointer so users read pills as interactive.
+  - **Unpin button** wired to `config.toggleChrome` (CH-1 mechanism from
+    0.183). Click → chrome hides. Re-show is programmatic via
+    `handle.toggleChrome(true)` — the in-chrome "show toolbar" affordance
+    for re-show is a follow-up.
+
+Prior entry (0.183 cut `41ec401`):
   - `onItemEdit` / `onItemEditError` async contract (IM-1/2/3) with
     per-task seq race resilience + revert-on-reject + in-flight dim
   - `onItemReorder` / `onItemReorderError` async contract (IM-4) via
