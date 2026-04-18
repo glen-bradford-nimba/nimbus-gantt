@@ -10,8 +10,9 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `a352a8c80baa41b7375df36f4dbbfcf045c8ccb8` |
-| Commit subject | `feat(app): 0.182 A3 + A2 + A1 stage-1 — CSS port, API docs link, view-pill re-unlock` |
+| Commit SHA (source — latest) | `60d9891943632a2789017e9ad01abfb267f69aaa` |
+| Commit subject | `feat(app): AuditListView vanilla port (v0) — 0.182 List view` |
+| 0.182 A3+A2+A1 stage-1 | `a352a8c80baa41b7375df36f4dbbfcf045c8ccb8` |
 | 0.182 Blocker 3 (today-14d viewport) | `f203c8f6903e7adf120521c4fedafd3fa62646e2` |
 | 0.181 cut candidate (frozen) | `2a2af312ea6904c372091d7c0ee0fc52bf48706d` |
 | Diagnostic-trace build (stripped by 2a2af31) | `33896c3ca2a1aa7f771e5ea7ede0ffc4c2e22a66` |
@@ -49,13 +50,17 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **135,589 bytes** (~132 KB)
-- sha256: `b7cb58929a6fad198e2c9f10de4a9a8340d4e719b847995055ca69f5abdb595a`
-- **0.182-prep — A3 CSS port + A2 API docs link + A1 stage-1 view pills.**
-  Bundle shrank ~6 KB from `f203c8f` because the 5 legacy alt-view stub
-  renderers (renderList/Treemap/Bubbles/Calendar/Flow) were replaced by
-  one unified `renderComingSoon` placeholder. CSS strip + chrome additions
-  net out smaller. Reviewer agent green-lit (0 blockers).
+- Size: **163,574 bytes** (~160 KB)
+- sha256: `1e0c55bca8aaf00c792fe44e6bf4d5d02393a8a6ce83fa0787e9f079f103ff79`
+- **0.182-prep — AuditListView v0 wired into List view.** ~700 LOC vanilla
+  port of v9's `AuditListView.tsx` (2,225 LOC React). Bundle grew +27,985 B
+  vs `a352a8c` for the new file. List view pill no longer shows "Coming
+  Soon" — renders the audit list with KPI bar, filter pills, search,
+  sort, per-bucket sections with rollup stats, per-row UI (drag handle
+  visual + chevron + name + title + progress + hours + dates + audit
+  icons), expand-to-detail. Treemap/Bubbles/Calendar/Flow still on the
+  Coming Soon placeholder. Drag-to-reorder + edit/add/merge/export/
+  submit defer to 0.183. Reviewer agent green-lit after 5 fixes.
 - **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`, `2ed90644…a200` at `9ee5426`).
 
 Copy mapping (Delivery-Hub CC):
