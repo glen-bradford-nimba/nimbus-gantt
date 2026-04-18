@@ -10,8 +10,9 @@ single-source-of-truth. Track A (A1–A7) is next.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `60d9891943632a2789017e9ad01abfb267f69aaa` |
-| Commit subject | `feat(app): AuditListView vanilla port (v0) — 0.182 List view` |
+| Commit SHA (source — latest) | `abc5fe0a0e7f07d90c4db0186a9a86af19123d8b` |
+| Commit subject | `fix(app): 2-row TitleBar when view pills render — 0.182 toolbar density polish` |
+| 0.182 AuditListView v0 | `60d9891943632a2789017e9ad01abfb267f69aaa` |
 | 0.182 A3+A2+A1 stage-1 | `a352a8c80baa41b7375df36f4dbbfcf045c8ccb8` |
 | 0.182 Blocker 3 (today-14d viewport) | `f203c8f6903e7adf120521c4fedafd3fa62646e2` |
 | 0.181 cut candidate (frozen) | `2a2af312ea6904c372091d7c0ee0fc52bf48706d` |
@@ -50,17 +51,22 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **163,574 bytes** (~160 KB)
-- sha256: `1e0c55bca8aaf00c792fe44e6bf4d5d02393a8a6ce83fa0787e9f079f103ff79`
-- **0.182-prep — AuditListView v0 wired into List view.** ~700 LOC vanilla
-  port of v9's `AuditListView.tsx` (2,225 LOC React). Bundle grew +27,985 B
-  vs `a352a8c` for the new file. List view pill no longer shows "Coming
-  Soon" — renders the audit list with KPI bar, filter pills, search,
-  sort, per-bucket sections with rollup stats, per-row UI (drag handle
-  visual + chevron + name + title + progress + hours + dates + audit
-  icons), expand-to-detail. Treemap/Bubbles/Calendar/Flow still on the
-  Coming Soon placeholder. Drag-to-reorder + edit/add/merge/export/
-  submit defer to 0.183. Reviewer agent green-lit after 5 fixes.
+- Size: **163,958 bytes** (~160 KB)
+- sha256: `ec880f1bef0c4f72c6b9ee28e8dce64d7f11b7c300dafd81b1e84fdf4de637ad`
+- **0.182-prep — TitleBar density polish (2-row layout).** Root flex
+  direction flipped to column; Row 1 (view pills, conditional on
+  `enabledViews.length > 1`) stacks above Row 2 (brand + version +
+  toggles + zoom + group + summary + right-side). Single-view configs
+  hide Row 1 and visually match v12 prod's single-row titlebar.
+  Cowork DOM selectors: `[data-nga-titlebar-row="views"]` (conditional)
+  and `[data-nga-titlebar-row="main"]` (always). +384 B vs `60d9891`.
+- **Important for Salesforce deploy:** `cloudnimbustemplatecss.resource`
+  must be refreshed from `packages/app/src/templates/cloudnimbus/styles.css`
+  alongside the app bundle swap — this release also updates the
+  `.nga-titlebar` CSS rule to `flex-direction: column` and adds the
+  `.nga-titlebar-row` rule. Stale CSS static resource on SF would leave
+  the titlebar in row-flex mode → Row 1 and Row 2 would render inline
+  instead of stacked. Same copy path as prior A3 CSS strip releases.
 - **Replaces** prior bundles (`22c505b9…8606` at `fa6a25e`, `8394edb3…3fc0` at `c9c765d`, `e9f835e9…4899` at `330eba7`, `d6919dae…11eb` at `2683542`, `5a2210ba…bf29` at `b202a85`, `2ed90644…a200` at `9ee5426`).
 
 Copy mapping (Delivery-Hub CC):
