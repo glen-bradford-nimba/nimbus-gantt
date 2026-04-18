@@ -17,7 +17,7 @@ import type { SlotProps, VanillaSlotInstance, ViewMode, ZoomLevel, GroupBy } fro
 import { CLOUD_NIMBUS_VIEW_MODES } from '../../defaults';
 import { CLOUD_NIMBUS_POOL } from '../../defaults';
 import {
-  CLS_TITLEBAR, CLS_TITLE_BRAND, CLS_VERSION_PILL, CLS_SEP,
+  CLS_TITLEBAR, CLS_TITLEBAR_ROW, CLS_TITLE_BRAND, CLS_VERSION_PILL, CLS_SEP,
   CLS_TB_FILL, CLS_TB_SUMMARY,
   CLS_PILL_BTN_BASE,
   CLS_PILL_BTN_ACTIVE_VIOLET, CLS_PILL_BTN_IDLE_VIOLET,
@@ -71,18 +71,16 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     clear(root);
     const { config, state, dispatch, data } = p;
 
-    /* 1. Brand */
-    const brand = el('span', CLS_TITLE_BRAND);
-    brand.textContent = config.title || 'Pro Forma Timeline';
-    root.appendChild(brand);
+    // Titlebar is column-flex — Row 1 (view pills) stacks above Row 2
+    // (everything else). Row 1 is only appended when the template enables
+    // >1 view mode; otherwise Row 2 is the only child (visually identical
+    // to v12 prod's single-row titlebar).
+    const rowViews = el('div', CLS_TITLEBAR_ROW);
+    rowViews.setAttribute('data-nga-titlebar-row', 'views');
+    const rowMain = el('div', CLS_TITLEBAR_ROW);
+    rowMain.setAttribute('data-nga-titlebar-row', 'main');
 
-    /* 2. Version pill */
-    const version = el('span', CLS_VERSION_PILL);
-    version.textContent = config.version || 'v10 · Nimbus Gantt';
-    root.appendChild(version);
-    root.appendChild(mkSep());
-
-    /* 4. VIEW_MODES row — only show modes enabled in config.views; hide section when ≤1 */
+    /* Row 1 — VIEW_MODES pills. Hidden when enabledViews.length <= 1. */
     const enabledViews = CLOUD_NIMBUS_VIEW_MODES.filter(
       (v) => !config.views || config.views.includes(v.id),
     );
@@ -96,10 +94,23 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
         btn.appendChild(ico);
         btn.appendChild(document.createTextNode(v.label));
         btn.addEventListener('click', () => dispatch({ type: 'SET_VIEW', mode: v.id as ViewMode }));
-        root.appendChild(btn);
+        rowViews.appendChild(btn);
       });
-      root.appendChild(mkSep());
+      root.appendChild(rowViews);
     }
+
+    /* Row 2 — brand + version + toggles + zoom + group + summary + right-side. */
+
+    /* 1. Brand */
+    const brand = el('span', CLS_TITLE_BRAND);
+    brand.textContent = config.title || 'Pro Forma Timeline';
+    rowMain.appendChild(brand);
+
+    /* 2. Version pill */
+    const version = el('span', CLS_VERSION_PILL);
+    version.textContent = config.version || 'v10 · Nimbus Gantt';
+    rowMain.appendChild(version);
+    rowMain.appendChild(mkSep());
 
     /* 6. Sidebar / Stats / Audit toggles */
     function toggleBtn(label: string, on: boolean, ev: () => void) {
@@ -109,12 +120,12 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       b.addEventListener('click', ev);
       return b;
     }
-    root.appendChild(toggleBtn('Sidebar', state.sidebarOpen, () => dispatch({ type: 'TOGGLE_SIDEBAR' })));
-    root.appendChild(toggleBtn('Stats',   state.statsOpen,   () => dispatch({ type: 'TOGGLE_STATS' })));
+    rowMain.appendChild(toggleBtn('Sidebar', state.sidebarOpen, () => dispatch({ type: 'TOGGLE_SIDEBAR' })));
+    rowMain.appendChild(toggleBtn('Stats',   state.statsOpen,   () => dispatch({ type: 'TOGGLE_STATS' })));
     if (config.features.auditPanel) {
-      root.appendChild(toggleBtn('Audit',  state.auditPanelOpen, () => dispatch({ type: 'TOGGLE_AUDIT_PANEL' })));
+      rowMain.appendChild(toggleBtn('Audit',  state.auditPanelOpen, () => dispatch({ type: 'TOGGLE_AUDIT_PANEL' })));
     }
-    root.appendChild(mkSep());
+    rowMain.appendChild(mkSep());
 
     /* 8. Zoom row */
     ZOOMS.forEach((z) => {
@@ -123,16 +134,16 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       const b = el('button', cls);
       b.textContent = z.charAt(0).toUpperCase() + z.slice(1);
       b.addEventListener('click', () => dispatch({ type: 'SET_ZOOM', zoom: z }));
-      root.appendChild(b);
+      rowMain.appendChild(b);
     });
 
     /* 10. Group: label + Priority/Epics buttons */
     if (config.features.groupByToggle) {
-      root.appendChild(mkSep());
+      rowMain.appendChild(mkSep());
       const gLbl = el('span', CLS_GROUP_LABEL);
       gLbl.textContent = 'Group:';
       gLbl.title = 'Left-click = Gantt · Right-click = Sidebar';
-      root.appendChild(gLbl);
+      rowMain.appendChild(gLbl);
       GROUPS.forEach((g) => {
         // v9 uses two independent group-by states (ganttGroupBy, sidebarGroupBy).
         // Our AppState only has one (groupBy). We drive both bindings from it so
@@ -161,13 +172,13 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
           e.preventDefault();
           dispatch({ type: 'SET_GROUP_BY', groupBy: g });
         });
-        root.appendChild(b);
+        rowMain.appendChild(b);
       });
     }
 
     /* 12. flex-1 fill */
     const fill = el('div', CLS_TB_FILL);
-    root.appendChild(fill);
+    rowMain.appendChild(fill);
 
     /* 13. Summary — scheduled · hoursLow-hoursHigh · monthsLow-monthsHigh */
     const hoursHigh = data.stats.est;
@@ -182,7 +193,7 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       data.stats.scheduled + ' scheduled · ' +
       hoursLow + '–' + hoursHigh + 'h · ' +
       mLowS + '–' + mHighS + ' mo';
-    root.appendChild(summary);
+    rowMain.appendChild(summary);
 
     /* 14. Right-side action buttons */
     // Unpin — placeholder (toggles chromeVisible in v9). Show as toggleable pill.
@@ -196,7 +207,7 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       console.log('[TitleBar] unpin toggled →', unpinOn);
       render(currentProps);
     });
-    root.appendChild(unpinBtn);
+    rowMain.appendChild(unpinBtn);
 
     // Fullscreen — host-nav mode vs local-toggle mode.
     // When the host passes `onExitFullscreen` AND mode==='fullscreen' (i.e.
@@ -215,7 +226,7 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       fsBtn.textContent = state.fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
       fsBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_FULLSCREEN' }));
     }
-    root.appendChild(fsBtn);
+    rowMain.appendChild(fsBtn);
 
     // Admin — no-op placeholder
     const adminBtn = el('button',
@@ -228,7 +239,7 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       console.log('[TitleBar] admin toggled →', adminOn);
       render(currentProps);
     });
-    root.appendChild(adminBtn);
+    rowMain.appendChild(adminBtn);
 
     // Advisor — no-op placeholder
     const advisorBtn = el('button',
@@ -241,7 +252,7 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       console.log('[TitleBar] advisor toggled →', advisorOn);
       render(currentProps);
     });
-    root.appendChild(advisorBtn);
+    rowMain.appendChild(advisorBtn);
 
     // API docs link — only renders when config.apiDocsUrl is set. v9 parity
     // anchor in top chrome (DeliveryTimelineV5.tsx:2290-2296). Salesforce
@@ -254,14 +265,18 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       apiDocs.title = 'API docs — how to automate submits';
       apiDocs.setAttribute('data-nga-api-docs', '1');
       apiDocs.textContent = 'API docs';
-      root.appendChild(apiDocs);
+      rowMain.appendChild(apiDocs);
     }
 
     // v3 link-badge
     const v3 = el('a', CLS_V3_LINK);
     (v3 as HTMLAnchorElement).href = '#';
     v3.textContent = 'v3 (Canvas)';
-    root.appendChild(v3);
+    rowMain.appendChild(v3);
+
+    // Attach Row 2 to the outer titlebar (always present; Row 1 already
+    // appended above when enabledViews.length > 1).
+    root.appendChild(rowMain);
   }
 
   render(initial);

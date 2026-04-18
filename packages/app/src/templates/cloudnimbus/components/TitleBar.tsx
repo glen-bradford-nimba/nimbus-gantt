@@ -6,7 +6,7 @@
 import type { SlotProps, ViewMode, ZoomLevel, GroupBy } from '../../types';
 import { CLOUD_NIMBUS_VIEW_MODES } from '../defaults';
 import {
-  CLS_TITLEBAR, CLS_TITLE_BRAND, CLS_VERSION_PILL, CLS_SEP,
+  CLS_TITLEBAR, CLS_TITLEBAR_ROW, CLS_TITLE_BRAND, CLS_VERSION_PILL, CLS_SEP,
   CLS_TB_FILL, CLS_TB_SUMMARY,
   CLS_PILL_BTN_BASE,
   CLS_PILL_BTN_ACTIVE_VIOLET, CLS_PILL_BTN_IDLE_VIOLET,
@@ -50,11 +50,11 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
 
   return (
     <div className={CLS_TITLEBAR} data-slot="TitleBar">
-      <span className={CLS_TITLE_BRAND}>{config.title || 'Pro Forma Timeline'}</span>
-      <span className={CLS_VERSION_PILL}>{config.version || 'v10 · Nimbus Gantt'}</span>
+      {/* Row 1 — view pills, shown only when the template enables >1 view.
+          Collapses entirely when hidden, so single-view configs (A1
+          reverted / minimal template) look identical to v12 prod. */}
       {enabledViews.length > 1 && (
-        <>
-          <Sep />
+        <div className={CLS_TITLEBAR_ROW} data-nga-titlebar-row="views">
           {enabledViews.map((v) => {
             const on = state.viewMode === v.id;
             return (
@@ -71,8 +71,13 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
               </button>
             );
           })}
-        </>
+        </div>
       )}
+      {/* Row 2 — everything else (brand + version + toggles + zoom +
+          group + summary + right-side controls). */}
+      <div className={CLS_TITLEBAR_ROW} data-nga-titlebar-row="main">
+      <span className={CLS_TITLE_BRAND}>{config.title || 'Pro Forma Timeline'}</span>
+      <span className={CLS_VERSION_PILL}>{config.version || 'v10 · Nimbus Gantt'}</span>
       <Sep />
       <button
         type="button"
@@ -167,6 +172,7 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
           ← Exit Full Screen
         </button>
       ) : null}
+      </div>
     </div>
   );
 }

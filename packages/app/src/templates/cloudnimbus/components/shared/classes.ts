@@ -8,8 +8,15 @@
 export const CLS_ROOT = 'nga-root flex flex-col h-full w-full bg-slate-50 overflow-hidden';
 
 /* ── TitleBar ───────────────────────────────────────────────────────────── */
+// Outer titlebar is a COLUMN flex — allows the view-pill row (when
+// enabledViews.length > 1) to stack above the main controls row. When
+// view pills are hidden (A1 reverted / single-view configurations), the
+// column collapses visually to one row, matching v12 prod exactly.
 export const CLS_TITLEBAR =
-  'nga-titlebar bg-white border-b border-slate-200 px-3 py-1.5 flex items-center gap-2 flex-wrap min-w-0 overflow-x-hidden';
+  'nga-titlebar bg-white border-b border-slate-200 px-3 py-1.5 flex flex-col gap-1.5 min-w-0 overflow-x-hidden';
+// Each row inside the titlebar shares this class.
+export const CLS_TITLEBAR_ROW =
+  'flex items-center gap-2 flex-wrap min-w-0';
 export const CLS_TITLE_BRAND = 'text-sm font-bold text-slate-900';
 export const CLS_VERSION_PILL =
   'text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5';
