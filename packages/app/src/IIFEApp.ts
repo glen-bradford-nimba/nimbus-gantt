@@ -532,11 +532,24 @@ export class IIFEApp {
       }
       inst.setData(gtasks, []);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
-      // Scroll to (today - 14 days) after a tick so the canvas has its final
-      // dimensions. v9 parity — initial viewport shows ~2 weeks of recent
-      // past context rather than putting today flush at the left edge.
+      // Scroll so (today - 14 days) lands at the LEFT EDGE of the viewport.
+      // 0.181 used inst.scrollToDate(today-14d), but the engine's
+      // scrollToDate centers the date in the viewport (NimbusGantt.ts:309
+      // computes `targetX = x - viewportWidth/2`). With today-14d centered,
+      // viewportWidth/2-worth of past dates appears LEFT of today-14d,
+      // pushing today off-center to the right — and the centering math
+      // often clamps to 0 (negative targetX) so the scroll silently
+      // no-ops. v9 (DeliveryTimelineV5.tsx:1176-1188) bypasses scrollToDate
+      // and calls timeScale.dateToX + scrollManager.scrollToX directly to
+      // get true left-edge semantics. We replicate that pattern here.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setTimeout(() => { try { (inst as any).scrollToDate?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS)); } catch (_e) { /* ok */ } }, 50);
+      setTimeout(() => {
+        try {
+          const gi = inst as { timeScale?: { dateToX?: (d: Date) => number }; scrollManager?: { scrollToX?: (x: number) => void } };
+          const x = gi.timeScale?.dateToX?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
+          if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+        } catch (_e) { /* ok */ }
+      }, 50);
 
       let cleanupShading: (() => void) | null = null;
       let cleanupDrag: (() => void) | null = null;
@@ -896,12 +909,18 @@ export class IIFEApp {
       ganttInst.setData(gtasks, []);
       try { ganttInst.expandAll(); } catch (_e) { /* ok */ void 0; }
 
-      // Scroll to (today - 14 days) after a tick so the canvas has final
-      // dimensions. Same v9-parity initial viewport as the engineOnly path
-      // above — without this, the chrome path (SF fullscreen + v12 IIFE)
-      // opened flush on today with zero past context.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setTimeout(() => { try { (ganttInst as any).scrollToDate?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS)); } catch (_e) { /* ok */ void 0; } }, 50);
+      // Scroll so (today - 14 days) lands at the LEFT EDGE of the viewport.
+      // See engineOnly-path equivalent above for the full v9-parity rationale
+      // — short version: engine.scrollToDate centers the date, which silently
+      // clamps to 0 when (x - viewportWidth/2) goes negative; v9 bypasses
+      // scrollToDate via timeScale.dateToX + scrollManager.scrollToX direct.
+      setTimeout(() => {
+        try {
+          const gi = ganttInst as { timeScale?: { dateToX?: (d: Date) => number }; scrollManager?: { scrollToX?: (x: number) => void } };
+          const x = gi.timeScale?.dateToX?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
+          if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+        } catch (_e) { /* ok */ void 0; }
+      }, 50);
 
       if (cleanupShading) cleanupShading();
       if (cleanupDrag)    cleanupDrag();
