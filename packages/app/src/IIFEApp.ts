@@ -27,6 +27,7 @@ import {
 } from './pipeline';
 import { startDepthShading } from './depthShading';
 import { startDragReparent } from './dragReparent';
+import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/AuditListView.vanilla';
 
 import { resolveTemplate } from './templates/resolver';
 import { INITIAL_STATE, reduceAppState } from './templates/state';
@@ -874,14 +875,20 @@ export class IIFEApp {
         ganttInst = null;
       }
       ganttHost.innerHTML = '';
-      // A1 stage-1 (0.182): only Gantt has a real renderer. Other view-mode
-      // pills route through renderComingSoon (honest placeholder, not stub).
-      // Full alt-view ports follow in 0.183 — see renderComingSoon comment.
+      // A1 stage-1 (0.182): Gantt and List have real renderers. Other
+      // view-mode pills (Treemap/Bubbles/Calendar/Flow) route through
+      // renderComingSoon — honest placeholder, full ports in 0.183.
       if (state.viewMode === 'gantt') {
         initGantt(ganttHost);
+      } else if (state.viewMode === 'list') {
+        // AuditListView v0 — vanilla port of v9's AuditListView.tsx core.
+        // Filters by audit field presence (owner/dates/hours), groups by
+        // priority bucket, supports search + sort + section collapse.
+        // Drag-to-reorder + edit/add/merge/export/submit defer to 0.183.
+        renderAuditListView(ganttHost, allTasks);
       } else {
         const labelMap: Record<string, string> = {
-          list: 'List', treemap: 'Treemap', bubbles: 'Bubbles',
+          treemap: 'Treemap', bubbles: 'Bubbles',
           calendar: 'Calendar', flow: 'Flow',
         };
         renderComingSoon(ganttHost, labelMap[state.viewMode] || state.viewMode);
