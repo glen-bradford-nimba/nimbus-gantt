@@ -122,6 +122,79 @@ export interface MountOptions {
   onTaskDoubleClick?: (task: NormalizedTask) => void;
   onTaskHover?: (taskId: string | null) => void;
   onTaskContextMenu?: (task: NormalizedTask, pos: ScreenPos) => void;
+
+  /** 0.183 interaction-model callbacks. Separate from onPatch/onTaskClick so
+   *  hosts can wire the new IM-1/2/3/5 flows without touching legacy paths. */
+
+  /** Fired on pointer-up after a drag-to-move or drag-to-resize gesture.
+   *  `changes` carries only the fields the user actually moved (both when
+   *  dragging the bar body, start when dragging the left edge, end when
+   *  dragging the right edge). Returning a Promise gates the "in-flight"
+   *  visual state — the bar shows as dimmed until it settles. On resolve,
+   *  the new position is committed. On reject, the bar reverts to its
+   *  original start/end and `onItemEditError` fires.
+   *
+   *  Race resilience: if the user drags a task twice in quick succession,
+   *  the older promise's settle is ignored (per-task sequence numbering).
+   *  Latest edit wins; stale settles never revert. */
+  onItemEdit?: (
+    taskId: string,
+    changes: { startDate?: string; endDate?: string },
+  ) => Promise<void> | void;
+
+  /** Fired on single-click of a gantt bar (click, not drag). Host decides
+   *  destination (record page, modal, side panel). Library does not
+   *  navigate itself. Passes taskId only — full task lookup is host-side. */
+  onItemClick?: (taskId: string) => void;
+
+  /** Fired when `onItemEdit` rejects. Host surfaces its own UX (e.g.
+   *  Lightning ShowToastEvent in Salesforce). Library stays UI-agnostic.
+   *  Called AFTER the bar reverts to its original start/end so the host
+   *  toast appears alongside the restored position. */
+  onItemEditError?: (taskId: string, error: Error) => void;
+
+  /** IM-4 (0.183) — drag-to-reprioritize (row drag changing parent or
+   *  sort order). Same async contract as `onItemEdit`: resolve commits,
+   *  reject reverts, stale settles are ignored. `newIndex` is the task's
+   *  new position within its siblings (same parent / root). `newParentId`
+   *  is provided when the drag changed the parent too (re-parent + re-
+   *  sort can happen in one gesture). */
+  onItemReorder?: (
+    taskId: string,
+    payload: { newIndex: number; newParentId?: string | null },
+  ) => Promise<void> | void;
+
+  /** Fired when `onItemReorder` rejects. Same convention as
+   *  `onItemEditError` — host surfaces the toast. */
+  onItemReorderError?: (taskId: string, error: Error) => void;
+
+  /** IM-7 (0.183) — viewport state emission. Fires on scroll / zoom
+   *  changes, debounced ~150 ms so host persistence doesn't thrash.
+   *  `zoom` is the current zoom pill value ('day' | 'week' | 'month' |
+   *  'quarter'). Host stores the last-known viewport per user; passes
+   *  it back via `initialViewport` on the next mount. */
+  onViewportChange?: (state: {
+    scrollLeft: number;
+    scrollTop: number;
+    zoom: string;
+  }) => void;
+
+  /** IM-7 (0.183) — initial viewport to apply at mount time. Fields are
+   *  all optional. Unspecified scroll falls back to the default
+   *  "today - 14 days on the left edge" positioning; unspecified zoom
+   *  falls back to the template default. Pass the last-known viewport
+   *  the host persisted via `onViewportChange` for session continuity. */
+  initialViewport?: {
+    scrollLeft?: number;
+    scrollTop?: number;
+    zoom?: string;
+  };
+
+  /** Initial chrome visibility. Default true. When false the TitleBar,
+   *  FilterBar, ZoomBar, StatsPanel, Sidebar, AuditPanel, and HrsWkStrip
+   *  are all hidden at mount — embedded-mode-ish without forcing mode
+   *  to 'embedded'. Consumers can flip at runtime via `handle.toggleChrome()`. */
+  chromeVisibleDefault?: boolean;
 }
 
 export interface AppInstance {
@@ -133,6 +206,12 @@ export interface AppInstance {
   setFilter?(filter: string, search: string): void;
   setZoom?(zoom: string): void;
   setGroupBy?(groupBy: string): void;
+  /** Toggle chrome visibility at runtime (CH-1). With no argument, flips
+   *  the current state. With a boolean, sets explicitly. Hides/shows the
+   *  TitleBar, FilterBar, ZoomBar, StatsPanel, Sidebar, AuditPanel, and
+   *  HrsWkStrip slots. Only available on the chrome-aware mount path —
+   *  engineOnly instances do not expose it (React already owns chrome). */
+  toggleChrome?(visible?: boolean): void;
 }
 
 /** Internal mapped task passed to NimbusGantt engine */
@@ -141,6 +220,14 @@ export interface MappedTask {
   title: string;
   name: string;
   hoursLabel: string;
+  /** DM-3 (0.183) — column-ready hours string ("40h", or '' when 0). Split
+   *  out from hoursLabel so surfaces that enable the separate Hours column
+   *  get a clean numeric rather than the "40h (75% budget)" combined form. */
+  hours?: string;
+  /** DM-3 (0.183) — column-ready budget-used percent string ("75%",
+   *  "116%", or '' when unavailable). Uncapped per spec — surfaces see the
+   *  overrun directly. */
+  budgetUsedPct?: string;
   startDate: string;
   endDate: string;
   progress: number;

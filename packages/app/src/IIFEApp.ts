@@ -62,10 +62,36 @@ const V3_THEME = {
   fontSize: 12, selectionColor: '#3b82f6', singleRowHeader: true,
 };
 
-const GANTT_COLS = [
-  { field: 'title',      header: '', width: 210, tree: true },
-  { field: 'hoursLabel', header: '', width: 85,  align: 'right' },
-];
+/**
+ * Default gantt tree columns. DM-3 (0.183) adds two optional extra columns
+ * gated by `features.hoursColumn` / `features.budgetUsedColumn`. Build
+ * dynamically at mount time so each surface can opt into the split view.
+ *
+ * NOTE: the default columns have empty header strings because the library
+ * CSS hides the header row (see injectLegacyNgCss: `.ng-grid-header{visibility:hidden}`).
+ * DM-3 columns carry real header labels so DH surfaces that enable them
+ * get readable column titles when consumer CSS re-shows the header.
+ */
+interface GanttCol {
+  field: string;
+  header: string;
+  width: number;
+  tree?: boolean;
+  align?: 'left' | 'right' | 'center';
+}
+function buildGanttCols(features: FeatureFlags): GanttCol[] {
+  const cols: GanttCol[] = [
+    { field: 'title',      header: '',            width: 210, tree: true },
+    { field: 'hoursLabel', header: '',            width: 85,  align: 'right' },
+  ];
+  if (features.hoursColumn) {
+    cols.push({ field: 'hours',         header: 'Hours',       width: 60, align: 'right' });
+  }
+  if (features.budgetUsedColumn) {
+    cols.push({ field: 'budgetUsedPct', header: 'Budget Used', width: 90, align: 'right' });
+  }
+  return cols;
+}
 
 /**
  * Initial viewport offset from today — gantt scrolls to `today - 14 days`
@@ -220,6 +246,10 @@ export interface TemplateAwareMountOptions extends MountOptions {
  * Chrome features forced OFF in embedded mode. Behaviour-only flags
  * (dragReparent, depthShading, groupByToggle, hideCompletedToggle) are
  * intentionally left alone so the canvas remains interactive.
+ *
+ * CH-1 (0.183): reused by `toggleChrome()` to flip chrome off at runtime
+ * without re-mounting. Same keyset as embedded-mode — if you add a new
+ * chrome slot, add the flag here too.
  */
 const EMBEDDED_FEATURE_OVERRIDES: Partial<FeatureFlags> = {
   titleBar: false,
@@ -361,7 +391,7 @@ export class IIFEApp {
       };
 
       const inst = new eng.NimbusGantt(ganttEl, {
-        tasks: gtasks, dependencies: [], columns: GANTT_COLS, theme: V3_THEME,
+        tasks: gtasks, dependencies: [], columns: buildGanttCols(tplConfig.features), theme: V3_THEME,
         rowHeight: 32, barHeight: 20, headerHeight: 32, gridWidth: 295,
         zoomLevel: state.zoom, showToday: true, showWeekends: true, showProgress: true,
         colorMap: options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
@@ -370,6 +400,9 @@ export class IIFEApp {
           if (!task || !task.id || isBucketId(task.id)) return;
           const t = findTaskById(task.id);
           if (t) options.onTaskClick?.(t, 'canvas');
+          // IM-5 (0.183) — id-only click alias for hosts that prefer the new
+          // taskId-first contract over the legacy NormalizedTask signature.
+          options.onItemClick?.(task.id);
         },
         onTaskDblClick: (task: { id: string }) => {
           if (!task || !task.id || isBucketId(task.id)) return;
@@ -524,8 +557,72 @@ export class IIFEApp {
 
     /* ── State ──────────────────────────────────────────────────────── */
     let state: AppState = { ...INITIAL_STATE };
+    // IM-7 (0.183) — apply initialViewport.zoom to state before the first
+    // renderSlots so the ZoomBar pill picks up the restored value on paint,
+    // and initGantt passes the right zoomLevel to the engine Ctor.
+    if (options.initialViewport?.zoom) {
+      state = { ...state, zoom: options.initialViewport.zoom as AppState['zoom'] };
+    }
     let allTasks: NormalizedTask[] = options.tasks || [];
     const patchLog: PatchLogEntry[] = [];
+
+    /* IM-7 (0.183) — Viewport emission helpers.
+     *
+     * After the engine mounts we attach a scroll listener to the
+     * `.ng-scroll-wrapper` (inside ganttEl). Scroll bursts are debounced
+     * to 150 ms before firing onViewportChange — matches Glen's spec and
+     * avoids thrashing host persistence on fast drags / pan gestures.
+     *
+     * Zoom changes are emitted from the dispatch reducer (see below)
+     * instead of via scroll events — zoom changes don't always cause a
+     * scroll so the scroll path alone would drop them. */
+    const _viewportEmitTimer: { t: ReturnType<typeof setTimeout> | null } = { t: null };
+    function emitViewport(): void {
+      if (!options.onViewportChange || !ganttInst) return;
+      if (_viewportEmitTimer.t) clearTimeout(_viewportEmitTimer.t);
+      _viewportEmitTimer.t = setTimeout(() => {
+        _viewportEmitTimer.t = null;
+        try {
+          const sm = (ganttInst as { scrollManager?: { getScrollPosition?: () => { x: number; y: number } } }).scrollManager;
+          const pos = sm?.getScrollPosition?.() ?? { x: 0, y: 0 };
+          options.onViewportChange?.({
+            scrollLeft: pos.x,
+            scrollTop:  pos.y,
+            zoom:       state.zoom,
+          });
+        } catch (_e) { /* swallow — emission is best-effort */ }
+      }, 150);
+    }
+
+    /* CH-1 (0.183) — Chrome visibility.
+     *
+     * Starts from `options.chromeVisibleDefault` (default true). When false,
+     * chrome slots are forced off via EMBEDDED_FEATURE_OVERRIDES at render
+     * time, leaving the gantt canvas as the only rendered slot. Mutated by
+     * `handle.toggleChrome()` at runtime.
+     *
+     * NOTE: `mode: 'embedded'` already forces features off before template
+     * resolution; chromeVisible=false is the runtime equivalent that can
+     * flip back without re-mounting. In embedded mode chromeVisible is
+     * pinned false (toggling would have no effect since features are
+     * already scrubbed from tplConfig). */
+    let chromeVisible = options.chromeVisibleDefault !== false;
+    if (mode === 'embedded') chromeVisible = false;
+    // Capture a snapshot of the template-resolved features so toggleChrome
+    // can restore them when re-enabling chrome. tplConfig.features is
+    // mutated below to reflect chromeVisible state.
+    const ORIGINAL_FEATURES: FeatureFlags = { ...tplConfig.features };
+    function applyChromeVisibility(): void {
+      if (chromeVisible) {
+        tplConfig.features = { ...ORIGINAL_FEATURES };
+      } else {
+        tplConfig.features = {
+          ...ORIGINAL_FEATURES,
+          ...EMBEDDED_FEATURE_OVERRIDES,
+        };
+      }
+    }
+    applyChromeVisibility();
 
     /* ── Root shell ─────────────────────────────────────────────────── */
     injectLegacyNgCss();
@@ -573,6 +670,228 @@ export class IIFEApp {
     /* ── Dispatch + data helpers ────────────────────────────────────── */
     const _patchRefreshTimer: { t: ReturnType<typeof setTimeout> | null } = { t: null };
     const rawOnPatch = options.onPatch || (() => { /* no-op */ });
+
+    /* IM-1/2/3 (0.183) — Async drag-to-edit state.
+     *
+     * The engine fires onTaskMove / onTaskResize synchronously on pointer-up
+     * AFTER optimistically updating its internal state. We intercept those
+     * callbacks, maintain a per-task pending-edit registry, and drive the
+     * async contract Glen specified:
+     *   - Capture original dates at first-in-chain edit (reused on subsequent
+     *     rapid edits so revert restores truly-persisted state, not a prior
+     *     in-flight optimistic value).
+     *   - Apply optimistic update to allTasks + re-render the gantt with the
+     *     affected bar dimmed (inflightTaskIds set).
+     *   - Await host's onItemEdit(taskId, changes). On resolve (only if this
+     *     edit is still the current seq for the task): clear in-flight, done.
+     *   - On reject (current seq only): revert allTasks to captured originals,
+     *     refreshGantt, call onItemEditError. Stale settles are ignored so
+     *     newer in-flight edits aren't clobbered.
+     *
+     * When options.onItemEdit is absent, date-edits fall through to the
+     * legacy onPatch path (no async contract, fires immediately). */
+    interface PendingEdit {
+      seq: number;
+      origStart: string;
+      origEnd: string;
+    }
+    const pendingEdits = new Map<string, PendingEdit>();
+    let nextEditSeq = 0;
+    const inflightTaskIds = new Set<string>();
+
+    /** Dim a bar color for the in-flight visual state. Appends a 50%-alpha
+     *  byte to hex colors; rgb/rgba colors pass through unchanged (dimming
+     *  alpha-mix is not worth the parse cost — these are rare in practice
+     *  since buildTasks uses STAGE_COLORS / STAGE_TO_CATEGORY_COLOR which
+     *  are 6-digit hex). */
+    function dimColor(hex: string): string {
+      if (!hex) return '#94a3b880';
+      if (hex.startsWith('rgb')) return hex;
+      const s = hex.charAt(0) === '#' ? hex.slice(1) : hex;
+      const full = s.length === 3
+        ? s.charAt(0) + s.charAt(0) + s.charAt(1) + s.charAt(1) + s.charAt(2) + s.charAt(2)
+        : s;
+      if (full.length !== 6) return hex;
+      return '#' + full + '80';
+    }
+
+    async function onTaskEditAsync(
+      taskId: string,
+      nextStart: string,
+      nextEnd: string,
+      changes: { startDate?: string; endDate?: string },
+    ): Promise<void> {
+      const idx = allTasks.findIndex((t) => t.id === taskId);
+      if (idx === -1) return;
+
+      // Capture pre-edit-chain originals (reused when a prior edit is still
+      // in flight for this task — revert must restore truly-persisted state).
+      const existing = pendingEdits.get(taskId);
+      const origStart = existing ? existing.origStart : (allTasks[idx].startDate || '');
+      const origEnd   = existing ? existing.origEnd   : (allTasks[idx].endDate   || '');
+
+      const seq = ++nextEditSeq;
+      pendingEdits.set(taskId, { seq, origStart, origEnd });
+      inflightTaskIds.add(taskId);
+
+      // Optimistic local update + audit trail (same surface legacy onTaskPatch
+      // hits, so pendingPatchCount + patchLog stay consistent).
+      allTasks[idx] = { ...allTasks[idx], startDate: nextStart, endDate: nextEnd };
+      const title = allTasks[idx].title || (allTasks[idx].name as string) || taskId;
+      patchLog.unshift({ ts: new Date(), desc: title + ': dates updated' });
+      if (patchLog.length > 50) patchLog.pop();
+      dispatch({ type: 'PATCH', patch: { id: taskId, startDate: nextStart, endDate: nextEnd } });
+      refreshGantt();
+
+      if (!options.onItemEdit) {
+        // Legacy: immediate commit via onPatch. No async contract to honor.
+        inflightTaskIds.delete(taskId);
+        pendingEdits.delete(taskId);
+        rawOnPatch({ id: taskId, startDate: nextStart, endDate: nextEnd });
+        refreshGantt();
+        return;
+      }
+
+      try {
+        await options.onItemEdit(taskId, changes);
+        const current = pendingEdits.get(taskId);
+        if (!current || current.seq !== seq) return; // stale — newer owns state
+        pendingEdits.delete(taskId);
+        inflightTaskIds.delete(taskId);
+        refreshGantt();
+      } catch (err) {
+        const current = pendingEdits.get(taskId);
+        if (!current || current.seq !== seq) return; // stale — newer decides
+        const idxNow = allTasks.findIndex((t) => t.id === taskId);
+        if (idxNow !== -1) {
+          allTasks[idxNow] = { ...allTasks[idxNow], startDate: origStart, endDate: origEnd };
+        }
+        pendingEdits.delete(taskId);
+        inflightTaskIds.delete(taskId);
+        refreshGantt();
+        try {
+          options.onItemEditError?.(
+            taskId,
+            err instanceof Error ? err : new Error(String(err)),
+          );
+        } catch (_e) { /* swallow host-handler throws */ }
+      }
+    }
+
+    /* IM-4 (0.183) — Async drag-to-reprioritize with revert.
+     *
+     * Same seq/in-flight/revert primitive as onTaskEditAsync, but for
+     * parent + sortOrder (+ priorityGroup) changes fired by dragReparent.
+     * Triggered via interceptedOnPatch below — which routes date patches
+     * to the legacy onTaskPatch and structural patches here.
+     *
+     * Originals captured on first edit in a chain (shared with any later
+     * reorder of the same task) so revert restores truly-persisted state,
+     * not a prior in-flight optimistic value. */
+    interface PendingReorder {
+      seq: number;
+      origParentId: string | null | undefined;
+      origSortOrder: number | undefined;
+      origPriorityGroup: string | null | undefined;
+    }
+    const pendingReorders = new Map<string, PendingReorder>();
+    let nextReorderSeq = 0;
+
+    async function onTaskReorderAsync(patch: TaskPatch): Promise<void> {
+      const taskId = patch.id;
+      const idx = allTasks.findIndex((t) => t.id === taskId);
+      if (idx === -1) return;
+
+      const existing = pendingReorders.get(taskId);
+      const origTask = allTasks[idx];
+      const origParentId      = existing ? existing.origParentId      : origTask.parentWorkItemId;
+      const origSortOrder     = existing ? existing.origSortOrder     : origTask.sortOrder;
+      const origPriorityGroup = existing ? existing.origPriorityGroup : origTask.priorityGroup;
+
+      const seq = ++nextReorderSeq;
+      pendingReorders.set(taskId, { seq, origParentId, origSortOrder, origPriorityGroup });
+      // Reuse the edit-path inflight set so dim rendering stays consistent —
+      // a task can only be in one async flow at a time from the user's POV.
+      inflightTaskIds.add(taskId);
+
+      // Optimistic update (dragReparent has already repainted the row in
+      // its new position on the grid side; this keeps allTasks in sync so
+      // the canvas refresh reflects the new ordering too).
+      const u: NormalizedTask = { ...origTask };
+      if (patch.parentId      !== undefined) u.parentWorkItemId = patch.parentId;
+      if (patch.priorityGroup !== undefined) u.priorityGroup    = patch.priorityGroup;
+      if (patch.sortOrder     !== undefined) u.sortOrder        = patch.sortOrder;
+      allTasks[idx] = u;
+
+      const title = origTask.title || (origTask.name as string) || taskId;
+      const logParts: string[] = [];
+      if (patch.priorityGroup) logParts.push('→ ' + patch.priorityGroup);
+      if (patch.parentId !== undefined) logParts.push('parent ' + (patch.parentId || 'none'));
+      if (patch.sortOrder !== undefined) logParts.push('reordered');
+      patchLog.unshift({ ts: new Date(), desc: title + ': ' + logParts.join(', ') });
+      if (patchLog.length > 50) patchLog.pop();
+      dispatch({ type: 'PATCH', patch });
+      refreshGantt();
+
+      if (!options.onItemReorder) {
+        // Legacy: no async contract — fire rawOnPatch and clear in-flight.
+        inflightTaskIds.delete(taskId);
+        pendingReorders.delete(taskId);
+        rawOnPatch(patch);
+        refreshGantt();
+        return;
+      }
+
+      try {
+        const newIndex = typeof patch.sortOrder === 'number' ? patch.sortOrder : 0;
+        const newParentId = patch.parentId !== undefined ? patch.parentId : undefined;
+        await options.onItemReorder(taskId, { newIndex, newParentId });
+        const current = pendingReorders.get(taskId);
+        if (!current || current.seq !== seq) return; // stale
+        pendingReorders.delete(taskId);
+        inflightTaskIds.delete(taskId);
+        refreshGantt();
+      } catch (err) {
+        const current = pendingReorders.get(taskId);
+        if (!current || current.seq !== seq) return; // stale
+        const idxNow = allTasks.findIndex((t) => t.id === taskId);
+        if (idxNow !== -1) {
+          const rev: NormalizedTask = { ...allTasks[idxNow] };
+          rev.parentWorkItemId = origParentId ?? null;
+          if (origSortOrder !== undefined) rev.sortOrder = origSortOrder;
+          rev.priorityGroup = origPriorityGroup ?? null;
+          allTasks[idxNow] = rev;
+        }
+        pendingReorders.delete(taskId);
+        inflightTaskIds.delete(taskId);
+        refreshGantt();
+        try {
+          options.onItemReorderError?.(
+            taskId,
+            err instanceof Error ? err : new Error(String(err)),
+          );
+        } catch (_e) { /* swallow */ }
+      }
+    }
+
+    /** Route structural patches (parent / sortOrder / priorityGroup) through
+     *  the IM-4 async path when `onItemReorder` is wired; date-only patches
+     *  continue to land on legacy onTaskPatch (IM-1/2/3 date patches take
+     *  the dedicated onTaskEditAsync branch inside the engine Ctor bindings,
+     *  so they never reach this interceptor). */
+    function interceptedOnPatch(patch: TaskPatch): void {
+      const hasStructural =
+        patch.parentId !== undefined ||
+        patch.priorityGroup !== undefined ||
+        patch.sortOrder !== undefined;
+      const hasDates =
+        patch.startDate !== undefined || patch.endDate !== undefined;
+      if (hasStructural && !hasDates) {
+        onTaskReorderAsync(patch);
+      } else {
+        onTaskPatch(patch);
+      }
+    }
 
     function onTaskPatch(patch: TaskPatch): void {
       // Apply optimistic update locally (mirrors v5 behaviour)
@@ -630,6 +949,9 @@ export class IIFEApp {
         } else if (ev.type === 'SET_ZOOM') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           if (ganttInst && typeof (ganttInst as any).setZoom === 'function') (ganttInst as any).setZoom(state.zoom);
+          // IM-7 (0.183) — zoom changes aren't always paired with scroll
+          // events, so emit here directly. Debounced inside emitViewport.
+          emitViewport();
         }
       }
     }
@@ -675,6 +997,19 @@ export class IIFEApp {
         } else {
           const inst = factory(props);
           slotInstances.set(slotName, inst);
+          container.appendChild(inst.el);
+        }
+      });
+
+      // CH-1 (0.183) — after any destroy/recreate cycle (e.g. toggleChrome),
+      // re-append each mounted slot in SLOT_ORDER so DOM order matches the
+      // declared layout. appendChild on an already-attached node moves it to
+      // the end; doing this in SLOT_ORDER gives us the correct final order
+      // without special-casing "was this slot just created?". Cheap —
+      // browsers optimise node re-insertion at the same level.
+      SLOT_ORDER.forEach((slotName) => {
+        const inst = slotInstances.get(slotName);
+        if (inst && inst.el.parentNode === container) {
           container.appendChild(inst.el);
         }
       });
@@ -731,7 +1066,7 @@ export class IIFEApp {
       let lastHoveredTaskId: string | null = null;
 
       ganttInst = new Ctor(ganttEl, {
-        tasks: gtasks, dependencies: [], columns: GANTT_COLS, theme: V3_THEME,
+        tasks: gtasks, dependencies: [], columns: buildGanttCols(tplConfig.features), theme: V3_THEME,
         rowHeight: 32, barHeight: 20, headerHeight: 32, gridWidth: 295,
         zoomLevel: state.zoom, showToday: true, showWeekends: true, showProgress: true,
         colorMap: options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
@@ -741,6 +1076,9 @@ export class IIFEApp {
           dispatch({ type: 'TOGGLE_DETAIL', taskId: task.id });
           const t = allTasks.find((x) => x.id === task.id);
           if (t) options.onTaskClick?.(t, 'canvas');
+          // IM-5 (0.183) — id-only click alias for hosts that prefer the new
+          // taskId-first contract over the legacy NormalizedTask signature.
+          options.onItemClick?.(task.id);
         },
         onTaskDblClick: (task: { id: string }) => {
           if (!task || !task.id || isBucketId(task.id)) return;
@@ -764,10 +1102,20 @@ export class IIFEApp {
           options.onTaskHover?.(id);
         },
         onTaskMove: (task: { id: string }, s: string, e: string) => {
-          if (task && task.id && !isBucketId(task.id)) onTaskPatch({ id: task.id, startDate: s, endDate: e });
+          if (!task || !task.id || isBucketId(task.id)) return;
+          // IM-1 (0.183) — drag whole bar: both start + end shifted.
+          onTaskEditAsync(task.id, s, e, { startDate: s, endDate: e });
         },
         onTaskResize: (task: { id: string }, s: string, e: string) => {
-          if (task && task.id && !isBucketId(task.id)) onTaskPatch({ id: task.id, startDate: s, endDate: e });
+          if (!task || !task.id || isBucketId(task.id)) return;
+          // IM-2/3 (0.183) — edge drag: diff against the pre-edit task so
+          // `changes` carries only the moved field (left-edge → start only,
+          // right-edge → end only). Minimum-delta payload for the host.
+          const orig = allTasks.find((t) => t.id === task.id);
+          const changes: { startDate?: string; endDate?: string } = {};
+          if (!orig || orig.startDate !== s) changes.startDate = s;
+          if (!orig || orig.endDate !== e) changes.endDate = e;
+          onTaskEditAsync(task.id, s, e, changes);
         },
       });
 
@@ -817,33 +1165,87 @@ export class IIFEApp {
 
       if (typeof PGP === 'function') {
         const pluginBuckets = tplConfig.buckets;
+        // DM-5 (0.183) — when headerRowCompletionBar is explicitly false,
+        // feed the plugin a zero-progress function so the header bar
+        // renders without the fill overlay. The row itself still shows
+        // (label + color). When on, use hoursWeightedProgress from the
+        // engine bundle (falls back to arithmetic-mean inside the plugin
+        // when absent).
+        const bucketProgressFn = tplConfig.features.headerRowCompletionBar === false
+          ? () => 0
+          : (typeof hwp === 'function' ? hwp : undefined);
         ganttInst.use(PGP({
           buckets: pluginBuckets,
           getBucket: (task: { groupId?: string | null }) => task.groupId || null,
-          getBucketProgress: typeof hwp === 'function' ? hwp : undefined,
+          getBucketProgress: bucketProgressFn,
         }));
       }
 
       ganttInst.setData(gtasks, []);
       try { ganttInst.expandAll(); } catch (_e) { /* ok */ void 0; }
 
-      // Scroll so (today - 14 days) lands at the LEFT EDGE of the viewport.
-      // See engineOnly-path equivalent above for the full v9-parity rationale
-      // — short version: engine.scrollToDate centers the date, which silently
-      // clamps to 0 when (x - viewportWidth/2) goes negative; v9 bypasses
-      // scrollToDate via timeScale.dateToX + scrollManager.scrollToX direct.
+      // Initial viewport positioning.
+      //
+      // IM-7 (0.183): when options.initialViewport provides scrollLeft /
+      // scrollTop, those win over the default "today - 14 days" math.
+      // When only zoom is provided (or nothing), fall back to the v9
+      // today-14d positioning (same rationale as the engineOnly path).
       setTimeout(() => {
         try {
-          const gi = ganttInst as { timeScale?: { dateToX?: (d: Date) => number }; scrollManager?: { scrollToX?: (x: number) => void } };
-          const x = gi.timeScale?.dateToX?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
-          if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+          const gi = ganttInst as {
+            timeScale?: { dateToX?: (d: Date) => number };
+            scrollManager?: {
+              scrollToX?: (x: number) => void;
+              scrollToY?: (y: number) => void;
+              setScrollPosition?: (x: number, y: number) => void;
+            };
+          };
+          const iv = options.initialViewport;
+          if (iv && (typeof iv.scrollLeft === 'number' || typeof iv.scrollTop === 'number')) {
+            const x = typeof iv.scrollLeft === 'number' ? Math.max(0, iv.scrollLeft) : 0;
+            const y = typeof iv.scrollTop === 'number' ? Math.max(0, iv.scrollTop) : 0;
+            if (typeof gi.scrollManager?.setScrollPosition === 'function') {
+              gi.scrollManager.setScrollPosition(x, y);
+            } else {
+              gi.scrollManager?.scrollToX?.(x);
+              gi.scrollManager?.scrollToY?.(y);
+            }
+          } else {
+            const x = gi.timeScale?.dateToX?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
+            if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+          }
         } catch (_e) { /* ok */ void 0; }
       }, 50);
 
       if (cleanupShading) cleanupShading();
       if (cleanupDrag)    cleanupDrag();
       if (tplConfig.features.depthShading) cleanupShading = startDepthShading(ganttEl, depthMap);
-      if (tplConfig.features.dragReparent) cleanupDrag    = startDragReparent(ganttEl, allTasks, depthMap, onTaskPatch);
+      // IM-4 (0.183) — route through interceptedOnPatch so structural
+      // patches (parent / sortOrder / priorityGroup) go through the async
+      // onItemReorder contract when wired. Date-only patches still land
+      // on legacy onTaskPatch.
+      if (tplConfig.features.dragReparent) cleanupDrag    = startDragReparent(ganttEl, allTasks, depthMap, interceptedOnPatch);
+
+      /* IM-7 (0.183) — scroll emission. Attach AFTER the dragReparent
+       * cleanup is assigned so the scroll-listener cleanup chains onto
+       * the final cleanupDrag (which fires on unmount). The engine's
+       * ScrollManager wraps the canvas in `.ng-scroll-wrapper`
+       * (overflow:auto). Scroll events don't bubble, so we listen
+       * directly on the wrapper. Debounce lives inside emitViewport. */
+      if (options.onViewportChange) {
+        try {
+          const wrapper = ganttEl.querySelector<HTMLElement>('.ng-scroll-wrapper');
+          if (wrapper) {
+            const onScroll = () => emitViewport();
+            wrapper.addEventListener('scroll', onScroll, { passive: true });
+            const prevCleanupDrag2 = cleanupDrag;
+            cleanupDrag = () => {
+              wrapper.removeEventListener('scroll', onScroll);
+              if (prevCleanupDrag2) prevCleanupDrag2();
+            };
+          }
+        } catch (_e) { /* ok */ void 0; }
+      }
     }
 
     function refreshGantt(): void {
@@ -853,9 +1255,18 @@ export class IIFEApp {
         const maybeHide = state.hideCompleted
           ? filtered.filter((t) => !DONE_STAGES[t.stage || ''])
           : filtered;
-        const gtasks = state.groupBy === 'epic'
+        let gtasks = state.groupBy === 'epic'
           ? buildTasks(buildTasksEpic(maybeHide))
           : buildTasks(maybeHide);
+        // IM-1/2/3 (0.183) — in-flight visual. Bars whose edit is awaiting
+        // the host's onItemEdit promise render with a dimmed color until the
+        // promise settles. Cheap — only runs when at least one edit is in
+        // flight, and alpha-byte append preserves the canvas fast-path.
+        if (inflightTaskIds.size > 0) {
+          gtasks = gtasks.map((t) => inflightTaskIds.has(t.id)
+            ? { ...t, color: dimColor(t.color) }
+            : t);
+        }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const gi = ganttInst as any;
         if (typeof gi.setData === 'function') {
@@ -996,6 +1407,18 @@ export class IIFEApp {
         allTasks = tasks;
         depthMap = buildDepthMap(allTasks);
         rebuildView();
+      },
+      /** CH-1 (0.183) — toggle chrome visibility at runtime. With no arg,
+       *  flips current state; boolean arg sets explicitly. Embedded-mode
+       *  mounts cannot re-show chrome this way because features were
+       *  scrubbed at resolve time (mount with mode='fullscreen' first if
+       *  runtime re-show is needed). */
+      toggleChrome(visible?: boolean) {
+        const next = typeof visible === 'boolean' ? visible : !chromeVisible;
+        if (next === chromeVisible) return;
+        chromeVisible = next;
+        applyChromeVisibility();
+        renderSlots();
       },
       destroy() { IIFEApp.unmount(container); },
     };

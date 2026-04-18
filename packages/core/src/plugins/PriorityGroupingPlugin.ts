@@ -84,6 +84,11 @@ interface BucketRuntime {
   endDate: Date | null;
   /** Sum of metadata.hoursHigh across all bucket members (0 if no metadata) */
   totalHours: number;
+  /** DM-5 (0.183) — sum of metadata.hoursLogged across all bucket members.
+   *  Retained separately from progress (which is clamped 0-1 so overage
+   *  info is lost there) so the header over-budget branch can compare
+   *  totalLogged vs totalHours directly. */
+  totalLogged: number;
 }
 
 // ─── Defaults ───────────────────────────────────────────────────────────────
@@ -132,6 +137,7 @@ export function PriorityGroupingPlugin(
       startDate: null,
       endDate: null,
       totalHours: 0,
+      totalLogged: 0,
     }));
 
     // Pass 1: walk visible IDs to capture rendering order for visible tasks
@@ -163,12 +169,14 @@ export function PriorityGroupingPlugin(
         b.startDate = null;
         b.endDate = null;
         b.totalHours = 0;
+        b.totalLogged = 0;
         continue;
       }
       const tasksFull: GanttTask[] = [];
       let minTime = Infinity;
       let maxTime = -Infinity;
       let totalHigh = 0;
+      let totalLogged = 0;
       for (const id of b.allTaskIds) {
         const t = state.tasks.get(id);
         if (!t) continue;
@@ -183,10 +191,12 @@ export function PriorityGroupingPlugin(
         }
         const md = t.metadata as Record<string, unknown> | undefined;
         if (typeof md?.hoursHigh === 'number') totalHigh += md.hoursHigh;
+        if (typeof md?.hoursLogged === 'number') totalLogged += md.hoursLogged;
       }
       b.startDate = isFinite(minTime) ? new Date(minTime) : null;
       b.endDate = isFinite(maxTime) ? new Date(maxTime) : null;
       b.totalHours = totalHigh;
+      b.totalLogged = totalLogged;
       b.progress = Math.max(0, Math.min(1, getBucketProgress(tasksFull)));
     }
   }
@@ -194,11 +204,17 @@ export function PriorityGroupingPlugin(
   // ── Compose a synthetic header task for a bucket ────────────────────────
   function makeHeaderTask(bucket: BucketRuntime): GanttTask | null {
     if (!bucket.startDate || !bucket.endDate) return null;
-    const pct = Math.round(bucket.progress * 100);
-    // Bar label format matches v4: "266h (9%)"
+    // DM-5 (0.183) — over-budget aggregate: aggregate logged >= aggregate
+    // estimated. Uses raw totals so the comparison survives the 0-1 clamp
+    // applied to `progress`. Aggregate % label shows the UNCLAMPED ratio
+    // too, so overruns read at a glance on the header row.
+    const overBudget = bucket.totalHours > 0 && bucket.totalLogged >= bucket.totalHours;
+    const aggregatePct = bucket.totalHours > 0
+      ? Math.round((bucket.totalLogged / bucket.totalHours) * 100)
+      : Math.round(bucket.progress * 100);
     const labelText =
       bucket.totalHours > 0
-        ? `${bucket.totalHours}h (${pct}%)`
+        ? `${bucket.totalHours}h (${aggregatePct}% budget)`
         : `${bucket.allTaskIds.length} items`;
     return {
       id: `${HEADER_PREFIX}${bucket.config.id}`,
@@ -206,7 +222,11 @@ export function PriorityGroupingPlugin(
       startDate: toISODate(bucket.startDate),
       endDate: toISODate(bucket.endDate),
       progress: bucket.progress,
-      color: bucket.config.color,
+      // DM-5 (0.183) — warning hue on the header bar when the aggregate
+      // is over budget. Matches the OVER_BUDGET_COLOR shipped in
+      // packages/app/src/pipeline.ts (kept as a literal here to avoid
+      // cross-package coupling — core must not depend on app).
+      color: overBudget ? '#f59e0b' : bucket.config.color,
       // v4-compatible group styling — core.js reads these when
       // status === "group-header" to render the row background tint,
       // grid text color, canvas top border line, and label.

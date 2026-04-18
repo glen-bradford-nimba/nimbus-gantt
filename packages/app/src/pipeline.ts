@@ -23,6 +23,12 @@ export const GROUP_BAR: Record<string, string> = {
   'deferred':     '#cbd5e1',
 };
 
+/** DM-4 (0.183) — over-budget color. Bars where loggedHours >= estimatedHours
+ *  render in this warning hue so the reader sees the overrun at a glance
+ *  without having to parse the "(XX% budget)" label. Matches the theme
+ *  warning token and darkens cleanly for parent-bar shading. */
+export const OVER_BUDGET_COLOR = '#f59e0b';
+
 /* ── Stage colors ───────────────────────────────────────────────────────── */
 export const STAGE_COLORS: Record<string, string> = {
   'Backlog':                '#64748b',
@@ -164,7 +170,11 @@ export function buildTasks(tasks: NormalizedTask[]): MappedTask[] {
     // Children (leaves) get the v8 category color derived from workflow stage.
     // Nested parents (items with parentWorkItemId that are ALSO parents) will be
     // recoloured in pass 3 to use their root group's GROUP_BAR color.
-    const col    = gid ? (GROUP_BAR[gid] || '#94a3b8') : (STAGE_TO_CATEGORY_COLOR[t.stage || ''] || STAGE_COLORS[t.stage || ''] || '#94a3b8');
+    // DM-4 (0.183): over-budget leaves re-render in the warning hue. Parents
+    // get the same treatment in pass 3 if aggregate logged >= aggregate est.
+    const overBudget = hrs > 0 && logged >= hrs;
+    const baseCol = gid ? (GROUP_BAR[gid] || '#94a3b8') : (STAGE_TO_CATEGORY_COLOR[t.stage || ''] || STAGE_COLORS[t.stage || ''] || '#94a3b8');
+    const col    = overBudget ? OVER_BUDGET_COLOR : baseCol;
     const start  = t.startDate || fallback;
     const end    = t.endDate   || addDays(start, 14);
     return {
@@ -172,6 +182,11 @@ export function buildTasks(tasks: NormalizedTask[]): MappedTask[] {
       title: t.title || t.name || t.id,
       name: hrs > 0 ? (logged > 0 ? hrs + 'h (' + pct + '% budget)' : hrs + 'h') : '',
       hoursLabel: hLabel,
+      // DM-3 (0.183) — split fields for surfaces that opt into the separate
+      // Hours + Budget Used columns. When zero, empty string so the cell
+      // renders blank rather than "0h" / "0%".
+      hours:        hrs > 0 ? hrs + 'h' : '',
+      budgetUsedPct: hrs > 0 && logged > 0 ? pct + '%' : '',
       startDate: start,
       endDate: end,
       progress: hrs > 0 ? Math.min(logged / hrs, 1) : 0,
@@ -225,18 +240,31 @@ export function buildTasks(tasks: NormalizedTask[]): MappedTask[] {
     // We simplify to a flat 0.25 darkening since depth info isn't tracked separately.
     const rootGroup = resolveRootGroup(t.id);
     const parentBaseColor = rootGroup ? (GROUP_BAR[rootGroup] || '#94a3b8') : (t.color || '#64748b');
+    // DM-4 (0.183) — parents inherit over-budget warning when their own
+    // (direct, non-aggregated) logged >= estimate. Full rollup-aware
+    // aggregation is tracked as a follow-up; this is the cheap version
+    // that still surfaces overruns on parent rows that carry hours.
+    const pHrs    = t.metadata.hoursHigh;
+    const pLogged = t.metadata.hoursLogged;
+    const parentOverBudget = pHrs > 0 && pLogged >= pHrs;
+    const parentPaint = parentOverBudget ? OVER_BUDGET_COLOR : parentBaseColor;
 
     return {
       id: t.id,
       title: t.title,
       name: t.name + (count > 0 ? ' · ' + count + ' items' : ''),
       hoursLabel: t.hoursLabel,
+      // DM-3: propagate through parent mapping so conditional columns
+      // render on parent rows too (typically blank since parents often
+      // carry zero direct estimates — rollup math is DM-6, future).
+      hours:         t.hours,
+      budgetUsedPct: t.budgetUsedPct,
       startDate: allS.length ? allS[0] : t.startDate,
       endDate: allE.length ? allE[allE.length - 1] : t.endDate,
       progress: t.progress,
       status: t.status,
       // Darken the root bucket's bar color — all parent bars share the same hue family
-      color: darkenColor(parentBaseColor, 0.25),
+      color: darkenColor(parentPaint, 0.25),
       groupId: t.groupId,
       parentId: t.parentId,
       sortOrder: t.sortOrder,

@@ -34,6 +34,14 @@ const DEFAULT_FEATURES: FeatureFlags = {
   depthShading: true,
   groupByToggle: true,
   hideCompletedToggle: true,
+  // DM-3 (0.183) — new columns default OFF so existing surfaces keep their
+  // current tree width. DH opts in per-template / per-mount via features
+  // overrides. hoursLabel (combined "40h (75% budget)") remains on the
+  // default column — DM-3 is for surfaces that want the two values split.
+  hoursColumn: false,
+  budgetUsedColumn: false,
+  // DM-5 (0.183) — header-row completion bar defaults ON; pairs with DM-4.
+  headerRowCompletionBar: true,
 };
 
 /* ── Default theme — safe neutral fallback used when a template lacks tokens ── */

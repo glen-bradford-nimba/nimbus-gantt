@@ -73,6 +73,15 @@ export interface DragManagerOptions {
   onHover?: (task: GanttTask | null, x: number, y: number, color: string) => void;
   readOnly: boolean;
   headerHeight?: number;
+  /** IM-6 (0.183) — optional scroll controller that enables pan-on-deadspace.
+   *  When provided, a pointerdown on non-bar canvas area enters pan mode:
+   *  subsequent pointermove events update scroll via setScrollPosition, and
+   *  pointerup exits. Works regardless of `readOnly` — panning is navigation,
+   *  not editing. Absent: deadspace pointerdown is a no-op. */
+  scrollManager?: {
+    getScrollPosition: () => { x: number; y: number };
+    setScrollPosition: (x: number, y: number) => void;
+  };
 }
 
 /**
@@ -97,6 +106,17 @@ export class DragManager {
   private dragPointerId: number | null = null;
   private dragOriginalStartDate = '';
   private dragOriginalEndDate = '';
+
+  // IM-6 (0.183) — Pan state (separate from drag-to-edit).
+  //   `panning` goes true when pointerdown lands on canvas deadspace (no
+  //   bar hit) and `scrollManager` is provided. During pan, pointermove
+  //   sets scroll to (origScroll - clientDelta) — mouse-follow semantics.
+  //   Pointerup exits. Pan never fires onTaskMove/onTaskResize.
+  private panning = false;
+  private panStartClientX = 0;
+  private panStartClientY = 0;
+  private panOrigScrollX = 0;
+  private panOrigScrollY = 0;
 
   // Click / double-click tracking
   private lastClickTaskId: string | null = null;
@@ -204,6 +224,20 @@ export class DragManager {
   // ── Pointer Handlers ────────────────────────────────────────────────────
 
   private handlePointerMove(e: PointerEvent): void {
+    if (this.panning) {
+      // IM-6 pan — translate scroll by inverse of pointer delta so the
+      // content follows the mouse 1:1 (classic click-and-drag map pan).
+      e.preventDefault();
+      const dx = e.clientX - this.panStartClientX;
+      const dy = e.clientY - this.panStartClientY;
+      const sm = this.options.scrollManager;
+      if (sm) {
+        const nextX = Math.max(0, this.panOrigScrollX - dx);
+        const nextY = Math.max(0, this.panOrigScrollY - dy);
+        sm.setScrollPosition(nextX, nextY);
+      }
+      return;
+    }
     if (this.dragging) {
       this.handleDragMove(e);
       return;
@@ -239,7 +273,24 @@ export class DragManager {
     const layouts = this.options.getLayouts();
     const hit = this.hitTest.test(canvasX, canvasY, layouts, state.config);
 
-    if (!hit || hit.type === 'none') return;
+    if (!hit || hit.type === 'none') {
+      // IM-6 (0.183) — canvas deadspace: enter pan mode when a scrollManager
+      // is wired. Pan works in readOnly mode too (it's navigation, not
+      // editing). No-op when no scrollManager was provided.
+      if (!this.options.scrollManager) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.panning = true;
+      this.panStartClientX = e.clientX;
+      this.panStartClientY = e.clientY;
+      const pos = this.options.scrollManager.getScrollPosition();
+      this.panOrigScrollX = pos.x;
+      this.panOrigScrollY = pos.y;
+      try { this.canvas.setPointerCapture(e.pointerId); } catch { /* ok */ }
+      this.dragPointerId = e.pointerId;
+      this.canvas.style.cursor = 'grabbing';
+      return;
+    }
 
     // Prevent default browser action (text selection, etc.) and stop the
     // event from reaching framework-level navigation handlers.
@@ -312,6 +363,13 @@ export class DragManager {
         // Already released
       }
       this.dragPointerId = null;
+    }
+
+    // IM-6 (0.183) — exit pan mode cleanly before the drag-path early-return.
+    if (this.panning) {
+      this.panning = false;
+      this.canvas.style.cursor = '';
+      return;
     }
 
     if (!this.dragging || !this.dragHit) {

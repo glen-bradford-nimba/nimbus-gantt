@@ -219,6 +219,13 @@ export class NimbusGantt {
           },
           readOnly: this.config.readOnly,
           headerHeight: this.config.headerHeight,
+          // IM-6 (0.183) — wire pan-on-deadspace through ScrollManager.
+          // DragManager only exists in non-readOnly mode today (gated at
+          // line ~187); readOnly pan is a follow-up if consumers ask.
+          scrollManager: {
+            getScrollPosition: () => this.scrollManager.getScrollPosition(),
+            setScrollPosition: (x: number, y: number) => this.scrollManager.setScrollPosition(x, y),
+          },
         });
       }
     }

@@ -33,6 +33,18 @@ export interface FeatureFlags {
   depthShading: boolean;
   groupByToggle: boolean;
   hideCompletedToggle: boolean;
+  /** DM-3 (0.183) — render a numeric hours column right of the tree.
+   *  Optional so existing templates don't need churn; resolver defaults
+   *  to false. */
+  hoursColumn?: boolean;
+  /** DM-3 (0.183) — render a "Budget Used" percent column right of tree.
+   *  Optional so existing templates don't need churn; resolver defaults
+   *  to false. */
+  budgetUsedColumn?: boolean;
+  /** DM-5 (0.183) — draw the rolled-up completion bar on header/bucket
+   *  rows alongside the DM-4 per-item bars. Optional, resolver defaults
+   *  to true. Pass `false` to suppress the fill (label stays). */
+  headerRowCompletionBar?: boolean;
 }
 
 /* ── §1.3 Theme tokens ──────────────────────────────────────────────────── */
