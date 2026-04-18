@@ -158,7 +158,7 @@ export function buildTasks(tasks: NormalizedTask[]): MappedTask[] {
     const hrs    = t.estimatedHours ? Math.round(Number(t.estimatedHours)) : 0;
     const logged = t.loggedHours    ? Number(t.loggedHours) : 0;
     const pct    = hrs > 0 ? Math.round(logged / hrs * 100) : 0;
-    const hLabel = hrs > 0 ? (logged > 0 ? hrs + 'h (' + pct + '%)' : hrs + 'h') : '';
+    const hLabel = hrs > 0 ? (logged > 0 ? hrs + 'h (' + pct + '% budget)' : hrs + 'h') : '';
     const gid    = t.parentWorkItemId ? null : (t.priorityGroup || null);
     // Top-level items get their priority-group bar color.
     // Children (leaves) get the v8 category color derived from workflow stage.
@@ -170,7 +170,7 @@ export function buildTasks(tasks: NormalizedTask[]): MappedTask[] {
     return {
       id: t.id,
       title: t.title || t.name || t.id,
-      name: hrs > 0 ? (logged > 0 ? hrs + 'h (' + pct + '%)' : hrs + 'h') : '',
+      name: hrs > 0 ? (logged > 0 ? hrs + 'h (' + pct + '% budget)' : hrs + 'h') : '',
       hoursLabel: hLabel,
       startDate: start,
       endDate: end,

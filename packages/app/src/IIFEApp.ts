@@ -112,7 +112,11 @@ function injectLegacyNgCss(): void {
     '.ng-grid-row .ng-tree-cell .ng-expand-spacer+.ng-grid-cell-text{font-weight:400!important;color:#6b7280!important;font-size:11px!important}',
     '.ng-grid-cell{padding-top:0!important;padding-right:6px!important;padding-bottom:0!important;padding-left:6px;line-height:32px!important;border-right:none!important}',
     '.ng-expand-spacer{width:0!important;min-width:0!important}',
-    '.ng-expand-icon{font-size:9px!important;opacity:.5!important;color:#6b7280!important;width:14px!important;min-width:14px!important}',
+    /* .ng-expand-icon — ARROW_DIFF 2026-04-18 font-family normalization.
+     * Must match the canonical rule in styles.css:~687 so SF's
+     * synchronous injection backstop doesn't fight the async template
+     * stylesheet. See styles.css for rationale. */
+    '.ng-expand-icon{font-family:-apple-system,"Segoe UI Symbol","Apple Symbols","Helvetica Neue",Arial,sans-serif!important;font-size:10px!important;line-height:1!important;display:inline-block!important;text-align:center!important;opacity:.5!important;color:#6b7280!important;width:16px!important;min-width:16px!important}',
     '.ng-expand-icon:hover{opacity:1!important}',
     '.ng-grid-row{border:none!important;box-shadow:inset 0 -1px 0 #f3f4f6;box-sizing:border-box!important}',
     '.ng-grid-row:not(.ng-group-row){cursor:grab}',
@@ -885,7 +889,10 @@ export class IIFEApp {
         // Filters by audit field presence (owner/dates/hours), groups by
         // priority bucket, supports search + sort + section collapse.
         // Drag-to-reorder + edit/add/merge/export/submit defer to 0.183.
-        renderAuditListView(ganttHost, allTasks);
+        renderAuditListView(ganttHost, allTasks, {
+          progressLabel: tplConfig.progressLabel,
+          hideRecordIds: tplConfig.hideRecordIds,
+        });
       } else {
         const labelMap: Record<string, string> = {
           treemap: 'Treemap', bubbles: 'Bubbles',

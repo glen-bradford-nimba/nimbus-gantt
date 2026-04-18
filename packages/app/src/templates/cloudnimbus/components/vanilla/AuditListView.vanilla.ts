@@ -285,6 +285,17 @@ export interface AuditListOptions {
    *  doesn't dispatch row-clicks back to a parent state machine; consumers
    *  wanting in-app cross-view navigation can wire this. */
   onTaskClick?: (taskId: string) => void;
+  /** Label prefix for the per-row progress % display. Default 'Budget
+   *  Used' — the displayed % is `loggedHours / estimatedHours`, which
+   *  is a budget tracker, not a true completion tracker. Pass an empty
+   *  string to suppress the prefix entirely. */
+  progressLabel?: string;
+  /** When true (default), the per-row record-ID chip is hidden.
+   *  Salesforce consumers fall through `task.name || task.id` to a raw
+   *  18-char SF record ID (`a0D0300000...`), which should never reach
+   *  end users (roadmap DM-2: names-not-IDs). Pass `false` from
+   *  dev/debug contexts only. */
+  hideRecordIds?: boolean;
 }
 
 /**
@@ -305,6 +316,13 @@ export function renderAuditListView(
   let sortKey: SortKey = 'default';
   const collapsedBuckets = new Set<Group>();
   const expandedIds = new Set<string>();
+  // Per-row % prefix; 'Budget Used' is the 0.182 default (hours logged /
+  // hours estimated — tracks budget consumption, not completion).
+  const progressLabel = options?.progressLabel ?? 'Budget Used';
+  // Default-hide record IDs (CHANGE 4 from 2026-04-18 HQ). SF consumers
+  // fall through task.name || task.id to the 18-char SF record ID which
+  // should never reach end users.
+  const hideRecordIds = options?.hideRecordIds ?? true;
 
   // Compute audits once per task list; re-compute on data change. Tasks
   // change only when consumer calls renderAuditListView again with new
@@ -839,21 +857,27 @@ export function renderAuditListView(
     chev.textContent = isExpanded ? '\u25BC' : '\u25B6';
     top.appendChild(chev);
 
-    // Name (id) — monospace
-    const name = el('code', '');
-    name.style.cssText = [
-      'font-family:SF Mono,Cascadia Code,Consolas,monospace',
-      'font-size:11px',
-      'color:#64748b',
-      'flex-shrink:0',
-      'min-width:80px',
-      'max-width:140px',
-      'overflow:hidden',
-      'text-overflow:ellipsis',
-      'white-space:nowrap',
-    ].join(';');
-    name.textContent = task.name || task.id;
-    top.appendChild(name);
+    // Name (id) — monospace chip. Hidden by default per CHANGE 4 — the
+    // fallback `task.name || task.id` resolves to the raw 18-char SF
+    // record ID (`a0D0300000...`) for Salesforce consumers, which
+    // should never reach end users. Dev/debug contexts can set
+    // `hideRecordIds: false` in AuditListOptions / TemplateConfig.
+    if (!hideRecordIds) {
+      const name = el('code', '');
+      name.style.cssText = [
+        'font-family:SF Mono,Cascadia Code,Consolas,monospace',
+        'font-size:11px',
+        'color:#64748b',
+        'flex-shrink:0',
+        'min-width:80px',
+        'max-width:140px',
+        'overflow:hidden',
+        'text-overflow:ellipsis',
+        'white-space:nowrap',
+      ].join(';');
+      name.textContent = task.name || task.id;
+      top.appendChild(name);
+    }
 
     // Title — flex-grow
     const title = el('span', '');
@@ -879,7 +903,11 @@ export function renderAuditListView(
     }
     top.appendChild(title);
 
-    // Progress %
+    // Progress % — prefixed with the configurable `progressLabel`
+    // (default 'Budget Used' per 0.182 relabel). The % value is computed
+    // as `loggedHours / estimatedHours` (see progressOf), which tracks
+    // BUDGET consumption rather than work completion. Prefix is set to
+    // empty string by consumers who want the bare % back.
     const pct = progressOf(task);
     if (pct !== null) {
       const pctWrap = el('span', '');
@@ -888,10 +916,12 @@ export function renderAuditListView(
         'font-size:11px',
         'color:' + (pct === 100 ? '#10b981' : pct > 50 ? '#d97706' : '#64748b'),
         'font-weight:600',
-        'min-width:32px',
         'text-align:right',
+        'white-space:nowrap',
       ].join(';');
-      pctWrap.textContent = pct + '%';
+      const prefixLabel = progressLabel.trim();
+      pctWrap.textContent = prefixLabel ? prefixLabel + ' ' + pct + '%' : pct + '%';
+      pctWrap.title = 'Budget Used — hours logged / hours estimated';
       top.appendChild(pctWrap);
     }
 

@@ -209,24 +209,40 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     });
     rowMain.appendChild(unpinBtn);
 
-    // Fullscreen — host-nav mode vs local-toggle mode.
-    // When the host passes `onExitFullscreen` AND mode==='fullscreen' (i.e.
-    // we're mounted on the Salesforce Delivery_Gantt_Standalone page), the
-    // button becomes "← Exit Full Screen" and invokes the host callback so
-    // the LWC can navigate back to the embedded tab. Otherwise it keeps the
-    // v9-style local TOGGLE_FULLSCREEN behaviour (expands within the page).
-    const hostExit = config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function';
-    const fsBtn = el('button',
-      CLS_PILL_BTN_BASE + ' ' + ((state.fullscreen || hostExit) ? CLS_RIGHT_FS_ON : CLS_RIGHT_FS_OFF));
-    if (hostExit) {
-      fsBtn.textContent = '\u2190 Exit Full Screen';
-      fsBtn.setAttribute('data-nga-fullscreen-exit', '1');
-      fsBtn.addEventListener('click', () => { config.onExitFullscreen!(); });
-    } else {
-      fsBtn.textContent = state.fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
-      fsBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_FULLSCREEN' }));
+    // Fullscreen button — three dispatch modes in precedence order:
+    //   1. config.fullscreenUrl set + user already on that URL → button
+    //      is HIDDEN (already there; button would be a no-op).
+    //   2. config.fullscreenUrl set + user NOT on that URL → button
+    //      navigates (window.location.href). Salesforce embedded-tab
+    //      mount passes '/apex/DeliveryGanttStandalone' so users jump
+    //      to the fullscreen FlexiPage without the LWC wiring
+    //      NavigationMixin manually.
+    //   3. config.mode === 'fullscreen' + onExitFullscreen set (SF
+    //      Standalone) → "← Exit Full Screen" invokes the host nav
+    //      callback so the LWC returns to the embedded tab.
+    //   4. Fallback → native state TOGGLE_FULLSCREEN (CNN + localhost
+    //      expand-in-page UX preserved).
+    const fsUrl = config.fullscreenUrl;
+    const onCurrentFsUrl = !!(fsUrl && typeof location !== 'undefined' && location.pathname === fsUrl);
+    if (!onCurrentFsUrl) {
+      const hostExit = config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function';
+      const active = state.fullscreen || hostExit;
+      const fsBtn = el('button',
+        CLS_PILL_BTN_BASE + ' ' + (active ? CLS_RIGHT_FS_ON : CLS_RIGHT_FS_OFF));
+      if (fsUrl) {
+        fsBtn.textContent = 'Fullscreen';
+        fsBtn.setAttribute('data-nga-fullscreen-url', '1');
+        fsBtn.addEventListener('click', () => { window.location.href = fsUrl; });
+      } else if (hostExit) {
+        fsBtn.textContent = '\u2190 Exit Full Screen';
+        fsBtn.setAttribute('data-nga-fullscreen-exit', '1');
+        fsBtn.addEventListener('click', () => { config.onExitFullscreen!(); });
+      } else {
+        fsBtn.textContent = state.fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+        fsBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_FULLSCREEN' }));
+      }
+      rowMain.appendChild(fsBtn);
     }
-    rowMain.appendChild(fsBtn);
 
     // Admin — no-op placeholder
     const adminBtn = el('button',

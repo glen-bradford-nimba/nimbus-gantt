@@ -162,16 +162,41 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
           API docs
         </a>
       ) : null}
-      {config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function' ? (
-        <button
-          type="button"
-          data-nga-fullscreen-exit="1"
-          className={CLS_PILL_BTN_BASE + ' bg-slate-700 text-white border-slate-700'}
-          onClick={() => config.onExitFullscreen!()}
-        >
-          ← Exit Full Screen
-        </button>
-      ) : null}
+      {(() => {
+        // Precedence: fullscreenUrl (hide if already on it, else navigate)
+        // > onExitFullscreen callback (SF Standalone host-nav)
+        // > native TOGGLE_FULLSCREEN (fallback — React driver in 0.182
+        //   doesn't currently render that native-toggle button; see vanilla
+        //   path for the full 4-branch logic).
+        const fsUrl = config.fullscreenUrl;
+        const onCurrentFsUrl = !!(fsUrl && typeof location !== 'undefined' && location.pathname === fsUrl);
+        if (onCurrentFsUrl) return null;
+        if (fsUrl) {
+          return (
+            <button
+              type="button"
+              data-nga-fullscreen-url="1"
+              className={CLS_PILL_BTN_BASE + ' bg-slate-700 text-white border-slate-700'}
+              onClick={() => { window.location.href = fsUrl; }}
+            >
+              Fullscreen
+            </button>
+          );
+        }
+        if (config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function') {
+          return (
+            <button
+              type="button"
+              data-nga-fullscreen-exit="1"
+              className={CLS_PILL_BTN_BASE + ' bg-slate-700 text-white border-slate-700'}
+              onClick={() => config.onExitFullscreen!()}
+            >
+              ← Exit Full Screen
+            </button>
+          );
+        }
+        return null;
+      })()}
       </div>
     </div>
   );

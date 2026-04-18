@@ -155,6 +155,29 @@ export interface TemplateDefaults {
    *  '/mf/delivery-timeline-v8-api'. Salesforce consumers leave it unset
    *  unless they have a hosted docs page reachable from Lightning. */
   apiDocsUrl?: string;
+  /** Optional URL that the TitleBar "Fullscreen" button navigates to when
+   *  clicked. When set: if `location.pathname === fullscreenUrl` the
+   *  button is HIDDEN (user is already there); otherwise the button
+   *  becomes a link (`window.location.href = fullscreenUrl`). When unset:
+   *  the button falls back to the existing native TOGGLE_FULLSCREEN state
+   *  toggle (CNN + localhost UX preserved). Salesforce consumers pass
+   *  e.g. '/apex/DeliveryGanttStandalone' on the embedded-tab mount so
+   *  users can jump to the fullscreen FlexiPage without the LWC wiring
+   *  NavigationMixin manually. */
+  fullscreenUrl?: string;
+  /** Optional label prefix for completion-% displays (per-row progress,
+   *  future bar labels). Default 'Budget Used' — the visible % is
+   *  computed as `loggedHours / estimatedHours`, which is a budget
+   *  tracker, not a true completion tracker. Keep overridable for
+   *  future DM-7/DM-8 modes that may want different semantics. */
+  progressLabel?: string;
+  /** When true (default), the AuditListView's first-column record-ID chip
+   *  is NOT rendered. Salesforce consumers hit this because `task.name`
+   *  (or the fallback `task.id`) is the raw 18-char SF record ID
+   *  (`a0D0300000…`), which should never reach end users (roadmap DM-2:
+   *  names-not-IDs). Pass `false` from dev-/debug-only contexts to
+   *  surface the ID for troubleshooting. Default true. */
+  hideRecordIds?: boolean;
 }
 
 export interface TemplateStylesheet {
@@ -185,6 +208,9 @@ export interface TemplateOverrides {
   title?: string;
   version?: string;
   apiDocsUrl?: string;
+  fullscreenUrl?: string;
+  progressLabel?: string;
+  hideRecordIds?: boolean;
 }
 
 export interface AuditSubmitResult {
@@ -209,6 +235,13 @@ export interface TemplateConfig {
   version: string;
   /** Optional URL for the "API docs" anchor in TitleBar. See TemplateDefaults. */
   apiDocsUrl?: string;
+  /** Optional URL for the TitleBar "Fullscreen" button nav. See TemplateDefaults. */
+  fullscreenUrl?: string;
+  /** Optional label prefix for completion-% displays. See TemplateDefaults. */
+  progressLabel?: string;
+  /** Default-true: suppress AuditListView's raw-record-ID first column.
+   *  See TemplateDefaults. */
+  hideRecordIds?: boolean;
   /** Render mode — default 'fullscreen'. When 'embedded', chrome feature
    *  flags are forced off before resolution, leaving ContentArea only. */
   mode: AppMode;

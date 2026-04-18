@@ -149,6 +149,9 @@ export function resolveTemplate(
   let title = 'Nimbus Gantt';
   let version = '';
   let apiDocsUrl: string | undefined;
+  let fullscreenUrl: string | undefined;
+  let progressLabel: string | undefined;
+  let hideRecordIds: boolean | undefined;
 
   // Apply each template in the chain (root-first).
   chain.forEach((tpl) => {
@@ -161,6 +164,9 @@ export function resolveTemplate(
     if (d.title !== undefined)   title   = d.title;
     if (d.version !== undefined) version = d.version;
     if (d.apiDocsUrl !== undefined) apiDocsUrl = d.apiDocsUrl;
+    if (d.fullscreenUrl !== undefined) fullscreenUrl = d.fullscreenUrl;
+    if (d.progressLabel !== undefined) progressLabel = d.progressLabel;
+    if (d.hideRecordIds !== undefined) hideRecordIds = d.hideRecordIds;
     if (tpl.stylesheet && (tpl.stylesheet.url || tpl.stylesheet.inline || tpl.stylesheet.importedByBundler)) {
       stylesheet = tpl.stylesheet; // outermost (leaf) wins because chain is root-first
     }
@@ -179,6 +185,9 @@ export function resolveTemplate(
     if (overrides.title !== undefined)   title   = overrides.title;
     if (overrides.version !== undefined) version = overrides.version;
     if (overrides.apiDocsUrl !== undefined) apiDocsUrl = overrides.apiDocsUrl;
+    if (overrides.fullscreenUrl !== undefined) fullscreenUrl = overrides.fullscreenUrl;
+    if (overrides.progressLabel !== undefined) progressLabel = overrides.progressLabel;
+    if (overrides.hideRecordIds !== undefined) hideRecordIds = overrides.hideRecordIds;
     if (overrides.components) {
       components = mergeComponents(components, overrides.components);
     }
@@ -202,6 +211,9 @@ export function resolveTemplate(
     title,
     version,
     apiDocsUrl,
+    fullscreenUrl,
+    progressLabel,
+    hideRecordIds,
     // mode defaults to 'fullscreen'; IIFEApp / React driver may overwrite
     // this post-resolve to reflect the caller's MountOptions.mode.
     mode: 'fullscreen',
