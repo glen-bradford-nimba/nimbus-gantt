@@ -1,17 +1,20 @@
 # nimbus-gantt — HANDOFF
 
-Phase 0.5 (embedded/fullscreen mode prop) + two follow-up regression fixes
-surfaced by /v12. Unblocks Delivery-Hub's LWC swap from the legacy
-`window.DeliveryTimeline` bundle to the `window.NimbusGanttApp`
-single-source-of-truth. Track A (A1–A7) is next.
+**0.183 — interaction model cut.** IM-1/2/3 drag-to-edit dates + IM-4 drag-to-
+reprioritize + IM-5 onItemClick + IM-6 pan-on-deadspace + IM-7 viewport state +
+DM-3 hours/budget columns + DM-4 item-row over-budget warning + DM-5 header-row
+completion bar + CH-1 chrome toggle. Async contract for IM-1..4: optimistic +
+in-flight dim + per-task seq race resilience + revert-on-reject + error
+callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 
 ## Release metadata
 
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `639655645549d939caae769ded7daf18a78ff91e` |
-| Commit subject | `feat(app): 0.182 four-change polish bundle — fullscreenUrl + Budget Used + arrows + hide record IDs` |
+| Commit SHA (source — latest) | `41ec401` *(0.183 interaction cut)* |
+| Commit subject | `feat(0.183): interaction model cut — IM-1..7 + DM-3/4/5 + CH-1` |
+| 0.182 four-change polish bundle | `639655645549d939caae769ded7daf18a78ff91e` |
 | 0.182 VF pill-size defensive CSS | `7ea10aa6cf8f0c53ae76a8cf3674a5c780fcaa43` |
 | 0.182 2-row TitleBar | `abc5fe0a0e7f07d90c4db0186a9a86af19123d8b` |
 | 0.182 AuditListView v0 | `60d9891943632a2789017e9ad01abfb267f69aaa` |
@@ -46,22 +49,32 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **267,674 bytes** (~261 KB)
-- sha256: `1851cad1b99ad8b98753be4667a1973592851192d698624bbc85d2cca96e0bbf`
-- **Unchanged** since Phase 0.5 (`fa6a25e`) — no core source edits.
+- Size: **268,865 bytes** (~263 KB)
+- sha256: `34a9cf8c306cad4d236b91a1ec98fa5746a50aea59c3e0941345bbc251e7b0d3`
+- **Must re-copy.** `41ec401` adds:
+  - `DragManager.scrollManager` option + pan state (IM-6)
+  - `PriorityGroupingPlugin` tracks `totalLogged` alongside `totalHours`;
+    header task color switches to warning (`#f59e0b`) on aggregate over-
+    budget; label uses unclamped aggregate % (DM-5)
+  - `NimbusGantt` passes `scrollManager` into DragManager (IM-6 wire-up)
 
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **166,457 bytes** (~163 KB)
-- sha256: `becefc175efe42316cf16e4cb023b277a86c33ab210ed9c235a0dcf01677df25`
-- **Must re-copy.** The `6396556` four-change bundle adds
-  `fullscreenUrl` + `progressLabel` + `hideRecordIds` config props,
-  plumbs them through resolver / IIFEApp / AuditListView, updates the
-  Fullscreen button's 4-way precedence, relabels the per-row progress
-  % to "Budget Used XX%", bumps `injectLegacyNgCss` arrow values
-  (10px/16px/font-family) to match the CSS file, and relabels gantt-bar
-  hours label from "(XX%)" → "(XX% budget)".
+- Size: **179,076 bytes** (~175 KB)
+- sha256: `55f9c2dc7d7eb6c6b9a9261ee0585f3b1addf4b70dd52eb8867589afb6ecee91`
+- **Must re-copy.** `41ec401` (0.183) adds:
+  - `onItemEdit` / `onItemEditError` async contract (IM-1/2/3) with
+    per-task seq race resilience + revert-on-reject + in-flight dim
+  - `onItemReorder` / `onItemReorderError` async contract (IM-4) via
+    intercepted dragReparent patch routing
+  - `onItemClick(taskId)` id-first click alias (IM-5, both paths)
+  - `onViewportChange` debounced (150ms) + `initialViewport` (IM-7)
+  - `chromeVisibleDefault` + `handle.toggleChrome()` (CH-1)
+  - `features.hoursColumn` / `features.budgetUsedColumn` conditional
+    gantt columns (DM-3)
+  - `features.headerRowCompletionBar` flag (DM-5 fill suppression)
+  - `pipeline.ts` OVER_BUDGET_COLOR warning branch on leaves + parents (DM-4)
 
 ### `cloudnimbustemplatecss.resource` source (Salesforce) / v12 stylesheet path
 
@@ -135,6 +148,87 @@ app page (`Delivery_Gantt_Standalone`).
 it and injects a `<style>` element INSIDE the container element — this is
 the path that reliably pierces Salesforce synthetic shadow DOM under
 `lwc:dom="manual"`.
+
+## 0.183 interaction-model API (for DH CC + CN CC)
+
+New callbacks and options on `NimbusGanttApp.mount(container, options)`.
+All are optional — mounts that don't wire them keep legacy behaviour.
+
+```typescript
+window.NimbusGanttApp.mount(container, {
+  // ...existing mode/tasks/onPatch/cssUrl/engine...
+
+  // IM-1/2/3 — drag-to-edit dates (bar body moves both; edges move one).
+  onItemEdit?: (taskId: string, changes: { startDate?: string; endDate?: string })
+    => Promise<void> | void,
+  onItemEditError?: (taskId: string, error: Error) => void,
+
+  // IM-4 — drag-to-reprioritize (row drag, same async contract as IM-1..3).
+  onItemReorder?: (taskId: string, payload: { newIndex: number; newParentId?: string | null })
+    => Promise<void> | void,
+  onItemReorderError?: (taskId: string, error: Error) => void,
+
+  // IM-5 — id-first click alias (alongside legacy onTaskClick).
+  onItemClick?: (taskId: string) => void,
+
+  // IM-7 — viewport emission (debounced 150ms) + restore at mount.
+  onViewportChange?: (state: { scrollLeft: number; scrollTop: number; zoom: string })
+    => void,
+  initialViewport?: { scrollLeft?: number; scrollTop?: number; zoom?: string },
+
+  // CH-1 — chrome visibility.
+  chromeVisibleDefault?: boolean,   // default true
+
+  // DM-3 / DM-5 feature flags.
+  overrides: {
+    features: {
+      hoursColumn?: boolean,              // default false
+      budgetUsedColumn?: boolean,         // default false
+      headerRowCompletionBar?: boolean,   // default true
+    },
+  },
+});
+
+// CH-1 — runtime toggle, same handle returned by mount().
+const handle = window.NimbusGanttApp.mount(container, { ... });
+handle.toggleChrome(false);   // hide all chrome slots
+handle.toggleChrome();         // flip (back on)
+```
+
+**Async contract for IM-1/2/3 + IM-4:**
+
+1. On drop, library applies an optimistic update to its internal task state
+   and renders the affected bar/row with a dimmed color (in-flight visual).
+2. Library calls `onItemEdit` / `onItemReorder` and awaits the returned
+   promise.
+3. **Resolve** → commit; in-flight dim clears.
+4. **Reject** → library reverts the task to its captured original dates /
+   parent / sortOrder, re-renders, then calls `onItem{Edit,Reorder}Error`.
+   Hosts surface their own toast (Lightning `ShowToastEvent`, etc.) — the
+   library stays UI-agnostic.
+5. **Race resilience** — each edit gets a per-task sequence number. If the
+   user drags again before the first promise settles, the stale settle is
+   ignored. Last-edit-wins, without losing the in-flight edit that
+   resolves last.
+
+**Originals capture:** library captures original values at the FIRST in-
+flight edit of a chain and reuses them until the chain clears. Revert
+restores truly-persisted state, not a prior in-flight optimistic value.
+
+**IM-6 pan viewport** — pointer-drag on canvas deadspace (non-bar area)
+pans horizontally and vertically. Automatic in interactive (non-readOnly)
+mode — no config required; readOnly mounts do not pan today. Built into
+`DragManager` via the `scrollManager` option, wired from `NimbusGantt`.
+
+**DM-4 over-budget color** (item rows) — when `loggedHours >= estimatedHours`,
+the bar renders in the warning hue `#f59e0b`. Applies to leaves in pass 1
+and parent rows in pass 3 of `buildTasks`. Progress fill is clamped 0-1 so
+bar width never exceeds the task duration.
+
+**DM-5 over-budget color** (header rows) — `PriorityGroupingPlugin` tracks
+`totalLogged` alongside `totalHours` and switches the header task color to
+`#f59e0b` when aggregate `totalLogged >= totalHours`. Header label uses the
+UNCLAMPED aggregate % so overruns like `(116% budget)` read at a glance.
 
 ## Validation checklist (Cowork after Delivery-Hub scratch deploy)
 
