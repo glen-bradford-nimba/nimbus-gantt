@@ -1041,7 +1041,13 @@ export class IIFEApp {
         patchLog.unshift({ ts: new Date(), desc: title + ': ' + parts.join(', ') });
         if (patchLog.length > 50) patchLog.pop();
       }
-      dispatch({ type: 'PATCH', patch });
+      // NOTE (2026-04-18 regression fix): removed `dispatch({ type: 'PATCH', patch })`
+      // here. `dispatch` intercepts PATCH events and routes them back to
+      // onTaskPatch(ev.patch), which creates infinite mutual recursion:
+      //   onTaskPatch -> dispatch({PATCH}) -> onTaskPatch -> dispatch({PATCH}) -> ...
+      // -> RangeError: Maximum call stack size exceeded, swallowed by the
+      // try/catch in onTaskEditAsync, nothing persists. Introduced in a49a130.
+      // The reducer has no PATCH case, so the removed call was pure recursion.
       rawOnPatch(patch);
       if (_patchRefreshTimer.t) clearTimeout(_patchRefreshTimer.t);
       _patchRefreshTimer.t = setTimeout(() => { _patchRefreshTimer.t = null; refreshGantt(); }, 50);
