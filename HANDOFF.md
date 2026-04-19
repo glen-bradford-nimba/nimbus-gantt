@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `b2e22ef` *(0.183.1 hotfix)* |
-| Commit subject | `fix(0.183.1): reorder coalescing + titlebar cursor + Unpin→toggleChrome` |
+| Commit SHA (source — latest) | `ed82274` *(0.183.2 silent-swallow fix)* |
+| Commit subject | `fix(0.183.2): silent-swallow regression in onTaskEditAsync + onTaskReorderAsync` |
+| 0.183.1 polish | `b2e22ef` |
 | 0.183 interaction cut (source) | `41ec401eac5ce8…` |
 | 0.183 HANDOFF bump | `5d509af…` |
 | 0.182 four-change polish bundle | `639655645549d939caae769ded7daf18a78ff91e` |
@@ -63,9 +64,28 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **180,571 bytes** (~176 KB)
-- sha256: `81a872761b04f6574e572500ff75d374f28c3afa2fd8cdae19adba66c329200a`
-- **Must re-copy.** `b2e22ef` (0.183.1 hotfix) adds:
+- Size: **182,275 bytes** (~178 KB)
+- sha256: `19273a9f760fd2168df1f3a4a756b95a329ac55ec33ec0d133285825a9c638a9`
+- **Must re-copy.** `ed82274` (0.183.2 demo-blocker fix) patches a
+  silent-return regression vs the legacy onPatch contract:
+  - `onTaskEditAsync` + `onTaskReorderAsync` were returning silently
+    when `allTasks.findIndex(id) === -1`. The engine had already
+    painted the bar at the new position via its internal TASK_MOVE
+    state dispatch, so the user saw a successful visual move — but the
+    host callback never fired, no Apex save, zero `[DH onItemEdit]`
+    logs. Legacy `onTaskPatch` always fired `rawOnPatch` in this case;
+    the 0.183 async path regressed that contract.
+  - Patched: when idx === -1, skip the optimistic update + seq tracking
+    (no originals to capture), emit `diag('warn:task-not-in-allTasks')`
+    so divergence is observable, and STILL call
+    `options.onItemEdit` / `options.onItemReorder` (or `rawOnPatch`
+    fallback). Also fires the `*Error` callbacks on reject even
+    without a revert target.
+  - Closes the round-4 symptom (bar moved visually, no callback,
+    no Apex) AND the parallel IM-4 tree-row zero-fires on DH
+    fd9cf675 + successors.
+
+Prior entry (0.183.1 hotfix `b2e22ef`) added:
   - **Reorder patch coalescing** — onItemReorder now fires exactly once
     per drop with `{ newIndex, newParentId?, newPriorityGroup? }` merged
     payload. Was firing up to 3 times with partial payloads (priorityGroup,
