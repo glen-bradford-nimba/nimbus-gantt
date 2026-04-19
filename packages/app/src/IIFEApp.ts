@@ -103,6 +103,55 @@ function buildGanttCols(features: FeatureFlags): GanttCol[] {
  */
 const INITIAL_VIEWPORT_OFFSET_MS = 14 * 24 * 60 * 60 * 1000;
 
+/**
+ * 0.185.1 — snap a focus date to the start-of-period for the active zoom.
+ * Used by `initialFocusDate` mount option + `handle.scrollToDate()` so the
+ * landing position aligns with the period column the user expects to see
+ * at the left edge.
+ *
+ *   'day'     → date as-is
+ *   'week'    → snap to Monday (ISO 8601 week start)
+ *   'month'   → snap to the 1st of the month
+ *   'quarter' → snap to the 1st of the quarter (Jan/Apr/Jul/Oct)
+ *
+ * Operates in UTC throughout — same convention pipeline.ts uses for date
+ * parsing so `addDays`/`parseDate`/the snap math don't disagree about the
+ * day boundary.
+ */
+function snapDateToZoomPeriod(date: Date, zoom: string | undefined): Date {
+  const d = new Date(date.getTime());
+  d.setUTCHours(0, 0, 0, 0);
+  if (zoom === 'week') {
+    // ISO 8601: Monday = 1, Sunday = 0. Compute distance back to Monday.
+    const dow = d.getUTCDay();
+    const offsetDays = dow === 0 ? -6 : 1 - dow;
+    d.setUTCDate(d.getUTCDate() + offsetDays);
+  } else if (zoom === 'month') {
+    d.setUTCDate(1);
+  } else if (zoom === 'quarter') {
+    const m = d.getUTCMonth();
+    const qm = Math.floor(m / 3) * 3;
+    d.setUTCMonth(qm, 1);
+  }
+  // 'day' or undefined — no snap.
+  return d;
+}
+
+/**
+ * 0.185.1 — parse an `initialFocusDate` / `scrollToDate` argument into a
+ * Date. Accepts ISO strings ('2026-04-19', '2026-04-19T00:00:00Z') or a
+ * Date instance. Returns null on parse failure so callers can short-circuit
+ * cleanly without throwing inside the scroll hot path.
+ */
+function parseFocusDate(input: string | Date | undefined | null): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) return isNaN(input.getTime()) ? null : input;
+  // ISO-only path. Date.parse handles both 'YYYY-MM-DD' and full ISO.
+  const t = Date.parse(input);
+  if (isNaN(t)) return null;
+  return new Date(t);
+}
+
 /* ── Legacy gantt-CSS injection (kept from v5 for library class overrides) ──
  *
  * Also carries CRITICAL template-flex rules so the gantt canvas measures the
@@ -491,22 +540,28 @@ export class IIFEApp {
       }
       inst.setData(gtasks, []);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
-      // Scroll so (today - 14 days) lands at the LEFT EDGE of the viewport.
-      // 0.181 used inst.scrollToDate(today-14d), but the engine's
-      // scrollToDate centers the date in the viewport (NimbusGantt.ts:309
-      // computes `targetX = x - viewportWidth/2`). With today-14d centered,
-      // viewportWidth/2-worth of past dates appears LEFT of today-14d,
-      // pushing today off-center to the right — and the centering math
-      // often clamps to 0 (negative targetX) so the scroll silently
-      // no-ops. v9 (DeliveryTimelineV5.tsx:1176-1188) bypasses scrollToDate
-      // and calls timeScale.dateToX + scrollManager.scrollToX directly to
-      // get true left-edge semantics. We replicate that pattern here.
+      // Initial viewport positioning. 0.185.1 priority order matches the
+      // chrome-aware path: scrollLeft (px) > initialFocusDate (semantic) >
+      // today-14d default. v9-parity rationale documented in the chrome-
+      // aware mount path's equivalent block.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setTimeout(() => {
         try {
           const gi = inst as { timeScale?: { dateToX?: (d: Date) => number }; scrollManager?: { scrollToX?: (x: number) => void } };
-          const x = gi.timeScale?.dateToX?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
-          if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+          const iv = options.initialViewport;
+          if (iv && typeof iv.scrollLeft === 'number') {
+            gi.scrollManager?.scrollToX?.(Math.max(0, iv.scrollLeft));
+          } else if (options.initialFocusDate) {
+            const parsed = parseFocusDate(options.initialFocusDate);
+            if (parsed) {
+              const snapped = snapDateToZoomPeriod(parsed, state.zoom);
+              const x = gi.timeScale?.dateToX?.(snapped);
+              if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+            }
+          } else {
+            const x = gi.timeScale?.dateToX?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
+            if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+          }
         } catch (_e) { /* ok */ }
       }, 50);
 
@@ -571,6 +626,17 @@ export class IIFEApp {
         getPendingEdits(): PendingEdit[] { return []; },
         commitEdits(): Promise<CommitEditsResult> { return Promise.resolve({ committed: [] }); },
         discardEdits(): void { /* no-op in engineOnly */ },
+        /** 0.185.1 — same impl as the chrome-aware path. Snap then scroll. */
+        scrollToDate(date: string | Date): void {
+          const parsed = parseFocusDate(date);
+          if (!parsed) return;
+          try {
+            const gi = inst as { timeScale?: { dateToX?: (d: Date) => number }; scrollManager?: { scrollToX?: (x: number) => void } };
+            const snapped = snapDateToZoomPeriod(parsed, state.zoom);
+            const x = gi.timeScale?.dateToX?.(snapped);
+            if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+          } catch (_e) { /* ok */ }
+        },
         destroy() { IIFEApp.unmount(container); },
       };
     }
@@ -1510,10 +1576,11 @@ export class IIFEApp {
 
       // Initial viewport positioning.
       //
-      // IM-7 (0.183): when options.initialViewport provides scrollLeft /
-      // scrollTop, those win over the default "today - 14 days" math.
-      // When only zoom is provided (or nothing), fall back to the v9
-      // today-14d positioning (same rationale as the engineOnly path).
+      // 0.185.1 — three-way priority (most specific wins):
+      //   1. options.initialViewport.scrollLeft (explicit pixels)
+      //   2. options.initialFocusDate (semantic — library snaps to zoom period
+      //      then computes pixels via timeScale.dateToX)
+      //   3. today-14d default (v9-parity fallback)
       setTimeout(() => {
         try {
           const gi = ganttInst as {
@@ -1533,6 +1600,13 @@ export class IIFEApp {
             } else {
               gi.scrollManager?.scrollToX?.(x);
               gi.scrollManager?.scrollToY?.(y);
+            }
+          } else if (options.initialFocusDate) {
+            const parsed = parseFocusDate(options.initialFocusDate);
+            if (parsed) {
+              const snapped = snapDateToZoomPeriod(parsed, state.zoom);
+              const x = gi.timeScale?.dateToX?.(snapped);
+              if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
             }
           } else {
             const x = gi.timeScale?.dateToX?.(new Date(Date.now() - INITIAL_VIEWPORT_OFFSET_MS));
@@ -1813,6 +1887,25 @@ export class IIFEApp {
         syncPendingChanges();
         refreshGantt();
         return { committed };
+      },
+      /** 0.185.1 — imperative scroll-to-date. Snaps to start-of-period for
+       *  the current zoom (Mon for week, 1st for month, 1st of quarter for
+       *  quarter; day = no snap), then computes scrollLeft via
+       *  `timeScale.dateToX` and lands the date at the LEFT edge. No-op if
+       *  the engine isn't mounted yet (early call before initGantt). */
+      scrollToDate(date: string | Date): void {
+        if (!ganttInst) return;
+        const parsed = parseFocusDate(date);
+        if (!parsed) return;
+        try {
+          const gi = ganttInst as {
+            timeScale?: { dateToX?: (d: Date) => number };
+            scrollManager?: { scrollToX?: (x: number) => void };
+          };
+          const snapped = snapDateToZoomPeriod(parsed, state.zoom);
+          const x = gi.timeScale?.dateToX?.(snapped);
+          if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
+        } catch (_e) { /* ok */ }
       },
       /** 0.185 — visual-only revert. Restores `original` on every buffered
        *  task and clears the buffer. Host never sees a callback. Use when

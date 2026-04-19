@@ -197,6 +197,25 @@ export interface MountOptions {
     zoom?: string;
   };
 
+  /** 0.185.1 — declarative initial focus date. When set, the library
+   *  computes scrollLeft to land the given date at the left edge of the
+   *  viewport, snapped to start-of-period for the active zoom:
+   *    - `zoom: 'day'`     → date as-is
+   *    - `zoom: 'week'`    → snap to Monday of the date's ISO week
+   *    - `zoom: 'month'`   → snap to the 1st of the date's month
+   *    - `zoom: 'quarter'` → snap to the 1st of the date's quarter
+   *
+   *  Mount-time precedence (most specific wins):
+   *    1. `initialViewport.scrollLeft` (explicit pixels)
+   *    2. `initialFocusDate` (semantic — library computes pixels)
+   *    3. today-14d default (library v9-parity fallback)
+   *
+   *  Useful for fullscreen surfaces that know "land on today" but can't
+   *  compute pxPerDay themselves. DH path C: ship the prop wiring
+   *  unconditionally — older NG bundles ignore it (no-op), newer bundles
+   *  honor it (no further host change needed). */
+  initialFocusDate?: string;
+
   /** Initial chrome visibility. Default true. When false the TitleBar,
    *  FilterBar, ZoomBar, StatsPanel, Sidebar, AuditPanel, and HrsWkStrip
    *  are all hidden at mount — embedded-mode-ish without forcing mode
@@ -306,6 +325,14 @@ export interface AppInstance {
    *  callback — these edits never existed as far as persistence is
    *  concerned. */
   discardEdits?(): void;
+
+  /** 0.185.1 — scroll the gantt so `date` lands at the LEFT edge of the
+   *  viewport. Host doesn't need to know `pxPerDay` for the current zoom —
+   *  the library uses its own `timeScale.dateToX` to compute the offset.
+   *  Useful for fullscreen surfaces that want to land on "today" or any
+   *  named date after mount. Accepts either an ISO string ('2026-04-19')
+   *  or a Date. No-op if the engine isn't mounted yet. */
+  scrollToDate?(date: string | Date): void;
 }
 
 /** Internal mapped task passed to NimbusGantt engine */
