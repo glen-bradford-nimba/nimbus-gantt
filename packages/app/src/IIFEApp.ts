@@ -740,6 +740,10 @@ export class IIFEApp {
       changes: { startDate?: string; endDate?: string },
     ): Promise<void> {
       const idx = allTasks.findIndex((t) => t.id === taskId);
+      // 0.183.3-diag — entry probe with idx + onItemEdit-presence so we can
+      // see in one log whether we're on happy path or divergence path, and
+      // whether the host wired the new async callback.
+      try { console.log('[NG] onTaskEditAsync hit', taskId, 'idx=', idx, 'hasOnItemEdit=', !!options.onItemEdit, 'hasOnPatch=', !!options.onPatch); } catch (_e) { /* ok */ }
       if (idx === -1) {
         // 0.183.2 — divergence path. The engine fired onTaskMove/Resize with
         // a task the app layer doesn't know about (allTasks replaced via
@@ -794,7 +798,16 @@ export class IIFEApp {
         // Legacy: immediate commit via onPatch. No async contract to honor.
         inflightTaskIds.delete(taskId);
         pendingEdits.delete(taskId);
+        // 0.183.3-diag — instrument the rawOnPatch fire site. If we see this
+        // log on CN v12 but no proForma update happens, the break is in
+        // CN's onPatch handler / onPatchRef.current capture. If we DON'T
+        // see this log, the break is upstream in onTaskEditAsync.
+        try { console.log('[NG] rawOnPatch firing', { taskId, startDate: nextStart, endDate: nextEnd, hasOnPatch: !!options.onPatch }); } catch (_e) { /* ok */ }
         rawOnPatch({ id: taskId, startDate: nextStart, endDate: nextEnd });
+        // Permanent diag emit so future regressions on the happy-path
+        // legacy branch don't go silent. Today's regression hid because
+        // every code path on this branch ran without emitting anything.
+        try { diag('edit:commit', { taskId, nextStart, nextEnd, via: 'rawOnPatch' }); } catch (_e) { /* ok */ }
         refreshGantt();
         return;
       }
@@ -1212,11 +1225,15 @@ export class IIFEApp {
           options.onTaskHover?.(id);
         },
         onTaskMove: (task: { id: string }, s: string, e: string) => {
+          // 0.183.3-diag — engine→main-path arrival probe.
+          try { console.log('[NG] main onTaskMove received', task?.id, s, e); } catch (_e) { /* ok */ }
           if (!task || !task.id || isBucketId(task.id)) return;
           // IM-1 (0.183) — drag whole bar: both start + end shifted.
           onTaskEditAsync(task.id, s, e, { startDate: s, endDate: e });
         },
         onTaskResize: (task: { id: string }, s: string, e: string) => {
+          // 0.183.3-diag — engine→main-path arrival probe (resize variant).
+          try { console.log('[NG] main onTaskResize received', task?.id, s, e); } catch (_e) { /* ok */ }
           if (!task || !task.id || isBucketId(task.id)) return;
           // IM-2/3 (0.183) — edge drag: diff against the pre-edit task so
           // `changes` carries only the moved field (left-edge → start only,

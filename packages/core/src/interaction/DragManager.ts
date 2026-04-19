@@ -463,6 +463,11 @@ export class DragManager {
           startDate: newStart,
           endDate: newEnd,
         });
+        // 0.183.3-diag — engine emit point for bar-body drag commit. If this
+        // log fires but downstream IIFEApp probes don't, the regression is
+        // in the engine→app callback wiring (config.onTaskMove not making
+        // it through to options.onTaskMove on this Ctor instance).
+        try { console.log('[NG engine] drag commit move', task.id, newStart, newEnd, 'hasCb=', !!this.options.onTaskMove); } catch (_e) { /* ok */ }
         this.options.onTaskMove?.(task, newStart, newEnd);
         break;
       }
@@ -485,6 +490,7 @@ export class DragManager {
           startDate: finalStart,
           endDate: this.dragOriginalEndDate,
         });
+        try { console.log('[NG engine] drag commit resize-left', task.id, finalStart, this.dragOriginalEndDate, 'hasCb=', !!this.options.onTaskResize); } catch (_e) { /* ok */ }
         this.options.onTaskResize?.(task, finalStart, this.dragOriginalEndDate);
         break;
       }
@@ -507,6 +513,7 @@ export class DragManager {
           startDate: this.dragOriginalStartDate,
           endDate: finalEnd,
         });
+        try { console.log('[NG engine] drag commit resize-right', task.id, this.dragOriginalStartDate, finalEnd, 'hasCb=', !!this.options.onTaskResize); } catch (_e) { /* ok */ }
         this.options.onTaskResize?.(task, this.dragOriginalStartDate, finalEnd);
         break;
       }
