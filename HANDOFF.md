@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `5ba6d16` *(0.185 batchMode + handle verbs)* |
-| Commit subject | `feat(0.185): IIFE batchMode + handle.{getPendingEdits,commitEdits,discardEdits}` |
+| Commit SHA (source — latest) | `7a33285` *(0.185.1 initialFocusDate + scrollToDate)* |
+| Commit subject | `feat(0.185.1): initialFocusDate mount option + handle.scrollToDate` |
+| 0.185 batchMode + handle verbs | `5ba6d16` |
 | 0.184 audit preview modal | `b9a3ccf` |
 | 0.183.4 drag-save regression fix | `702d6b0` |
 | 0.183.3-diag instrumentation | `f24cc24` |
@@ -75,9 +76,20 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **201,634 bytes** (~197 KB)
-- sha256: `b5438805ce600c52793c992c1dfe74e11072201a2887cb1f9147d5502910ab49`
-- **Must re-copy.** `5ba6d16` (0.185) adds:
+- Size: **205,425 bytes** (~201 KB)
+- sha256: `81fa4e1d786d803e5170e60d670b027026bdd6d1da9deb717757f16a141dcca1`
+- **Must re-copy.** `7a33285` (0.185.1) adds for DH Full Bleed unblock:
+  - **`initialFocusDate?: string`** mount option — declarative
+    "land on this date" with snap-to-period (week → Mon, month → 1st,
+    quarter → 1st of Jan/Apr/Jul/Oct). Mount-time priority:
+    `initialViewport.scrollLeft` > `initialFocusDate` > today-14d default.
+    DH ships the prop wiring unconditionally (path C); older NG bundles
+    no-op, this bundle honors.
+  - **`handle.scrollToDate(date: string | Date)`** — imperative variant
+    for post-mount focus changes (e.g. "press T for today" shortcut).
+    Same snap+scroll path. Available on both mount paths.
+
+Prior entry (0.185 batchMode `5ba6d16`):
   - `batchMode: true` mount option — buffers onItemEdit/onItemReorder
     instead of forwarding per-edit. Default false → existing per-patch
     consumers (CN v10, DH today) untouched.
