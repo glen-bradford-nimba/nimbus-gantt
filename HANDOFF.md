@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `b9a3ccf` *(0.184 audit preview modal)* |
-| Commit subject | `feat(0.184): AuditPanel preview modal on submit (vanilla + react)` |
+| Commit SHA (source — latest) | `5ba6d16` *(0.185 batchMode + handle verbs)* |
+| Commit subject | `feat(0.185): IIFE batchMode + handle.{getPendingEdits,commitEdits,discardEdits}` |
+| 0.184 audit preview modal | `b9a3ccf` |
 | 0.183.4 drag-save regression fix | `702d6b0` |
 | 0.183.3-diag instrumentation | `f24cc24` |
 | 0.183.2 silent-swallow fix | `ed82274` |
@@ -74,9 +75,32 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **190,702 bytes** (~186 KB)
-- sha256: `17120768648f7f2f8fd114ccefa7e4a7adbbee116ce4fa3514c9d3b9dc090f13`
-- **Must re-copy.** Two cumulative changes since 0.183.3-diag:
+- Size: **201,634 bytes** (~197 KB)
+- sha256: `b5438805ce600c52793c992c1dfe74e11072201a2887cb1f9147d5502910ab49`
+- **Must re-copy.** `5ba6d16` (0.185) adds:
+  - `batchMode: true` mount option — buffers onItemEdit/onItemReorder
+    instead of forwarding per-edit. Default false → existing per-patch
+    consumers (CN v10, DH today) untouched.
+  - `handle.getPendingEdits()` → `PendingEdit[]` snapshot of buffer.
+  - `handle.commitEdits()` → flushes buffer (edits first, reorders second
+    to dodge DH Apex sortOrder neighbor-shift race). Resolves with
+    `{ committed }` on full success; throws `{ failedAt, successful, error }`
+    on first failure (partial-rollback — failed + remaining stay in
+    buffer for retry or discard).
+  - `handle.discardEdits()` → visual-only revert to captured originals.
+    Host never sees the buffered edits.
+  - Auto-derives `tplConfig.pendingChanges` from buffer when batchMode
+    is true → AuditPanel preview modal activates with NO host-side
+    plumbing. Host-supplied pendingChanges still wins on batchMode=false.
+  - Buffered bars dim via new `dirtyTaskIds` set (parallels inflight).
+  - `NimbusGanttAppReact` gets `batchMode?: boolean` + `handleRef?:
+    MutableRefObject` props. React-driver caveat: engineOnly mount stubs
+    the batch verbs (returns empty/no-op) — real React-driver batch is
+    a follow-up cut.
+  - `onItemReorder` payload type extended with `newPriorityGroup?: string`
+    (formalizes the field 0.183.1 has been passing implicitly).
+
+Prior entry (0.184 audit modal `b9a3ccf`):
   - **`702d6b0` (0.183.4 demo-blocker fix)** — removes infinite-recursion
     `dispatch({ type: 'PATCH', patch })` call from inside `onTaskPatch`.
     The reducer's PATCH case routed back to `onTaskPatch`, creating
