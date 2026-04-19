@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `ed82274` *(0.183.2 silent-swallow fix)* |
-| Commit subject | `fix(0.183.2): silent-swallow regression in onTaskEditAsync + onTaskReorderAsync` |
+| Commit SHA (source — latest) | `f24cc24` *(0.183.3-diag instrumentation)* |
+| Commit subject | `diag(0.183.3): drag-save chain instrumentation for CN v12 regression` |
+| 0.183.2 silent-swallow fix | `ed82274` |
 | 0.183.1 polish | `b2e22ef` |
 | 0.183 interaction cut (source) | `41ec401eac5ce8…` |
 | 0.183 HANDOFF bump | `5d509af…` |
@@ -52,9 +53,16 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **268,865 bytes** (~263 KB)
-- sha256: `34a9cf8c306cad4d236b91a1ec98fa5746a50aea59c3e0941345bbc251e7b0d3`
-- **Must re-copy.** `41ec401` adds:
+- Size: **269,229 bytes** (~263 KB)
+- sha256: `3c48790efd885cb5f7bbafb3e38b297037c0bbbef750a52c3fcd1bd19461852b`
+- **Must re-copy.** `f24cc24` (0.183.3-diag) adds three `console.log`
+  probes inside `DragManager.completeDrag` at the engine emit sites
+  (move, resize-left, resize-right). Lets next-session diagnosis see
+  whether the engine fires the callback at all on a problematic surface.
+  Wrapped in try/catch — cannot throw inside the drag-release hot path.
+  Probes will be removed once the regression is identified + fixed.
+
+Prior entry (0.183 cut `41ec401`) added:
   - `DragManager.scrollManager` option + pan state (IM-6)
   - `PriorityGroupingPlugin` tracks `totalLogged` alongside `totalHours`;
     header task color switches to warning (`#f59e0b`) on aggregate over-
@@ -64,9 +72,21 @@ deploy step.
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **182,275 bytes** (~178 KB)
-- sha256: `19273a9f760fd2168df1f3a4a756b95a329ac55ec33ec0d133285825a9c638a9`
-- **Must re-copy.** `ed82274` (0.183.2 demo-blocker fix) patches a
+- Size: **183,115 bytes** (~179 KB)
+- sha256: `23c62c0151f9f4a94048123473f58bb2f375e3c4443ed04274f263e9cfbdf5b5`
+- **Must re-copy.** `f24cc24` (0.183.3-diag) adds four console.log
+  probes + one permanent `diag('edit:commit', ...)` emit:
+  - `[NG] main onTaskMove received` at IIFEApp.ts:1215 — engine→app entry
+  - `[NG] main onTaskResize received` at IIFEApp.ts:1220 — resize variant
+  - `[NG] onTaskEditAsync hit` at line ~744 — logs idx + onItemEdit/onPatch presence
+  - `[NG] rawOnPatch firing` at line ~797 — at the legacy-fallback fire site
+  - **Permanent** `diag('edit:commit', { taskId, nextStart, nextEnd, via: 'rawOnPatch' })`
+    so future regressions on the legacy branch don't go silent (today's
+    bug hid because no code path on the happy/legacy branch emitted anything).
+  - Probes wrapped in try/catch; cannot throw inside hot paths.
+  - Used to diagnose CN v12 drag-save regression observed 2026-04-18 evening.
+
+Prior entry (0.183.2 demo-blocker `ed82274`) patched a
   silent-return regression vs the legacy onPatch contract:
   - `onTaskEditAsync` + `onTaskReorderAsync` were returning silently
     when `allTasks.findIndex(id) === -1`. The engine had already
