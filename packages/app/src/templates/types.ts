@@ -234,6 +234,23 @@ export interface AuditSubmitResult {
 
 export type AuditSubmitHandler = (note: string) => Promise<AuditSubmitResult>;
 
+/**
+ * 0.184 — shape for the AuditPanel preview modal. One entry per item with
+ * pending changes. `descs` is preferred for display (human-readable); fields
+ * is the raw list for grouping/stats. Consumers (ProFormaAdapter on CN,
+ * deliveryProFormaTimeline on DH) compute these from their local override
+ * map and pass them through `TemplateConfig.pendingChanges`.
+ */
+export interface AuditPreviewItem {
+  id: string;
+  /** Display title — falls back to id if absent. */
+  title?: string;
+  /** Raw list of fields that differ from baseline (e.g. ["start","end"]). */
+  fields: string[];
+  /** Human-readable change descriptions (e.g. ["dates → 2026-04-13 → 2026-04-17"]). */
+  descs: string[];
+}
+
 export interface TemplateConfig {
   templateName: string;
   features: FeatureFlags;
@@ -270,6 +287,11 @@ export interface TemplateConfig {
    *  the pending-patch count on success. When absent, falls back to a
    *  local RESET_PATCHES dispatch (no persistence). */
   onAuditSubmit?: AuditSubmitHandler;
+  /** 0.184 — list of pending changes surfaced in the AuditPanel preview
+   *  modal when the user clicks Submit. When present + non-empty, the panel
+   *  opens a confirm-before-commit modal listing every change. When empty or
+   *  absent, Submit fires onAuditSubmit immediately (legacy behaviour). */
+  pendingChanges?: AuditPreviewItem[];
   /** Optional runtime override for the AuditPanel dirty flag. When present,
    *  this wins over state.pendingPatchCount. Consumers with their own state
    *  store (e.g. useProFormaState) should pipe their isDirty here so the
