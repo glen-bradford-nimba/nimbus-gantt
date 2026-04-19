@@ -16,10 +16,11 @@
  */
 import type {
   NormalizedTask, AppInstance, MountOptions, TaskPatch, NimbusGanttEngine,
+  PendingEdit, CommitEditsResult,
 } from './types';
 import type {
   TemplateOverrides, TemplateConfig, AppState, AppEvent, SlotProps, SlotData, PatchLogEntry,
-  VanillaSlotInstance, FeatureFlags,
+  VanillaSlotInstance, FeatureFlags, AuditPreviewItem,
 } from './templates/types';
 import {
   buildDepthMap, buildTasks, buildTasksEpic, applyFilter, computeStats,
@@ -558,6 +559,18 @@ export class IIFEApp {
           state.groupBy = groupBy as AppState['groupBy'];
           _syncToCanvas();
         },
+        /** 0.185 — engineOnly batchMode stubs.
+         *
+         *  The engineOnly mount path doesn't currently buffer edits — it
+         *  forwards onTaskMove/onTaskResize directly to options.onPatch.
+         *  These stubs exist so NimbusGanttAppReact consumers calling
+         *  `handleRef.current.commitEdits()` get a clean no-op rather than
+         *  a TypeError. Real batch buffering for the React driver is queued
+         *  for a follow-up cut once a React consumer needs it (CN v10/v12
+         *  stay on per-patch flow per 0.185 spec). */
+        getPendingEdits(): PendingEdit[] { return []; },
+        commitEdits(): Promise<CommitEditsResult> { return Promise.resolve({ committed: [] }); },
+        discardEdits(): void { /* no-op in engineOnly */ },
         destroy() { IIFEApp.unmount(container); },
       };
     }
@@ -708,14 +721,117 @@ export class IIFEApp {
      *
      * When options.onItemEdit is absent, date-edits fall through to the
      * legacy onPatch path (no async contract, fires immediately). */
-    interface PendingEdit {
+    /** Local seq-tracking entry for the 0.183 in-flight async path. Renamed
+     *  from `PendingEdit` in 0.185 to avoid colliding with the public
+     *  `PendingEdit` type (which describes the batch buffer). */
+    interface EditSeqEntry {
       seq: number;
       origStart: string;
       origEnd: string;
     }
-    const pendingEdits = new Map<string, PendingEdit>();
+    const pendingEdits = new Map<string, EditSeqEntry>();
     let nextEditSeq = 0;
     const inflightTaskIds = new Set<string>();
+
+    /* 0.185 — Batch buffer for batchMode mounts.
+     *
+     * Key: taskId+'::'+kind so an edit + a reorder on the same task can
+     * coexist (DH may want to commit them as separate Apex calls).
+     * Coalesces multiple drags on the same task: changes merge, original
+     * snapshot preserved from the FIRST edit so discardEdits restores
+     * truly-persisted state (same pattern as the 0.183 pendingEdits seq
+     * registry).
+     *
+     * `dirtyTaskIds` parallels inflightTaskIds for the renderer dim
+     * treatment. Bars with buffered (uncommitted) edits render in the
+     * same dim color as in-flight bars. discardEdits + successful
+     * commitEdits both clear from this set. */
+    const pendingBuffer = new Map<string, PendingEdit>();
+    const dirtyTaskIds = new Set<string>();
+
+    function bufferEdit(
+      taskId: string,
+      kind: 'edit' | 'reorder',
+      payloadDelta: Record<string, unknown>,
+      originalDelta: PendingEdit['original'],
+    ): void {
+      const key = taskId + '::' + kind;
+      const existing = pendingBuffer.get(key);
+      if (kind === 'edit') {
+        pendingBuffer.set(key, {
+          taskId,
+          kind: 'edit',
+          changes: { ...(existing?.changes ?? {}), ...(payloadDelta as { startDate?: string; endDate?: string }) },
+          original: existing?.original ?? originalDelta,
+          ts: Date.now(),
+        });
+      } else {
+        pendingBuffer.set(key, {
+          taskId,
+          kind: 'reorder',
+          reorderPayload: {
+            ...(existing?.reorderPayload ?? {}),
+            ...(payloadDelta as { priorityGroup?: string; sortOrder?: number; parentId?: string | null }),
+          },
+          original: existing?.original ?? originalDelta,
+          ts: Date.now(),
+        });
+      }
+    }
+
+    /** Translates the internal PendingEdit buffer into AuditPanel's
+     *  AuditPreviewItem shape. One entry per taskId (collapses both
+     *  edit + reorder kinds for the same task into a single preview row).
+     *  Used by syncPendingChanges() to auto-populate
+     *  tplConfig.pendingChanges when batchMode is on. */
+    function buildPendingChangesFromBuffer(): AuditPreviewItem[] {
+      if (pendingBuffer.size === 0) return [];
+      const byTask = new Map<string, AuditPreviewItem>();
+      for (const p of pendingBuffer.values()) {
+        let entry = byTask.get(p.taskId);
+        if (!entry) {
+          const task = allTasks.find((t) => t.id === p.taskId);
+          const title = (task?.title || (task?.name as string) || p.taskId);
+          entry = { id: p.taskId, title, fields: [], descs: [] };
+          byTask.set(p.taskId, entry);
+        }
+        if (p.kind === 'edit' && p.changes) {
+          if (p.changes.startDate !== undefined) {
+            entry.fields.push('startDate');
+            entry.descs.push('start: ' + (p.original.startDate || '?') + ' → ' + p.changes.startDate);
+          }
+          if (p.changes.endDate !== undefined) {
+            entry.fields.push('endDate');
+            entry.descs.push('end: ' + (p.original.endDate || '?') + ' → ' + p.changes.endDate);
+          }
+        }
+        if (p.kind === 'reorder' && p.reorderPayload) {
+          if (p.reorderPayload.priorityGroup !== undefined) {
+            entry.fields.push('priorityGroup');
+            entry.descs.push('group: ' + (p.original.priorityGroup || '?') + ' → ' + p.reorderPayload.priorityGroup);
+          }
+          if (p.reorderPayload.parentId !== undefined) {
+            entry.fields.push('parentId');
+            entry.descs.push('parent: ' + (p.original.parentId || 'none') + ' → ' + (p.reorderPayload.parentId || 'none'));
+          }
+          if (p.reorderPayload.sortOrder !== undefined) {
+            entry.fields.push('sortOrder');
+            entry.descs.push('sortOrder → ' + p.reorderPayload.sortOrder);
+          }
+        }
+      }
+      return Array.from(byTask.values());
+    }
+
+    /** When batchMode is on, mirror the buffer state into
+     *  tplConfig.pendingChanges so the AuditPanel modal shows the live
+     *  diff. No-op when batchMode is off — host-supplied pendingChanges
+     *  remains in control on the per-patch flow (CN v10 path). */
+    function syncPendingChanges(): void {
+      if (!options.batchMode) return;
+      tplConfig.pendingChanges = buildPendingChangesFromBuffer();
+      renderSlots();
+    }
 
     /** Dim a bar color for the in-flight visual state. Appends a 50%-alpha
      *  byte to hex colors; rgb/rgba colors pass through unchanged (dimming
@@ -745,6 +861,15 @@ export class IIFEApp {
       // whether the host wired the new async callback.
       try { console.log('[NG] onTaskEditAsync hit', taskId, 'idx=', idx, 'hasOnItemEdit=', !!options.onItemEdit, 'hasOnPatch=', !!options.onPatch); } catch (_e) { /* ok */ }
       if (idx === -1) {
+        // 0.185 — batchMode + divergence: we have no allTasks entry, so we
+        // can neither buffer nor track originals. Surface a warn so HQ can
+        // see the lost edit; do NOT call host (host doesn't know about the
+        // task either). Engine's optimistic visual move stands until the
+        // next setTasks() refresh pulls fresh data.
+        if (options.batchMode) {
+          try { diag('warn:task-not-in-allTasks', { taskId, origin: 'edit-batch', changes }); } catch (_e) { /* ok */ }
+          return;
+        }
         // 0.183.2 — divergence path. The engine fired onTaskMove/Resize with
         // a task the app layer doesn't know about (allTasks replaced via
         // setTasks() without this id, filter drift, namespace mismatch,
@@ -772,6 +897,31 @@ export class IIFEApp {
             );
           } catch (_e) { /* swallow host-handler throws */ }
         }
+        return;
+      }
+
+      // 0.185 — batchMode happy path: buffer instead of forwarding to host.
+      // Self-contained — skips the seq-tracking + dispatch + onItemEdit
+      // chain entirely. dispatch is intentionally NOT called here because
+      // the reducer routes PATCH back to onTaskPatch which would fire
+      // rawOnPatch (defeats buffering).
+      if (options.batchMode) {
+        const origStartB = (allTasks[idx].startDate || '');
+        const origEndB   = (allTasks[idx].endDate   || '');
+        // Optimistic local update (engine already moved the bar; mirror in allTasks).
+        allTasks[idx] = { ...allTasks[idx], startDate: nextStart, endDate: nextEnd };
+        const titleB = allTasks[idx].title || (allTasks[idx].name as string) || taskId;
+        patchLog.unshift({ ts: new Date(), desc: titleB + ': dates updated (pending)' });
+        if (patchLog.length > 50) patchLog.pop();
+        bufferEdit(
+          taskId,
+          'edit',
+          { startDate: nextStart, endDate: nextEnd } as Record<string, unknown>,
+          { startDate: origStartB, endDate: origEndB },
+        );
+        dirtyTaskIds.add(taskId);
+        syncPendingChanges();
+        refreshGantt();
         return;
       }
 
@@ -848,19 +998,27 @@ export class IIFEApp {
      * Originals captured on first edit in a chain (shared with any later
      * reorder of the same task) so revert restores truly-persisted state,
      * not a prior in-flight optimistic value. */
-    interface PendingReorder {
+    /** Local seq-tracking entry for the 0.183 in-flight async reorder
+     *  path. Renamed in 0.185 for naming consistency with EditSeqEntry. */
+    interface ReorderSeqEntry {
       seq: number;
       origParentId: string | null | undefined;
       origSortOrder: number | undefined;
       origPriorityGroup: string | null | undefined;
     }
-    const pendingReorders = new Map<string, PendingReorder>();
+    const pendingReorders = new Map<string, ReorderSeqEntry>();
     let nextReorderSeq = 0;
 
     async function onTaskReorderAsync(patch: TaskPatch): Promise<void> {
       const taskId = patch.id;
       const idx = allTasks.findIndex((t) => t.id === taskId);
       if (idx === -1) {
+        // 0.185 — batchMode + divergence: same skip-with-warn semantics as
+        // onTaskEditAsync. Can't buffer without an allTasks entry.
+        if (options.batchMode) {
+          try { diag('warn:task-not-in-allTasks', { taskId, origin: 'reorder-batch', patch }); } catch (_e) { /* ok */ }
+          return;
+        }
         // 0.183.2 — divergence path mirror of onTaskEditAsync. Host still
         // needs to hear the reorder event even when allTasks diverges from
         // engine state. Skip the optimistic update + revert (no originals)
@@ -889,6 +1047,39 @@ export class IIFEApp {
             );
           } catch (_e) { /* swallow */ }
         }
+        return;
+      }
+
+      // 0.185 — batchMode happy path: buffer the reorder instead of forwarding
+      // to host. Self-contained — skips the seq-tracking + dispatch +
+      // onItemReorder chain entirely. Same dispatch-skip rationale as
+      // onTaskEditAsync's batch path.
+      if (options.batchMode) {
+        const origTaskB = allTasks[idx];
+        const u: NormalizedTask = { ...origTaskB };
+        if (patch.parentId      !== undefined) u.parentWorkItemId = patch.parentId;
+        if (patch.priorityGroup !== undefined) u.priorityGroup    = patch.priorityGroup;
+        if (patch.sortOrder     !== undefined) u.sortOrder        = patch.sortOrder;
+        allTasks[idx] = u;
+        const titleB = origTaskB.title || (origTaskB.name as string) || taskId;
+        const partsB: string[] = [];
+        if (patch.priorityGroup) partsB.push('→ ' + patch.priorityGroup);
+        if (patch.parentId !== undefined) partsB.push('parent ' + (patch.parentId || 'none'));
+        if (patch.sortOrder !== undefined) partsB.push('reordered');
+        patchLog.unshift({ ts: new Date(), desc: titleB + ': ' + partsB.join(', ') + ' (pending)' });
+        if (patchLog.length > 50) patchLog.pop();
+        const reorderDelta: { priorityGroup?: string; sortOrder?: number; parentId?: string | null } = {};
+        if (patch.priorityGroup !== undefined) reorderDelta.priorityGroup = patch.priorityGroup;
+        if (patch.sortOrder !== undefined) reorderDelta.sortOrder = patch.sortOrder;
+        if (patch.parentId !== undefined) reorderDelta.parentId = patch.parentId;
+        bufferEdit(taskId, 'reorder', reorderDelta as Record<string, unknown>, {
+          priorityGroup: origTaskB.priorityGroup ?? undefined,
+          sortOrder: origTaskB.sortOrder,
+          parentId: origTaskB.parentWorkItemId ?? null,
+        });
+        dirtyTaskIds.add(taskId);
+        syncPendingChanges();
+        refreshGantt();
         return;
       }
 
@@ -1395,8 +1586,10 @@ export class IIFEApp {
         // the host's onItemEdit promise render with a dimmed color until the
         // promise settles. Cheap — only runs when at least one edit is in
         // flight, and alpha-byte append preserves the canvas fast-path.
-        if (inflightTaskIds.size > 0) {
-          gtasks = gtasks.map((t) => inflightTaskIds.has(t.id)
+        // 0.185 — also dim bars sitting in the batchMode buffer (dirty).
+        // Same visual treatment, single-pass through gtasks.
+        if (inflightTaskIds.size > 0 || dirtyTaskIds.size > 0) {
+          gtasks = gtasks.map((t) => (inflightTaskIds.has(t.id) || dirtyTaskIds.has(t.id))
             ? { ...t, color: dimColor(t.color) }
             : t);
         }
@@ -1550,6 +1743,99 @@ export class IIFEApp {
        *  toggles share one code path. */
       toggleChrome(visible?: boolean) {
         runToggleChrome(visible);
+      },
+      /** 0.185 — snapshot of the batch buffer. Empty array when batchMode
+       *  is off or the buffer is clean. Insertion-order preserved across
+       *  the Map iteration. */
+      getPendingEdits(): PendingEdit[] {
+        return Array.from(pendingBuffer.values());
+      },
+      /** 0.185 — flush every buffered edit to the host. Edits first
+       *  (date changes), reorders second (parent/sortOrder/priorityGroup) —
+       *  matches DH Apex's race-avoidance pattern (sortOrder reads neighbor
+       *  state, so updateWorkItemDates must land first). Resolves with
+       *  `{ committed }` on full success. On first failure, throws
+       *  `{ failedAt, successful, error }`; failed + remaining stay in
+       *  the buffer so the host can retry or discardEdits(). */
+      async commitEdits(): Promise<CommitEditsResult> {
+        const all = Array.from(pendingBuffer.values());
+        const edits = all.filter((p) => p.kind === 'edit');
+        const reorders = all.filter((p) => p.kind === 'reorder');
+        const ordered = [...edits, ...reorders];
+        const committed: PendingEdit[] = [];
+        for (const p of ordered) {
+          try {
+            if (p.kind === 'edit' && p.changes) {
+              if (options.onItemEdit) {
+                await options.onItemEdit(p.taskId, p.changes);
+              } else if (options.onPatch) {
+                await Promise.resolve(options.onPatch({
+                  id: p.taskId,
+                  startDate: p.changes.startDate,
+                  endDate: p.changes.endDate,
+                }));
+              }
+            } else if (p.kind === 'reorder' && p.reorderPayload) {
+              if (options.onItemReorder) {
+                const newIndex = typeof p.reorderPayload.sortOrder === 'number'
+                  ? p.reorderPayload.sortOrder
+                  : 0;
+                const payload: { newIndex: number; newParentId?: string | null; newPriorityGroup?: string } = { newIndex };
+                if (p.reorderPayload.parentId !== undefined) payload.newParentId = p.reorderPayload.parentId;
+                if (p.reorderPayload.priorityGroup !== undefined) payload.newPriorityGroup = p.reorderPayload.priorityGroup;
+                await options.onItemReorder(p.taskId, payload);
+              } else if (options.onPatch) {
+                await Promise.resolve(options.onPatch({
+                  id: p.taskId,
+                  parentId: p.reorderPayload.parentId,
+                  priorityGroup: p.reorderPayload.priorityGroup,
+                  sortOrder: p.reorderPayload.sortOrder,
+                }));
+              }
+            }
+            // Success — remove from buffer + clear dim.
+            pendingBuffer.delete(p.taskId + '::' + p.kind);
+            // Only clear dirtyTaskIds when no other buffered entry still
+            // references this taskId (a task could have BOTH edit + reorder).
+            const stillBuffered = pendingBuffer.has(p.taskId + '::edit') || pendingBuffer.has(p.taskId + '::reorder');
+            if (!stillBuffered) dirtyTaskIds.delete(p.taskId);
+            committed.push(p);
+          } catch (err) {
+            // Partial-rollback per Glen's locked decision: failed + remaining
+            // stay in the buffer; already-committed cleared above. Modal stays
+            // open with "committed N of M, failed on X — retry or discard?"
+            syncPendingChanges();
+            refreshGantt();
+            throw { failedAt: p, successful: committed, error: err };
+          }
+        }
+        // Full success.
+        syncPendingChanges();
+        refreshGantt();
+        return { committed };
+      },
+      /** 0.185 — visual-only revert. Restores `original` on every buffered
+       *  task and clears the buffer. Host never sees a callback. Use when
+       *  the user clicks Cancel on the audit preview modal. */
+      discardEdits(): void {
+        for (const p of pendingBuffer.values()) {
+          const idx = allTasks.findIndex((t) => t.id === p.taskId);
+          if (idx === -1) continue;
+          const u: NormalizedTask = { ...allTasks[idx] };
+          if (p.kind === 'edit') {
+            if (p.original.startDate !== undefined) u.startDate = p.original.startDate;
+            if (p.original.endDate   !== undefined) u.endDate   = p.original.endDate;
+          } else {
+            if (p.original.priorityGroup !== undefined) u.priorityGroup    = p.original.priorityGroup;
+            if (p.original.parentId      !== undefined) u.parentWorkItemId = p.original.parentId;
+            if (p.original.sortOrder     !== undefined) u.sortOrder        = p.original.sortOrder;
+          }
+          allTasks[idx] = u;
+        }
+        pendingBuffer.clear();
+        dirtyTaskIds.clear();
+        syncPendingChanges();
+        refreshGantt();
       },
       destroy() { IIFEApp.unmount(container); },
     };

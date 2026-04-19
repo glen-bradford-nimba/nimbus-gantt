@@ -161,7 +161,14 @@ export interface MountOptions {
    *  sort can happen in one gesture). */
   onItemReorder?: (
     taskId: string,
-    payload: { newIndex: number; newParentId?: string | null },
+    payload: {
+      newIndex: number;
+      newParentId?: string | null;
+      /** 0.183.1 — coalesced from the priorityGroup patch dragReparent emits
+       *  when the drop crossed a bucket boundary. Optional; omitted when the
+       *  drop stayed within the same bucket. */
+      newPriorityGroup?: string;
+    },
   ) => Promise<void> | void;
 
   /** Fired when `onItemReorder` rejects. Same convention as
@@ -195,6 +202,75 @@ export interface MountOptions {
    *  are all hidden at mount — embedded-mode-ish without forcing mode
    *  to 'embedded'. Consumers can flip at runtime via `handle.toggleChrome()`. */
   chromeVisibleDefault?: boolean;
+
+  /** 0.185 — when true, drag-edits and reorders are BUFFERED inside the IIFE
+   *  instead of firing onItemEdit / onItemReorder per-edit. The host commits
+   *  the whole buffer via `handle.commitEdits()` (typically wired to the
+   *  AuditPanel Submit+commit button) or reverts via `handle.discardEdits()`.
+   *
+   *  When `batchMode: true`, the library auto-populates
+   *  `TemplateConfig.pendingChanges` from its internal buffer, so the
+   *  AuditPanel preview modal activates with no host-side `pendingChanges`
+   *  plumbing required.
+   *
+   *  Default: false — existing per-patch flow (CN v10, DH today) untouched. */
+  batchMode?: boolean;
+}
+
+/**
+ * 0.185 — single buffered edit returned by `handle.getPendingEdits()`.
+ *
+ * `kind === 'edit'` carries date changes; `kind === 'reorder'` carries
+ * structural changes (parent / sortOrder / priorityGroup). A single task
+ * can have one of each in the buffer simultaneously (key: taskId+kind).
+ *
+ * `original` snapshots the pre-first-edit state for that taskId+kind, so
+ * `discardEdits` restores truly-persisted values rather than a prior
+ * in-flight optimistic value (same pattern as the 0.183 pendingEdits
+ * registry).
+ */
+export interface PendingEdit {
+  taskId: string;
+  kind: 'edit' | 'reorder';
+  /** Populated when kind === 'edit'. */
+  changes?: { startDate?: string; endDate?: string };
+  /** Populated when kind === 'reorder'. Mirrors TaskPatch fields. */
+  reorderPayload?: {
+    priorityGroup?: string;
+    sortOrder?: number;
+    parentId?: string | null;
+  };
+  /** Pre-edit-chain snapshot — used by discardEdits to revert. */
+  original: {
+    startDate?: string;
+    endDate?: string;
+    priorityGroup?: string | null;
+    sortOrder?: number;
+    parentId?: string | null;
+  };
+  /** ms-since-epoch of the LAST coalesced edit on this taskId+kind. */
+  ts: number;
+}
+
+/**
+ * 0.185 — result returned by `handle.commitEdits()`.
+ *
+ * On success: `{ committed: PendingEdit[] }` — every buffered edit cleared
+ * and forwarded to the host.
+ *
+ * On failure: thrown as `{ failedAt, successful, error }`. `successful`
+ * are the edits that already landed (cleared from the buffer). `failedAt`
+ * is the edit that threw — it stays in the buffer along with everything
+ * after it, so the host can re-call `commitEdits()` to retry from the
+ * failure point or call `discardEdits()` to drop the rest.
+ */
+export interface CommitEditsResult {
+  committed: PendingEdit[];
+}
+export interface CommitEditsFailure {
+  failedAt: PendingEdit;
+  successful: PendingEdit[];
+  error: unknown;
 }
 
 export interface AppInstance {
@@ -212,6 +288,24 @@ export interface AppInstance {
    *  HrsWkStrip slots. Only available on the chrome-aware mount path —
    *  engineOnly instances do not expose it (React already owns chrome). */
   toggleChrome?(visible?: boolean): void;
+
+  /** 0.185 — snapshot of the current buffered-edit set. Empty when not in
+   *  batch mode or the buffer is clean. Insertion order preserved. */
+  getPendingEdits?(): PendingEdit[];
+
+  /** 0.185 — flush every buffered edit to the host by calling onItemEdit
+   *  (date edits first) then onItemReorder (structural reorders second —
+   *  edits-before-reorders avoids DH's Apex sortOrder neighbor-shift race).
+   *  Resolves with `{ committed }` on full success. Throws
+   *  `{ failedAt, successful, error }` on first failure; failed + remaining
+   *  stay in the buffer so the host can retry or discard. */
+  commitEdits?(): Promise<CommitEditsResult>;
+
+  /** 0.185 — visual-only revert: restores the pre-edit originals on every
+   *  buffered task and clears the buffer. The host never sees any
+   *  callback — these edits never existed as far as persistence is
+   *  concerned. */
+  discardEdits?(): void;
 }
 
 /** Internal mapped task passed to NimbusGantt engine */

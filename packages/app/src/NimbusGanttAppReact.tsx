@@ -7,7 +7,7 @@
  * IIFEApp gantt engine inside that host so React never fights the canvas.
  */
 import { useCallback, useEffect, useMemo, useReducer, useRef, createElement, Fragment } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, MutableRefObject } from 'react';
 import type {
   Template, TemplateOverrides, TemplateConfig, SlotProps, SlotData, AppEvent,
   AuditSubmitHandler, FeatureFlags, AppMode,
@@ -68,6 +68,24 @@ export interface NimbusGanttAppProps {
   className?: string;
   /** Legacy field — forwarded to IIFEApp mount. */
   config?: Parameters<typeof IIFEApp.mount>[1]['config'];
+  /** 0.185 — when true, drag-edits and reorders are buffered inside the
+   *  IIFE instance instead of firing onPatch per-edit. Host commits via
+   *  `handleRef.current.commitEdits()` (typically wired to AuditPanel
+   *  Submit) or reverts via `discardEdits()`.
+   *
+   *  ⚠️ React-driver caveat (0.185): NimbusGanttAppReact mounts with
+   *  `engineOnly: true`, which currently has stub handle methods —
+   *  `getPendingEdits()` returns `[]`, `commitEdits()` resolves empty,
+   *  `discardEdits()` is a no-op. Real batch buffering only works on
+   *  the vanilla `IIFEApp.mount(...)` path (DH LWC's primary surface).
+   *  React-driver batch support is queued for a follow-up cut once a
+   *  React consumer needs it. */
+  batchMode?: boolean;
+  /** 0.185 — ref object that receives the IIFEApp mount handle once the
+   *  underlying engine is mounted. Consumers (CN v10/v12 React, future
+   *  React-driver hosts) call `handleRef.current.commitEdits()` etc.
+   *  See batchMode caveat above for the engineOnly limitation. */
+  handleRef?: MutableRefObject<ReturnType<typeof IIFEApp.mount> | null>;
 }
 
 export function NimbusGanttApp(props: NimbusGanttAppProps) {
@@ -159,6 +177,10 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
       template: tplConfig.templateName,
       overrides: props.overrides,
       config: props.config,
+      // 0.185 — pass-through. engineOnly mount stubs the batch handle
+      // verbs (see prop docstring) so this is functionally a no-op until
+      // engineOnly batch support lands in a follow-up.
+      batchMode: props.batchMode,
       // React already renders all chrome slots above — IIFEApp only drives
       // the gantt engine inside the ContentArea host. No chrome duplication.
       engineOnly: true,
@@ -185,9 +207,16 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
       onTaskContextMenu: (t, pos) => onTaskContextMenuRef.current?.(t, pos),
     });
 
+    // 0.185 — forward the mount handle to the consumer's handleRef so they
+    // can call getPendingEdits/commitEdits/discardEdits (batch verbs) +
+    // toggleChrome/setTasks (existing verbs). Cleared on unmount so a stale
+    // ref doesn't outlive the engine.
+    if (props.handleRef) props.handleRef.current = ganttInstanceRef.current;
+
     return () => {
       IIFEApp.unmount(host);
       ganttInstanceRef.current = null;
+      if (props.handleRef) props.handleRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
