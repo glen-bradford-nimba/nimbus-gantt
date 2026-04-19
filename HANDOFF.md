@@ -12,8 +12,10 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `f24cc24` *(0.183.3-diag instrumentation)* |
-| Commit subject | `diag(0.183.3): drag-save chain instrumentation for CN v12 regression` |
+| Commit SHA (source — latest) | `b9a3ccf` *(0.184 audit preview modal)* |
+| Commit subject | `feat(0.184): AuditPanel preview modal on submit (vanilla + react)` |
+| 0.183.4 drag-save regression fix | `702d6b0` |
+| 0.183.3-diag instrumentation | `f24cc24` |
 | 0.183.2 silent-swallow fix | `ed82274` |
 | 0.183.1 polish | `b2e22ef` |
 | 0.183 interaction cut (source) | `41ec401eac5ce8…` |
@@ -72,9 +74,29 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **183,115 bytes** (~179 KB)
-- sha256: `23c62c0151f9f4a94048123473f58bb2f375e3c4443ed04274f263e9cfbdf5b5`
-- **Must re-copy.** `f24cc24` (0.183.3-diag) adds four console.log
+- Size: **190,702 bytes** (~186 KB)
+- sha256: `17120768648f7f2f8fd114ccefa7e4a7adbbee116ce4fa3514c9d3b9dc090f13`
+- **Must re-copy.** Two cumulative changes since 0.183.3-diag:
+  - **`702d6b0` (0.183.4 demo-blocker fix)** — removes infinite-recursion
+    `dispatch({ type: 'PATCH', patch })` call from inside `onTaskPatch`.
+    The reducer's PATCH case routed back to `onTaskPatch`, creating
+    mutual recursion that blew the call stack. RangeError got swallowed
+    by `onTaskEditAsync`'s try/catch, producing the silent-fail observed
+    on CN v12 (bar moves visually, zero callback, zero network). Closes
+    the regression introduced in `a49a130`. The 0.183.3-diag probes
+    confirm the chain works end-to-end after this fix; probes will be
+    removed in a follow-up commit once CN + DH report a clean drag.
+  - **`b9a3ccf` (0.184 audit preview modal)** — clicking Submit+commit
+    on the AuditPanel now opens a modal listing every pending change
+    (id / title / per-field diff) when `config.pendingChanges` is
+    populated. Cancel / Confirm buttons; Esc + backdrop click close.
+    Adds `AuditPreviewItem` + `pendingChanges?: AuditPreviewItem[]` to
+    `TemplateConfig`. Vanilla variant also fixes a long-standing bug
+    where it dispatched `RESET_PATCHES` and silently swallowed the
+    commit path — now actually calls `config.onAuditSubmit(note)` with
+    loading/success/error state.
+
+Prior entry (0.183.3-diag `f24cc24`) added four console.log
   probes + one permanent `diag('edit:commit', ...)` emit:
   - `[NG] main onTaskMove received` at IIFEApp.ts:1215 — engine→app entry
   - `[NG] main onTaskResize received` at IIFEApp.ts:1220 — resize variant
