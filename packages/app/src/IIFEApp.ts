@@ -740,7 +740,36 @@ export class IIFEApp {
       changes: { startDate?: string; endDate?: string },
     ): Promise<void> {
       const idx = allTasks.findIndex((t) => t.id === taskId);
-      if (idx === -1) return;
+      if (idx === -1) {
+        // 0.183.2 — divergence path. The engine fired onTaskMove/Resize with
+        // a task the app layer doesn't know about (allTasks replaced via
+        // setTasks() without this id, filter drift, namespace mismatch,
+        // etc). We have no originals to capture and no local state to
+        // update, but the HOST still needs to know so it can save. Legacy
+        // onTaskPatch's contract was "always call host"; the async path in
+        // 0.183 regressed this by returning silently. Symptom observed on
+        // DH fd9cf675 + round-4 probe: bar moved visually (engine state
+        // advanced) but no callback fired, no Apex save, zero console logs.
+        try { diag('warn:task-not-in-allTasks', { taskId, origin: 'edit', changes }); } catch (_e) { /* ok */ }
+        try {
+          if (options.onItemEdit) {
+            await options.onItemEdit(taskId, changes);
+          } else {
+            rawOnPatch({ id: taskId, startDate: nextStart, endDate: nextEnd });
+          }
+        } catch (err) {
+          // No revert possible (no originals captured). Surface error so
+          // the host toast fires; engine bar stays at new position until
+          // host-side refresh pulls fresh data.
+          try {
+            options.onItemEditError?.(
+              taskId,
+              err instanceof Error ? err : new Error(String(err)),
+            );
+          } catch (_e) { /* swallow host-handler throws */ }
+        }
+        return;
+      }
 
       // Capture pre-edit-chain originals (reused when a prior edit is still
       // in flight for this task — revert must restore truly-persisted state).
@@ -818,7 +847,37 @@ export class IIFEApp {
     async function onTaskReorderAsync(patch: TaskPatch): Promise<void> {
       const taskId = patch.id;
       const idx = allTasks.findIndex((t) => t.id === taskId);
-      if (idx === -1) return;
+      if (idx === -1) {
+        // 0.183.2 — divergence path mirror of onTaskEditAsync. Host still
+        // needs to hear the reorder event even when allTasks diverges from
+        // engine state. Skip the optimistic update + revert (no originals)
+        // but fire options.onItemReorder with the best-effort payload OR
+        // fall back to rawOnPatch so legacy consumers keep working.
+        try { diag('warn:task-not-in-allTasks', { taskId, origin: 'reorder', patch }); } catch (_e) { /* ok */ }
+        try {
+          if (options.onItemReorder) {
+            const newIndex = typeof patch.sortOrder === 'number' ? patch.sortOrder : 0;
+            const reorderPayload: {
+              newIndex: number;
+              newParentId?: string | null;
+              newPriorityGroup?: string;
+            } = { newIndex };
+            if (patch.parentId !== undefined) reorderPayload.newParentId = patch.parentId;
+            if (patch.priorityGroup !== undefined) reorderPayload.newPriorityGroup = patch.priorityGroup;
+            await options.onItemReorder(taskId, reorderPayload);
+          } else {
+            rawOnPatch(patch);
+          }
+        } catch (err) {
+          try {
+            options.onItemReorderError?.(
+              taskId,
+              err instanceof Error ? err : new Error(String(err)),
+            );
+          } catch (_e) { /* swallow */ }
+        }
+        return;
+      }
 
       const existing = pendingReorders.get(taskId);
       const origTask = allTasks[idx];
