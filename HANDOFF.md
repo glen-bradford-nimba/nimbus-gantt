@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `df51a3b` *(0.185.25 chrome polish + liveDataUpdate flag)* |
-| Commit subject | `feat(0.185.25): chrome polish + liveDataUpdate flag` |
+| Commit SHA (source — latest) | `534321d` *(0.185.26 titleBarButtons slot)* |
+| Commit subject | `feat(0.185.26): titleBarButtons slot + setTitleBarButtons handle` |
+| 0.185.26 titleBarButtons slot | `534321d` |
 | 0.185.25 chrome polish + liveDataUpdate | `df51a3b` |
 | 0.185.24 bucket-scoped dragReparent | `5799b53` |
 | 0.185.1 initialFocusDate + scrollToDate | `7a33285` |
@@ -79,12 +80,65 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **255,946 bytes** (~250 KB)
-- sha256: `ea16d5b5c84e8c1511f3e249ebca0dcfd54b08493f11301c7426d572ad7930fe`
+- Size: **257,039 bytes** (~251 KB)
+- sha256: `9e40a74e0049ec1a6ad71a0019a5f75dd36c783a8993c70167904857ba61c444`
 
-**0.185.25 — chrome polish + live-data-update hardening** (source
-`df51a3b`). DH CC, re-copy this bundle into
-`staticresources/nimbusganttapp.resource`.
+**0.185.26 — titleBarButtons slot** (source `534321d`). DH CC, re-copy
+this bundle into `staticresources/nimbusganttapp.resource`.
+
+Generic host-supplied buttons slot in TitleBar's right cluster,
+immediately before the Full Screen button. Addresses DH CC's
+dispatch 2026-04-20 for a "Show Header" toggle on Salesforce's
+single-tab Timeline layout. Pattern is reusable for any future
+host-level chrome (reset-viewport, open-resource-panel, etc).
+
+**Mount option:**
+```ts
+titleBarButtons?: Array<{
+  id: string;       // stable key; unique within array
+  label: string;    // displayed text
+  onClick: () => void;
+  pressed?: boolean;  // toggle-pressed visual (blue active variant)
+  title?: string;     // tooltip
+}>;
+```
+
+**Handle method (runtime updates, e.g. flipping pressed state):**
+```ts
+handle.setTitleBarButtons(newButtons);
+```
+
+**DH-side consumption pattern:**
+```js
+// In deliveryNimbusGantt LWC (or equivalent host mount):
+let headerVisible = false;
+
+const toggleHeader = () => {
+  headerVisible = !headerVisible;
+  // existing header-toggle CSS trick (whatever __cnEdit.toggleHeader did)
+  document.body.__cnEdit.toggleHeader();
+  handle.setTitleBarButtons(buildHostButtons());
+};
+
+const buildHostButtons = () => [{
+  id: 'dh-show-header',
+  label: headerVisible ? 'Hide Header' : 'Show Header',
+  onClick: toggleHeader,
+  pressed: headerVisible,
+  title: 'Toggle the Salesforce page header',
+}];
+
+mount(container, {
+  titleBarButtons: buildHostButtons(),
+  // ... other mount options
+});
+```
+
+Backwards compatible: no host change needed unless you want the
+button. Omit `titleBarButtons` → TitleBar renders exactly as
+0.185.25. Existing mount paths untouched.
+
+Prior entry (0.185.25 `df51a3b`) — chrome polish + liveDataUpdate:
 
 1. **Search bar single-char typing fixed.** Root cause: `document.activeElement === searchInput`
    identity check in `FilterBar.vanilla.ts:56` returns the shadow host (not the
