@@ -141,6 +141,11 @@ export class DragManager {
   private lastClickTaskId: string | null = null;
   private lastClickTime = 0;
 
+  // 0.185.20 — gesture label element. Floating div that follows the cursor
+  // during a bar drag and previews what the commit will land on. Created
+  // lazily on first drag; destroyed with the DragManager.
+  private gestureLabelEl: HTMLDivElement | null = null;
+
   // Bound event handlers (stored for cleanup)
   private readonly onPointerDown: (e: PointerEvent) => void;
   private readonly onPointerMove: (e: PointerEvent) => void;
@@ -186,6 +191,9 @@ export class DragManager {
 
     this.dragging = false;
     this.dragHit = null;
+    // 0.185.20 — clean up the gesture label if the DragManager is torn
+    // down while a label is still in the DOM (e.g., unmount mid-drag).
+    this.removeGestureLabel();
   }
 
   // ── Coordinate Translation ──────────────────────────────────────────────
@@ -374,6 +382,85 @@ export class DragManager {
       currentX: canvasX,
       currentY: canvasY,
     });
+
+    // 0.185.20 — update the floating gesture label so the user can see
+    // what the drag will commit to before releasing. Computes preview
+    // dates from the current pointer position and the drag's original
+    // task dates.
+    this.updateGestureLabel(e);
+  }
+
+  // ── Gesture Label ──────────────────────────────────────────────────────
+
+  private updateGestureLabel(e: PointerEvent): void {
+    if (!this.dragHit) return;
+    const state = this.options.getState();
+    const task = state.tasks.get(this.dragHit.taskId);
+    if (!task) return;
+    const timeScale = this.options.getTimeScale();
+    const pixelDeltaX = e.clientX - this.dragStartX;
+    const days = pixelsToDays(pixelDeltaX, timeScale);
+
+    let text = '';
+    if (this.dragHit.type === 'bar') {
+      const newStart = addDays(this.dragOriginalStartDate, days);
+      const newEnd = addDays(this.dragOriginalEndDate, days);
+      text = `${newStart} → ${newEnd}`;
+    } else if (this.dragHit.type === 'bar-left-edge') {
+      const newStart = addDays(this.dragOriginalStartDate, days);
+      text = `Start → ${newStart}`;
+    } else if (this.dragHit.type === 'bar-right-edge') {
+      const newEnd = addDays(this.dragOriginalEndDate, days);
+      text = `End → ${newEnd}`;
+    } else if (this.dragHit.type === 'progress-handle') {
+      const layout = this.dragHit.layout;
+      const { canvasX } = this.toCanvasCoords(e);
+      const relativeX = canvasX - layout.x;
+      const pct = Math.round(clamp(relativeX / layout.width, 0, 1) * 100);
+      text = `${pct}%`;
+    }
+    if (!text) return;
+
+    if (!this.gestureLabelEl) {
+      const el = document.createElement('div');
+      el.setAttribute('data-nga-gesture-label', '1');
+      el.style.cssText = [
+        'position:fixed',
+        'z-index:9999',
+        'pointer-events:none',
+        'padding:4px 8px',
+        'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+        'font-size:11px',
+        'font-weight:600',
+        'color:#ffffff',
+        'background:rgba(30,41,59,0.92)',
+        'border-radius:4px',
+        'box-shadow:0 2px 8px rgba(0,0,0,0.18)',
+        'white-space:nowrap',
+        'transition:opacity 80ms ease',
+        'opacity:0',
+      ].join(';');
+      document.body.appendChild(el);
+      this.gestureLabelEl = el;
+      // Fade in on next frame so the initial position doesn't flash
+      requestAnimationFrame(() => { if (this.gestureLabelEl) this.gestureLabelEl.style.opacity = '1'; });
+    }
+    this.gestureLabelEl.textContent = text;
+    // Position 12px below-right of cursor; clamp to viewport so it doesn't
+    // flow off the right edge on edge-of-screen drags.
+    const pad = 12;
+    const viewportW = window.innerWidth || document.documentElement.clientWidth;
+    const rectW = this.gestureLabelEl.offsetWidth;
+    const nextX = Math.min(e.clientX + pad, viewportW - rectW - 4);
+    const nextY = e.clientY + pad;
+    this.gestureLabelEl.style.left = `${nextX}px`;
+    this.gestureLabelEl.style.top = `${nextY}px`;
+  }
+
+  private removeGestureLabel(): void {
+    if (!this.gestureLabelEl) return;
+    try { this.gestureLabelEl.remove(); } catch (_e) { /* ok */ }
+    this.gestureLabelEl = null;
   }
 
   private handlePointerUp(e: PointerEvent): void {
@@ -425,6 +512,8 @@ export class DragManager {
 
     this.dragging = false;
     this.dragHit = null;
+    // 0.185.20 — remove gesture label on any pointer-up path (click or drag).
+    this.removeGestureLabel();
   }
 
   // ── Click / Double-Click ────────────────────────────────────────────────
