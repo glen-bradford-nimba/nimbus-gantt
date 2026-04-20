@@ -22,6 +22,38 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
   // Legacy date-only fields still work when config.fieldSchema is absent.
   let drafts: Record<string, unknown> = {};
   let lastRenderedKey = '';
+  // 0.185.17 — draggable panel state. When the user drags the header, we
+  // switch from the default right/bottom anchor to an absolute left/top
+  // position. Null means "use defaults." Persists across task switches
+  // within the same mount (user drags the panel, it stays there) so the
+  // multi-instance follow-up (0.185.18) can stack them without re-teaching
+  // the user where each panel is.
+  let panelX: number | null = null;
+  let panelY: number | null = null;
+  let headerDragging = false;
+  let headerDragStartX = 0;
+  let headerDragStartY = 0;
+  let headerDragOrigX = 0;
+  let headerDragOrigY = 0;
+
+  function onHeaderDragMove(e: MouseEvent): void {
+    if (!headerDragging) return;
+    const dx = e.clientX - headerDragStartX;
+    const dy = e.clientY - headerDragStartY;
+    panelX = headerDragOrigX + dx;
+    panelY = headerDragOrigY + dy;
+    // Apply position directly (skip full re-render — cheap + focus-safe).
+    root.style.left = panelX + 'px';
+    root.style.top = panelY + 'px';
+    root.style.right = '';
+    root.style.bottom = '';
+  }
+  function onHeaderDragEnd(): void {
+    headerDragging = false;
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onHeaderDragMove);
+    window.removeEventListener('mouseup',   onHeaderDragEnd);
+  }
 
   function render(p: SlotProps) {
     clear(root);
@@ -33,8 +65,20 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
 
     const editing = state.detailMode === 'edit';
     const catColor = '#64748b';
-    root.style.bottom = '80px';
-    root.style.right  = '24px';
+    // 0.185.17 — position: use dragged location if set, else default
+    // anchor (bottom-right). Both paths keep the panel inside the
+    // container via the same width/border settings.
+    if (panelX != null && panelY != null) {
+      root.style.left = panelX + 'px';
+      root.style.top = panelY + 'px';
+      root.style.right = '';
+      root.style.bottom = '';
+    } else {
+      root.style.bottom = '80px';
+      root.style.right  = '24px';
+      root.style.left = '';
+      root.style.top = '';
+    }
     root.style.width  = '380px';
     root.style.borderColor = catColor;
     root.setAttribute('data-detail-mode', state.detailMode);
@@ -63,6 +107,35 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
     /* ── Header ─────────────────────────────────────────────────────────── */
     const header = el('div', CLS_DETAIL_HEADER);
     header.style.background = catColor + '15';
+    // 0.185.17 — drag-to-reposition via header. Skip when mousedown lands
+    // on a button or anchor (edit toggle, close, record link) so clicks
+    // on those controls don't accidentally start a drag.
+    header.style.cursor = 'move';
+    header.style.userSelect = 'none';
+    header.addEventListener('mousedown', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('button, a, input, select, textarea')) return;
+      e.preventDefault();
+      // Capture initial pointer + current panel position as the drag origin.
+      // If panelX/Y haven't been set yet (still at default right/bottom),
+      // read the current bounding rect to seed the absolute position.
+      if (panelX == null || panelY == null) {
+        const rect = root.getBoundingClientRect();
+        const parent = root.parentElement;
+        const parentRect = parent ? parent.getBoundingClientRect() : { left: 0, top: 0 };
+        panelX = rect.left - parentRect.left;
+        panelY = rect.top - parentRect.top;
+      }
+      headerDragging = true;
+      headerDragStartX = e.clientX;
+      headerDragStartY = e.clientY;
+      headerDragOrigX = panelX;
+      headerDragOrigY = panelY;
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', onHeaderDragMove);
+      window.addEventListener('mouseup',   onHeaderDragEnd);
+    });
     const lwrap = el('div', 'flex items-center gap-2 min-w-0');
     const dot = el('span', 'w-2.5 h-2.5 rounded-full flex-shrink-0');
     dot.style.background = catColor;
@@ -298,6 +371,14 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
   return {
     el: root,
     update: render,
-    destroy() { clear(root); if (root.parentNode) root.parentNode.removeChild(root); },
+    destroy() {
+      // 0.185.17 — detach any in-flight drag listeners on unmount so
+      // they don't fire against a destroyed panel.
+      window.removeEventListener('mousemove', onHeaderDragMove);
+      window.removeEventListener('mouseup',   onHeaderDragEnd);
+      document.body.style.userSelect = '';
+      clear(root);
+      if (root.parentNode) root.parentNode.removeChild(root);
+    },
   };
 }
