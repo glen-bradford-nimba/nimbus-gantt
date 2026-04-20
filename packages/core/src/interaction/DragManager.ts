@@ -309,8 +309,11 @@ export class DragManager {
     this.dragOriginalStartDate = task.startDate;
     this.dragOriginalEndDate = task.endDate;
 
-    // Capture the pointer for reliable tracking (both readOnly and interactive)
-    this.canvas.setPointerCapture(e.pointerId);
+    // Capture the pointer for reliable tracking (both readOnly and interactive).
+    // Guarded for LWS (Lightning Web Security) — distorted-window canvas may
+    // not expose setPointerCapture as a function. Drag still works without
+    // capture as long as the pointer doesn't leave the canvas mid-drag.
+    try { this.canvas.setPointerCapture(e.pointerId); } catch { /* LWS or browser rejected */ }
     this.dragPointerId = e.pointerId;
     this.dragging = true;
 
