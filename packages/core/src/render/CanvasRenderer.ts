@@ -129,6 +129,12 @@ export class CanvasRenderer {
     // ── 7. Task bars ────────────────────────────────────────────────────
     this.renderTaskBars(state, layouts, config, theme, scrollX, scrollY, bodyTop, bodyHeight);
 
+    // ── 7a. 0.185.22 — Snap guide during date drag ──────────────────────
+    // When a move/resize drag is active, draw a vertical guide at the
+    // day boundary the gesture will commit to on release. Helps users
+    // see precision before they let go.
+    this.renderDragSnapGuide(state, layouts, timeScale, bodyTop, bodyHeight, theme);
+
     // ── 8. Today marker line ────────────────────────────────────────────
     if (config.showToday && todayX !== null) {
       this.renderTodayLine(todayX, bodyTop, bodyHeight, theme);
@@ -312,6 +318,67 @@ export class CanvasRenderer {
       }
       ctx.restore();
     }
+  }
+
+  /**
+   * 0.185.22 — Draw a vertical snap guide at the day boundary the current
+   * drag will commit to on release. Renders only when an active move /
+   * resize drag is in progress and the target bar is in view. Day-granular
+   * because DragManager.completeDrag uses pixelsToDays() for the commit.
+   */
+  private renderDragSnapGuide(
+    state: GanttState,
+    layouts: TaskLayout[],
+    timeScale: TimeScale,
+    bodyTop: number,
+    bodyHeight: number,
+    theme: ResolvedTheme,
+  ): void {
+    const drag = state.dragState;
+    if (!drag) return;
+    if (drag.type !== 'move' && drag.type !== 'resize-left' && drag.type !== 'resize-right') return;
+    const layout = layouts.find((l) => l.taskId === drag.taskId);
+    if (!layout) return;
+
+    // Compute the day width once so we can snap pixel positions to day
+    // boundaries. Matches the existing renderTodayBackground pattern.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today.getTime() + MS_PER_DAY);
+    const dayWidth = timeScale.dateToX(tomorrow) - timeScale.dateToX(today);
+    if (dayWidth <= 0) return;
+
+    // Determine which edge the user is moving.
+    const deltaX = drag.currentX - drag.startX;
+    let targetX: number;
+    if (drag.type === 'move') {
+      // For move, snap the LEADING (left) edge.
+      targetX = layout.x + deltaX;
+    } else if (drag.type === 'resize-left') {
+      targetX = layout.x + deltaX;
+    } else {
+      // resize-right: snap the TRAILING (right) edge.
+      targetX = layout.x + layout.width + deltaX;
+    }
+
+    // Snap to nearest day boundary. Anchor the grid at day 0 (timeScale
+    // origin); pixelsToDays uses the same grid so the snap matches what
+    // completeDrag will actually commit.
+    const snappedX = Math.round(targetX / dayWidth) * dayWidth;
+
+    const { ctx } = this;
+    ctx.save();
+    // Use the same accent as drag preview bar outline (barSelectedBorder)
+    // so the guide and the preview visually relate.
+    ctx.strokeStyle = theme.barSelectedBorder || '#3b82f6';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(snappedX + 0.5, bodyTop);
+    ctx.lineTo(snappedX + 0.5, bodyTop + bodyHeight);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /**
