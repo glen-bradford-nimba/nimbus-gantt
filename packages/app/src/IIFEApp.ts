@@ -569,10 +569,15 @@ function renderEmbeddedFullscreenButton(
     'box-shadow:0 1px 2px rgba(0,0,0,0.04)',
     'cursor:pointer',
   ].join(';');
-  btn.addEventListener('click', onClick);
+  btn.addEventListener('click', () => {
+    try { console.log('[NG fs-enter-btn click] invoking host onEnterFullscreen'); } catch (_e) { /* ok */ }
+    try { onClick(); }
+    catch (err) { try { console.error('[NG fs-enter-btn click] onEnterFullscreen threw', err); } catch (_e) { /* ok */ } }
+  });
   // container is the gantt host; make sure it positions our button correctly.
   if (!container.style.position) container.style.position = 'relative';
   container.appendChild(btn);
+  try { console.log('[NG fs-enter-btn render] embedded-mode floating button attached'); } catch (_e) { /* ok */ }
   return () => { try { btn.remove(); } catch (_e) { /* ok */ } };
 }
 

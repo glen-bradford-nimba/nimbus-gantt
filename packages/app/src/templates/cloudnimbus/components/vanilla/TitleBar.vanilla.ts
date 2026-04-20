@@ -232,6 +232,17 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     //      expand-in-page UX preserved).
     const fsUrl = config.fullscreenUrl;
     const onCurrentFsUrl = !!(fsUrl && typeof location !== 'undefined' && location.pathname === fsUrl);
+    // 0.185.9-diag — log which rendering path the Fullscreen button takes so
+    // we can tell from one paint whether the button exists + which branch.
+    try {
+      console.log('[NG fs-btn render]',
+        'mode=', config.mode,
+        'fsUrl=', fsUrl || '(none)',
+        'location=', typeof location !== 'undefined' ? location.pathname : '(no-loc)',
+        'onCurrentFsUrl=', onCurrentFsUrl,
+        'hasOnEnter=', typeof config.onEnterFullscreen === 'function',
+        'hasOnExit=', typeof config.onExitFullscreen === 'function');
+    } catch (_e) { /* ok */ }
     if (!onCurrentFsUrl) {
       const hostExit = config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function';
       const active = state.fullscreen || hostExit;
@@ -240,16 +251,29 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       if (fsUrl) {
         fsBtn.textContent = 'Fullscreen';
         fsBtn.setAttribute('data-nga-fullscreen-url', '1');
-        fsBtn.addEventListener('click', () => { window.location.href = fsUrl; });
+        fsBtn.addEventListener('click', () => {
+          try { console.log('[NG fs-btn click] path=url-nav target=', fsUrl); } catch (_e) { /* ok */ }
+          try { window.location.href = fsUrl; }
+          catch (err) { try { console.error('[NG fs-btn click] url-nav threw', err); } catch (_e) { /* ok */ } }
+        });
       } else if (hostExit) {
         fsBtn.textContent = '\u2190 Exit Full Screen';
         fsBtn.setAttribute('data-nga-fullscreen-exit', '1');
-        fsBtn.addEventListener('click', () => { config.onExitFullscreen!(); });
+        fsBtn.addEventListener('click', () => {
+          try { console.log('[NG fs-btn click] path=host-exit invoking config.onExitFullscreen'); } catch (_e) { /* ok */ }
+          try { config.onExitFullscreen!(); }
+          catch (err) { try { console.error('[NG fs-btn click] host-exit threw', err); } catch (_e) { /* ok */ } }
+        });
       } else {
         fsBtn.textContent = state.fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
-        fsBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_FULLSCREEN' }));
+        fsBtn.addEventListener('click', () => {
+          try { console.log('[NG fs-btn click] path=toggle-state'); } catch (_e) { /* ok */ }
+          dispatch({ type: 'TOGGLE_FULLSCREEN' });
+        });
       }
       rowMain.appendChild(fsBtn);
+    } else {
+      try { console.log('[NG fs-btn] HIDDEN — onCurrentFsUrl true, no button rendered'); } catch (_e) { /* ok */ }
     }
 
     // 0.185.8 — Admin button: dispatches TOGGLE_ADMIN; state.adminOpen
