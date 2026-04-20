@@ -63,6 +63,15 @@ export interface FeatureFlags {
    *  shift behavior. Horizontal-dominant drags still shift dates.
    *  Default FALSE. Runtime-toggleable via AdminPanel checkbox. */
   enableDragBarToReprioritize?: boolean;
+  /** 0.185.25 — when true (default), host setTasks() updates data in
+   *  place via refreshGantt() — scroll position, canvas, and timescale
+   *  survive the refresh. Eliminates the post-drop "snap 2-4 times"
+   *  glitch when a host like Delivery Hub fires setTasks multiple times
+   *  during drop settlement (optimistic → server → refetch). When false,
+   *  falls back to the legacy rebuildView() path (full destroy + re-mount
+   *  on every setTasks — scroll resets). DH/CN can opt out via
+   *  `overrides.features.liveDataUpdate = false` if a regression surfaces. */
+  liveDataUpdate?: boolean;
 }
 
 /* ── §1.3 Theme tokens ──────────────────────────────────────────────────── */
@@ -114,6 +123,8 @@ export interface AppState {
    *  TOGGLE_DETAIL's optional editMode payload (e.g. dblclick → edit). */
   detailMode: DetailMode;
   auditPanelOpen: boolean;
+  /** Hrs/Wk capacity strip visibility. Default closed — toggle in TitleBar. */
+  hrsWkStripOpen: boolean;
   fullscreen: boolean;
   selectedTaskId: string | null;
   pendingPatchCount: number;
@@ -147,6 +158,7 @@ export type AppEvent =
   | { type: 'TOGGLE_DETAIL'; taskId?: string; editMode?: boolean }
   | { type: 'SET_DETAIL_MODE'; mode: DetailMode }
   | { type: 'TOGGLE_AUDIT_PANEL' }
+  | { type: 'TOGGLE_HRSWK_STRIP' }
   | { type: 'TOGGLE_FULLSCREEN' }
   | { type: 'SELECT_TASK'; taskId: string | null }
   | { type: 'PATCH'; patch: TaskPatch }

@@ -42,9 +42,10 @@ function computeWeeks(tasks: SlotProps['data']['tasks']): { label: string; hours
   return weeks.map((w) => ({ label: w.label, hours: Math.round(w.hours), isCurrent: w.isCurrent }));
 }
 
-export function HrsWkStrip({ data }: SlotProps) {
+export function HrsWkStrip({ data, state }: SlotProps) {
   const weeks = computeWeeks(data.tasks);
   const maxH = Math.max(1, ...weeks.map((w) => w.hours));
+  if (!state.hrsWkStripOpen) return null;
   return (
     <div className={CLS_HRSWK} data-slot="HrsWkStrip">
       <span className={CLS_HRSWK_LABEL}>Hrs/wk</span>

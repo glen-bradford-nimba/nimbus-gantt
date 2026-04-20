@@ -62,6 +62,10 @@ export function HrsWkStripVanilla(initial: SlotProps): VanillaSlotInstance {
 
   function render(p: SlotProps) {
     clear(root);
+    // Default collapsed — TitleBar's Hrs/Wk toggle opens it. Mirrors the
+    // AuditPanel pattern: slot always mounts, content hides via display.
+    root.style.display = p.state.hrsWkStripOpen ? '' : 'none';
+    if (!p.state.hrsWkStripOpen) return;
     const weeks = computeWeeks(p.data.tasks);
     const totalHours = weeks.reduce((s, w) => s + w.hours, 0);
     const maxH = Math.max(1, ...weeks.map((w) => w.hours));

@@ -2304,7 +2304,19 @@ export class IIFEApp {
       setTasks(tasks: NormalizedTask[]) {
         allTasks = tasks;
         depthMap = buildDepthMap(allTasks);
-        rebuildView();
+        // 0.185.25 — when liveDataUpdate is on (default), route through the
+        // light-touch refreshGantt() path so scroll position, canvas, and
+        // timescale survive the refresh. Kills the post-drop "snap 2-4 times"
+        // glitch when hosts fire setTasks repeatedly during drop settlement.
+        // Legacy rebuildView() path still runs when flag is off, or when the
+        // engine isn't alive, or view mode isn't 'gantt' (non-gantt views
+        // currently require rebuild).
+        const live = tplConfig.features.liveDataUpdate !== false;
+        if (live && ganttInst && state.viewMode === 'gantt') {
+          refreshGantt();
+        } else {
+          rebuildView();
+        }
       },
       /** CH-1 (0.183) — toggle chrome visibility at runtime. With no arg,
        *  flips current state; boolean arg sets explicitly. Embedded-mode

@@ -211,6 +211,18 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
           Audit
         </button>
       )}
+      {config.features.hrsWkStrip && (
+        <button
+          type="button"
+          className={
+            CLS_PILL_BTN_BASE + ' ' +
+            (state.hrsWkStripOpen ? CLS_PILL_BTN_ACTIVE_BLUE : CLS_PILL_BTN_IDLE_BLUE)
+          }
+          onClick={() => dispatch({ type: 'TOGGLE_HRSWK_STRIP' })}
+        >
+          Hrs/Wk
+        </button>
+      )}
       <Sep />
       {ZOOMS.map((z) => {
         const on = state.zoom === z;

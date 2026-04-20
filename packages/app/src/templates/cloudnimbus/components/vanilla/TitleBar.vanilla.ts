@@ -204,6 +204,9 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     if (config.features.auditPanel) {
       rowMain.appendChild(toggleBtn('Audit',  state.auditPanelOpen, () => dispatch({ type: 'TOGGLE_AUDIT_PANEL' })));
     }
+    if (config.features.hrsWkStrip) {
+      rowMain.appendChild(toggleBtn('Hrs/Wk', state.hrsWkStripOpen, () => dispatch({ type: 'TOGGLE_HRSWK_STRIP' })));
+    }
     rowMain.appendChild(mkSep());
 
     /* 8. Zoom row */

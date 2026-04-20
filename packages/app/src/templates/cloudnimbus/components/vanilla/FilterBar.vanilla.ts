@@ -46,14 +46,19 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
   searchInput.type = 'text';
   searchInput.placeholder = 'Search T-NNNN, title, owner…';
 
+  // Track focus via our own listeners. document.activeElement returns the
+  // shadow host (not the input) inside Salesforce's Locker/LWS shadow DOM,
+  // so the activeElement identity check always failed there — producing the
+  // "one char at a time" symptom. Own-listener state works on every surface.
+  let searchInputFocused = false;
+  searchInput.addEventListener('focus', () => { searchInputFocused = true; });
+  searchInput.addEventListener('blur',  () => { searchInputFocused = false; });
+
   function render(p: SlotProps) {
-    // 0.185.12 — preserve search-input focus across re-renders. clear(inner)
-    // detaches every child, which drops DOM focus even though the input
-    // element is held in closure. Save focus + caret state before clear,
-    // restore after the tree is rebuilt. Without this, dispatching
-    // SET_SEARCH on every keystroke re-renders FilterBar, drops focus, and
-    // users can only type one character at a time before re-clicking.
-    const hadSearchFocus = (document.activeElement === searchInput);
+    // Preserve search-input focus across re-renders. clear(inner) detaches
+    // every child, which drops DOM focus even though the input element is
+    // held in closure. Save caret state before clear, restore after rebuild.
+    const hadSearchFocus = searchInputFocused;
     const selStart = hadSearchFocus ? searchInput.selectionStart : null;
     const selEnd   = hadSearchFocus ? searchInput.selectionEnd   : null;
 
@@ -143,7 +148,10 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
     teamWrap.appendChild(cap);
     inner.appendChild(teamWrap);
 
-    /* 10. Auto-Schedule */
+    /* 10. Auto-Schedule — button visible; behavior is a no-op stub until
+       DH-side scheduler wires up. Glen's call 2026-04-20: "i want it; DH
+       sorts out what it does." Follow-up will add an `onAutoSchedule`
+       callback to forward the click to DH's ETA service. */
     const autoBtn = el('button', CLS_AUTO_SCHED_BTN);
     autoBtn.textContent = 'Auto-Schedule';
     autoBtn.addEventListener('click', () => {

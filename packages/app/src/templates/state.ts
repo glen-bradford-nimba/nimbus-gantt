@@ -14,7 +14,8 @@ export const INITIAL_STATE: AppState = {
   statsOpen: false,
   detailOpen: false,
   detailMode: 'view',
-  auditPanelOpen: true, // v9 parity — Audit strip defaults to open
+  auditPanelOpen: false, // default collapsed — Audit toggle in TitleBar opens it
+  hrsWkStripOpen: false, // default collapsed — Hrs/Wk toggle in TitleBar opens it
   fullscreen: false,
   selectedTaskId: null,
   pendingPatchCount: 0,
@@ -77,6 +78,8 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
       return { ...state, detailMode: event.mode };
     case 'TOGGLE_AUDIT_PANEL':
       return { ...state, auditPanelOpen: !state.auditPanelOpen };
+    case 'TOGGLE_HRSWK_STRIP':
+      return { ...state, hrsWkStripOpen: !state.hrsWkStripOpen };
     case 'TOGGLE_FULLSCREEN':
       return { ...state, fullscreen: !state.fullscreen };
     case 'SELECT_TASK':
