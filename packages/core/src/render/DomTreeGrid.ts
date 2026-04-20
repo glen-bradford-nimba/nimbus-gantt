@@ -76,19 +76,37 @@ function injectStyles(root: HTMLElement, theme: ResolvedTheme): void {
     }
 
     /* ── Resize Handle ───────────────────────────────────────────────────── */
+    /*  0.185.4 — widened to 8px + faint default indicator so the grip is
+     *  discoverable without a pixel-perfect hover. The th element has
+     *  overflow:hidden so the handle stays within column bounds; a faint
+     *  vertical line at right:2px makes the grip visible without hover. */
 
     .ng-resize-handle {
       position: absolute;
-      top: 0;
+      top: 20%;
       right: 0;
-      width: 5px;
-      height: 100%;
+      width: 8px;
+      height: 60%;
       cursor: col-resize;
       z-index: 3;
+      opacity: 0.35;
+      transition: opacity 120ms ease, background 120ms ease;
+    }
+
+    .ng-resize-handle::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 2px;
+      width: 2px;
+      height: 100%;
+      background: ${theme.gridBorderColor};
+      border-radius: 1px;
     }
 
     .ng-resize-handle:hover {
       background: ${theme.selectionColor};
+      opacity: 1;
     }
 
     /* ── Body ────────────────────────────────────────────────────────────── */

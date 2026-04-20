@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import type { SlotProps } from '../../types';
 import { CLS_DETAIL, CLS_DETAIL_HEADER, CLS_DETAIL_BODY, CLS_CATEGORY_PILL } from './shared/classes';
 
-export function DetailPanel({ state, data, dispatch }: SlotProps) {
+export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
   const editing = state.detailMode === 'edit';
   const task = state.selectedTaskId
     ? data.tasks.find((t) => String(t.id) === state.selectedTaskId)
@@ -67,7 +67,19 @@ export function DetailPanel({ state, data, dispatch }: SlotProps) {
       <div className={CLS_DETAIL_HEADER} style={{ background: categoryColor + '15' }}>
         <div className="flex items-center gap-2 min-w-0">
           <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: categoryColor }} />
-          <span className="text-[10px] font-mono font-bold text-slate-500 flex-shrink-0">{taskId}</span>
+          {config.recordUrlTemplate ? (
+            <a
+              className="text-[10px] font-mono font-bold text-slate-500 hover:text-slate-900 hover:underline flex-shrink-0"
+              href={config.recordUrlTemplate.replace('{id}', encodeURIComponent(taskId))}
+              target="_top"
+              title="Open record"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {taskId}
+            </a>
+          ) : (
+            <span className="text-[10px] font-mono font-bold text-slate-500 flex-shrink-0">{taskId}</span>
+          )}
           <span className="text-xs font-bold text-slate-900 truncate">{task.title}</span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0 ml-2">

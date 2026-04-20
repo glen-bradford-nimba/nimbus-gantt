@@ -297,6 +297,9 @@ export interface TemplateConfig {
    *  store (e.g. useProFormaState) should pipe their isDirty here so the
    *  "unsaved changes" pill and Submit button reflect real dirty state. */
   isDirty?: boolean;
+  /** 0.185.4 — record-URL template passed through from MountOptions.
+   *  DetailPanel renders task.id as an `<a href>` when this is set. */
+  recordUrlTemplate?: string;
   /** CH-1 / 0.183.1 — runtime chrome-visibility toggle. Wired by IIFEApp to
    *  the same closure that backs `handle.toggleChrome()`. Slots (e.g. the
    *  TitleBar Unpin button) call this to hide chrome without needing the
