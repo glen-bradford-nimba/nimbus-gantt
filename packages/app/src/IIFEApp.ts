@@ -1005,6 +1005,11 @@ export class IIFEApp {
     container.className = 'nga-root';
     container.setAttribute('data-template', tplConfig.templateName);
     container.setAttribute('data-mode', mode);
+    // 0.185.10 — marker for the Fullscreen API to find the right request
+    // target (the whole mounted app, not just the TitleBar that triggered
+    // the click). TitleBar's fullscreen button uses closest() to locate
+    // this ancestor so chrome + gantt canvas go fullscreen together.
+    container.setAttribute('data-nga-template-root', '1');
     // Non-destructive style application. Previously this assigned
     // container.style.cssText = '...' which WIPED consumer-provided inline
     // styles (position:fixed; inset:0 on /v12; any host-owned sizing on SF)
@@ -2116,11 +2121,29 @@ export class IIFEApp {
     }
 
     /* ── Registry + AppInstance ─────────────────────────────────────── */
+    // 0.185.10 — re-render slots when browser fullscreen state changes so
+    // the TitleBar button label flips between "Full Screen" and "Exit Full
+    // Screen" on Esc-exit or programmatic transitions. Same listener covers
+    // both vendor-prefixed and standard events.
+    const onFullscreenChange = (): void => {
+      try { renderSlots(); } catch (_e) { /* ok */ }
+    };
+    try {
+      document.addEventListener('fullscreenchange', onFullscreenChange);
+      document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+      document.addEventListener('msfullscreenchange', onFullscreenChange);
+    } catch (_e) { /* ok */ }
+
     const cleanup = () => {
       if (cleanupShading) cleanupShading();
       if (cleanupDrag)    cleanupDrag();
       if (cleanupEmbeddedBtn) cleanupEmbeddedBtn();
       if (repinButtonEl) { try { repinButtonEl.remove(); } catch (_e) { /* ok */ void 0; } repinButtonEl = null; }
+      try {
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
+        document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+        document.removeEventListener('msfullscreenchange', onFullscreenChange);
+      } catch (_e) { /* ok */ }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (ganttInst) { try { (ganttInst as any).destroy(); } catch (_e) { /* ok */ void 0; } }
       slotInstances.forEach((inst) => inst.destroy());

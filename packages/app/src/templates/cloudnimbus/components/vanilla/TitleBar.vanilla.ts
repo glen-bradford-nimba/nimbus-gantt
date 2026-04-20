@@ -29,6 +29,54 @@ import { el, clear } from '../shared/el';
 const ZOOMS: ZoomLevel[] = ['day', 'week', 'month', 'quarter'];
 const GROUPS: GroupBy[] = ['priority', 'epic'];
 
+/**
+ * 0.185.10 — Fullscreen API helpers. Replaces the earlier navigate-to-VF-page
+ * behavior (which only hid the Lightning tab header but kept one.app chrome,
+ * and introduced a separate surface that caused stale-bundle + persistence
+ * divergence bugs). Real fullscreen uses browser Fullscreen API on the host
+ * element so chrome disappears entirely on the same mounted LWC — no
+ * navigation, no surface divergence, Esc exits.
+ *
+ * The earlier `fullscreenUrl` and `onExitFullscreen` options stay wired for
+ * backwards compat when a consumer needs a separate surface (e.g. CNN page-
+ * level fullscreen). Default precedence now favors the Fullscreen API when
+ * the browser supports it AND the consumer hasn't explicitly opted into the
+ * URL/host-exit paths.
+ */
+interface FsApi { request(el: HTMLElement): Promise<void>; exit(): Promise<void>; element(): Element | null; }
+function resolveFullscreenApi(): FsApi | null {
+  if (typeof document === 'undefined') return null;
+  const doc = document as unknown as Document & {
+    webkitFullscreenElement?: Element;
+    webkitExitFullscreen?: () => Promise<void>;
+    msFullscreenElement?: Element;
+    msExitFullscreen?: () => Promise<void>;
+  };
+  const request = (el: HTMLElement): Promise<void> => {
+    const anyEl = el as unknown as {
+      requestFullscreen?: () => Promise<void>;
+      webkitRequestFullscreen?: () => Promise<void>;
+      msRequestFullscreen?: () => Promise<void>;
+    };
+    if (anyEl.requestFullscreen)         return anyEl.requestFullscreen();
+    if (anyEl.webkitRequestFullscreen)   return anyEl.webkitRequestFullscreen();
+    if (anyEl.msRequestFullscreen)       return anyEl.msRequestFullscreen();
+    return Promise.reject(new Error('Fullscreen API not supported'));
+  };
+  const exit = (): Promise<void> => {
+    if (doc.exitFullscreen)         return doc.exitFullscreen();
+    if (doc.webkitExitFullscreen)   return doc.webkitExitFullscreen();
+    if (doc.msExitFullscreen)       return doc.msExitFullscreen();
+    return Promise.reject(new Error('exitFullscreen not supported'));
+  };
+  const element = (): Element | null => {
+    return doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement || null;
+  };
+  const anyEl = document.documentElement as unknown as { requestFullscreen?: unknown; webkitRequestFullscreen?: unknown };
+  if (!anyEl.requestFullscreen && !anyEl.webkitRequestFullscreen) return null;
+  return { request, exit, element };
+}
+
 /* ── v9 "Group:" button variants ────────────────────────────────────────── */
 const CLS_GROUP_BOTH   = 'bg-indigo-600 text-white border-indigo-600';
 const CLS_GROUP_GANTT  = 'bg-indigo-100 text-indigo-700 border-indigo-400';
@@ -230,23 +278,61 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     //      callback so the LWC returns to the embedded tab.
     //   4. Fallback → native state TOGGLE_FULLSCREEN (CNN + localhost
     //      expand-in-page UX preserved).
+    // 0.185.10 — Default path uses the browser Fullscreen API on the gantt
+    // root element: same surface, same mounted LWC, SF chrome outside the
+    // container disappears entirely, Esc exits. No navigation, no separate
+    // VF-wrapped surface, no stale-bundle or persistence divergence.
+    //
+    // Backwards-compat paths preserved (off by default; opt-in via config):
+    //   - config.fullscreenUrl set → legacy URL-nav (e.g. CNN page-level)
+    //   - config.onExitFullscreen set AND mode==='fullscreen' → legacy host-
+    //     exit (SF Standalone VF page host callback to navigate back)
+    //
+    // Precedence (most specific wins):
+    //   1. fullscreenUrl set → URL nav (opt-in)
+    //   2. host-exit available → config.onExitFullscreen (opt-in)
+    //   3. Fullscreen API available → real fullscreen on gantt root (default)
+    //   4. Fallback → TOGGLE_FULLSCREEN local state (legacy expand-in-page)
+    const fsApi = resolveFullscreenApi();
     const fsUrl = config.fullscreenUrl;
     const onCurrentFsUrl = !!(fsUrl && typeof location !== 'undefined' && location.pathname === fsUrl);
     if (!onCurrentFsUrl) {
       const hostExit = config.mode === 'fullscreen' && typeof config.onExitFullscreen === 'function';
-      const active = state.fullscreen || hostExit;
+      const useFsApi = !fsUrl && !hostExit && !!fsApi;
+      const fsApiActive = !!(fsApi && fsApi.element());
+      const active = state.fullscreen || hostExit || fsApiActive;
       const fsBtn = el('button',
         CLS_PILL_BTN_BASE + ' ' + (active ? CLS_RIGHT_FS_ON : CLS_RIGHT_FS_OFF));
       if (fsUrl) {
-        fsBtn.textContent = 'Fullscreen';
+        fsBtn.textContent = 'Full Screen';
         fsBtn.setAttribute('data-nga-fullscreen-url', '1');
         fsBtn.addEventListener('click', () => { window.location.href = fsUrl; });
       } else if (hostExit) {
         fsBtn.textContent = '\u2190 Exit Full Screen';
         fsBtn.setAttribute('data-nga-fullscreen-exit', '1');
         fsBtn.addEventListener('click', () => { config.onExitFullscreen!(); });
+      } else if (useFsApi) {
+        fsBtn.textContent = fsApiActive ? '\u2190 Exit Full Screen' : 'Full Screen';
+        fsBtn.setAttribute('data-nga-fullscreen-api', '1');
+        fsBtn.addEventListener('click', async () => {
+          try {
+            if (fsApi!.element()) {
+              await fsApi!.exit();
+            } else {
+              // Find the template root so the whole chrome+canvas goes
+              // fullscreen together (not just the TitleBar). Fall back to
+              // documentElement if no template-root marker is present.
+              const target = (root.closest('[data-nga-template-root]') as HTMLElement | null)
+                || (root.parentElement as HTMLElement | null)
+                || document.documentElement;
+              await fsApi!.request(target);
+            }
+          } catch (err) {
+            try { console.error('[NG fs-btn] Fullscreen API threw', err); } catch (_e) { /* ok */ }
+          }
+        });
       } else {
-        fsBtn.textContent = state.fullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+        fsBtn.textContent = state.fullscreen ? 'Exit Full Screen' : 'Full Screen';
         fsBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_FULLSCREEN' }));
       }
       rowMain.appendChild(fsBtn);
