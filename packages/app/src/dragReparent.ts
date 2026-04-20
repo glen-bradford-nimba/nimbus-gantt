@@ -25,6 +25,12 @@ interface InsertionPoint {
    *  null, the drop is sibling-reorder and `insertBeforeRow` positions the
    *  spacer. Mutually exclusive with `insertBeforeRow`. */
   nestIntoRow: HTMLElement | null;
+  /** 0.185.7 — when true, the drop is interpreted as explicit deparent.
+   *  Triggered by dropping on a bucket header (`.ng-group-row`). Emits
+   *  `newParentId: null` in the onItemReorder payload so DH can distinguish
+   *  "move to root of this bucket" from "no parent change." Mutually
+   *  exclusive with nestIntoRow + insertBeforeRow. */
+  deparent: boolean;
 }
 
 export function startDragReparent(
@@ -83,6 +89,40 @@ export function startDragReparent(
     ) as HTMLElement[];
     const vis = allRows.filter(r => r !== dragRow && r !== spacer);
 
+    // 0.185.7 — deparent detection: when the cursor is over a group-header
+    // row (bucket header), the drop becomes an explicit deparent. Emits
+    // `newParentId: null` so the task becomes a root-level child of the
+    // target bucket. Only meaningful when the dragged task currently HAS
+    // a parent; otherwise this degrades to a within-bucket reorder.
+    const groupRows = Array.prototype.slice.call(
+      ganttContainer.querySelectorAll('.ng-group-row')
+    ) as HTMLElement[];
+    let overGroupRow: HTMLElement | null = null;
+    for (const gr of groupRows) {
+      const rect = gr.getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom) { overGroupRow = gr; break; }
+    }
+    if (overGroupRow) {
+      // Resolve the bucket from the group-header's data-task-id.
+      const tid = overGroupRow.getAttribute('data-task-id') || '';
+      let bucket = '';
+      if (tid.indexOf('__bucket_header__') === 0) bucket = tid.slice('__bucket_header__'.length);
+      else if (tid.indexOf('group-') === 0) bucket = tid.slice(6);
+      const bucketFinal = bucket || dragSourceGroup || '';
+      return {
+        parentId: null,
+        depth: 0,
+        targetBucket: bucketFinal,
+        // Put the deparented task at the top of the bucket (before any
+        // existing root-level tasks). Index-based value matches the
+        // sparse-int convention used elsewhere.
+        targetSortOrder: 500,
+        insertBeforeRow: null,
+        nestIntoRow: null,
+        deparent: true,
+      };
+    }
+
     // 0.185.6 — drop-onto-row nest detection. When the cursor sits inside
     // the middle 50% of a row's body (top 25% = insert-above, bottom 25%
     // = insert-below, middle = nest-under), interpret the drop as "make
@@ -136,6 +176,7 @@ export function startDragReparent(
           targetSortOrder: maxChildSort + 1000,
           insertBeforeRow: null,
           nestIntoRow,
+          deparent: false,
         };
       }
       // Fall through: cycle or missing target → treat as sibling reorder.
@@ -173,7 +214,7 @@ export function startDragReparent(
     const targetSort = (sortAbove !== sortBelow)
       ? (sortAbove + sortBelow) / 2
       : (aboveIdx >= 0 ? (aboveIdx + 1) * 1000 : 500);
-    return { parentId, depth: desiredDepth, targetBucket, targetSortOrder: targetSort, insertBeforeRow: rowBelow, nestIntoRow: null };
+    return { parentId, depth: desiredDepth, targetBucket, targetSortOrder: targetSort, insertBeforeRow: rowBelow, nestIntoRow: null, deparent: false };
   }
 
   function cleanupDrag() {
@@ -191,6 +232,11 @@ export function startDragReparent(
       row.classList.remove('ng-nest-target');
       row.style.boxShadow = '';
       row.style.background = '';
+    });
+    // 0.185.7 — clear any deparent-target group-row highlight.
+    ganttContainer.querySelectorAll<HTMLElement>('.ng-deparent-target').forEach((row) => {
+      row.classList.remove('ng-deparent-target');
+      row.style.boxShadow = '';
     });
     dragTaskId = null; dragSourceGroup = null; dragRow = null; hasMoved = false; pendingIP = null;
   }
@@ -273,10 +319,10 @@ export function startDragReparent(
     pendingIP = ip;
     if (spacer) {
       const tb = dragRow ? dragRow.parentElement : null;
-      if (ip.nestIntoRow) {
-        // 0.185.6 — nesting gesture: hide the spacer (no insertion line)
-        // because the drop target is a row, not a gap between rows. Park
-        // the spacer out of view so it doesn't visually pollute the list.
+      if (ip.nestIntoRow || ip.deparent) {
+        // 0.185.6/7 — nesting or deparenting: hide the spacer because the
+        // drop target is a row (nest) or a bucket header (deparent), not
+        // a gap between rows.
         if (tb && spacer.parentElement === tb) spacer.remove();
       } else if (tb) {
         if (ip.insertBeforeRow && ip.insertBeforeRow !== spacer) tb.insertBefore(spacer, ip.insertBeforeRow);
@@ -290,11 +336,37 @@ export function startDragReparent(
     // differs from the source bucket, highlight the target bucket header
     // so the user sees where the drop will land. Toggle on per-move; the
     // bucket DOM is the `.ng-group-row` with a matching data-task-id.
-    updateBucketHighlight(ip.targetBucket);
+    // 0.185.7 — skip this when explicit deparent is active (its own
+    // amber highlight takes precedence; avoids double-highlighting).
+    updateBucketHighlight(ip.deparent ? null : ip.targetBucket);
     // 0.185.6 — nest-target row highlight. When the cursor is in a row's
     // middle zone (nest gesture), highlight that row to show "this will
     // become the parent." Distinct from the cross-group bucket highlight.
     updateNestHighlight(ip.nestIntoRow);
+    // 0.185.7 — deparent highlight. When cursor is over a bucket header
+    // (drop there = move to root of bucket), show an amber inset shadow
+    // on that header. Distinct from blue cross-group and green nest.
+    updateDeparentHighlight(ip.deparent ? getGroupRowForBucket(ip.targetBucket) : null);
+  }
+
+  function getGroupRowForBucket(bucket: string): HTMLElement | null {
+    if (!bucket) return null;
+    const rows = ganttContainer.querySelectorAll<HTMLElement>('.ng-group-row');
+    for (const row of Array.from(rows)) {
+      const tid = row.getAttribute('data-task-id') || '';
+      if (tid === `__bucket_header__${bucket}` || tid === `group-${bucket}`) return row;
+    }
+    return null;
+  }
+
+  function updateDeparentHighlight(target: HTMLElement | null): void {
+    ganttContainer.querySelectorAll<HTMLElement>('.ng-deparent-target').forEach((row) => {
+      row.classList.remove('ng-deparent-target');
+      row.style.boxShadow = '';
+    });
+    if (!target) return;
+    target.classList.add('ng-deparent-target');
+    target.style.boxShadow = 'inset 0 0 0 3px #f59e0b';
   }
 
   function updateNestHighlight(target: HTMLElement | null): void {
