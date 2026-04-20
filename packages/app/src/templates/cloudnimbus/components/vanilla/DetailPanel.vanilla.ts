@@ -7,7 +7,7 @@
  * lockstep with the React slot so SF Locker / LWS consumers of the IIFE
  * bundle get identical UX.
  */
-import type { SlotProps, VanillaSlotInstance } from '../../../types';
+import type { SlotProps, VanillaSlotInstance, FieldDescriptor } from '../../../types';
 import { CLS_DETAIL, CLS_DETAIL_HEADER, CLS_DETAIL_BODY, CLS_CATEGORY_PILL } from '../shared/classes';
 import { el, clear } from '../shared/el';
 
@@ -17,8 +17,10 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
 
   // Local draft state — mirrors the React slot's useState. Re-initialised
   // every time the selected task or edit mode flips.
-  let draftStart = '';
-  let draftEnd = '';
+  // 0.185.15 — generalized from {draftStart, draftEnd} to a keyed map so
+  // DetailPanel can render arbitrary field schemas provided by the host.
+  // Legacy date-only fields still work when config.fieldSchema is absent.
+  let drafts: Record<string, unknown> = {};
   let lastRenderedKey = '';
 
   function render(p: SlotProps) {
@@ -39,10 +41,22 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
 
     // Reset draft when task id or editing flag changes — prevents stale
     // values leaking between tasks / view↔edit transitions.
-    const renderKey = `${task.id}|${editing ? 1 : 0}|${task.startDate || ''}|${task.endDate || ''}`;
+    // 0.185.15 — render key now includes fieldSchema identity so switching
+    // schemas mid-session (rare) still resets drafts.
+    const schema: FieldDescriptor[] | undefined = p.config.fieldSchema;
+    const schemaKey = schema ? schema.map((f) => f.key).join(',') : '';
+    const renderKey = `${task.id}|${editing ? 1 : 0}|${task.startDate || ''}|${task.endDate || ''}|${schemaKey}`;
     if (renderKey !== lastRenderedKey) {
-      draftStart = task.startDate || '';
-      draftEnd = task.endDate || '';
+      drafts = {};
+      if (schema && schema.length) {
+        for (const f of schema) {
+          drafts[f.key] = (task as unknown as Record<string, unknown>)[f.key];
+        }
+      } else {
+        // Legacy date-only defaults.
+        drafts.startDate = task.startDate || '';
+        drafts.endDate   = task.endDate   || '';
+      }
       lastRenderedKey = renderKey;
     }
 
@@ -119,44 +133,100 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
     body.appendChild(pillWrap);
 
     const grid = el('div', 'grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1');
-    function fld(label: string, value: string) {
-      const w = el('div', '');
+    function fld(label: string, value: string, fullWidth = false) {
+      const w = el('div', fullWidth ? 'col-span-2' : '');
       const l = el('p', 'text-[9px] text-slate-400 uppercase tracking-wide');
       l.textContent = label;
-      const v = el('p', 'text-slate-900');
+      const v = el('p', 'text-slate-900 whitespace-pre-wrap');
       v.textContent = value;
       w.appendChild(l); w.appendChild(v);
       grid.appendChild(w);
     }
-    function inpField(
-      label: string,
-      type: 'text' | 'date' | 'number',
-      value: string,
-      onInput: (v: string) => void,
-    ) {
-      const w = el('div', '');
+    // 0.185.15 — schema-driven field renderer. Handles text/date/number/
+    // textarea/picklist/lookup. Textareas auto-span both columns so they
+    // don't look cramped. Changes write into the `drafts` map; Save diffs
+    // against task on commit. readOnly descriptors render in view style
+    // even when `editing` is true.
+    function renderField(desc: FieldDescriptor) {
+      const fullWidth = desc.type === 'textarea';
+      const raw = drafts[desc.key];
+      const currentVal = raw == null ? '' : String(raw);
+      const readOnly = !!desc.readOnly;
+      if (!editing || readOnly) {
+        const displayVal = currentVal || '\u2014';
+        fld(desc.label, displayVal, fullWidth);
+        return;
+      }
+      const w = el('div', fullWidth ? 'col-span-2' : '');
       const l = el('p', 'text-[9px] text-slate-400 uppercase tracking-wide');
-      l.textContent = label;
-      const input = document.createElement('input');
-      input.type = type;
-      input.value = value;
-      input.className =
+      l.textContent = desc.label;
+      w.appendChild(l);
+      const inputCls =
         'w-full px-1.5 py-0.5 text-xs text-slate-900 border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-fuchsia-400';
-      input.addEventListener('input', () => onInput(input.value));
-      w.appendChild(l); w.appendChild(input);
+      if (desc.type === 'textarea') {
+        const ta = document.createElement('textarea');
+        ta.value = currentVal;
+        ta.rows = 3;
+        ta.className = inputCls + ' resize-y';
+        if (desc.placeholder) ta.placeholder = desc.placeholder;
+        ta.addEventListener('input', () => { drafts[desc.key] = ta.value; });
+        w.appendChild(ta);
+      } else if (desc.type === 'picklist') {
+        const sel = document.createElement('select');
+        sel.className = inputCls;
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = desc.placeholder || '—';
+        sel.appendChild(blank);
+        for (const opt of (desc.options || [])) {
+          const o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          if (opt === currentVal) o.selected = true;
+          sel.appendChild(o);
+        }
+        if (!currentVal) blank.selected = true;
+        sel.addEventListener('change', () => { drafts[desc.key] = sel.value; });
+        w.appendChild(sel);
+      } else {
+        // text / date / number / lookup (lookup renders as plain text for now)
+        const input = document.createElement('input');
+        input.type = desc.type === 'number' ? 'number'
+                   : desc.type === 'date'   ? 'date'
+                   : 'text';
+        input.value = currentVal;
+        input.className = inputCls;
+        if (desc.placeholder) input.placeholder = desc.placeholder;
+        if (desc.type === 'number') {
+          if (desc.min !== undefined) input.min = String(desc.min);
+          if (desc.max !== undefined) input.max = String(desc.max);
+        }
+        input.addEventListener('input', () => {
+          drafts[desc.key] = desc.type === 'number'
+            ? (input.value === '' ? null : Number(input.value))
+            : input.value;
+        });
+        w.appendChild(input);
+      }
       grid.appendChild(w);
     }
-    fld('Status',   task.stage || '\u2014');
-    fld('Priority', task.priorityGroup || '\u2014');
-    if (editing) {
-      inpField('Start', 'date', draftStart, (v) => { draftStart = v; });
-      inpField('End',   'date', draftEnd,   (v) => { draftEnd   = v; });
+
+    if (schema && schema.length) {
+      for (const desc of schema) renderField(desc);
     } else {
-      fld('Start', task.startDate || '\u2014');
-      fld('End',   task.endDate   || '\u2014');
+      // Legacy date-only render path (unchanged behavior when no schema).
+      fld('Status',   task.stage || '\u2014');
+      fld('Priority', task.priorityGroup || '\u2014');
+      if (editing) {
+        renderField({ key: 'startDate', label: 'Start', type: 'date' });
+        renderField({ key: 'endDate',   label: 'End',   type: 'date' });
+      } else {
+        fld('Start', task.startDate || '\u2014');
+        fld('End',   task.endDate   || '\u2014');
+      }
+      fld('Estimated', task.estimatedHours ? task.estimatedHours + 'h' : '\u2014');
+      fld('Logged',    task.loggedHours ? task.loggedHours + 'h' : '\u2014');
     }
-    fld('Estimated', task.estimatedHours ? task.estimatedHours + 'h' : '\u2014');
-    fld('Logged',    task.loggedHours ? task.loggedHours + 'h' : '\u2014');
     body.appendChild(grid);
 
     if (editing) {
@@ -167,13 +237,33 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
       );
       saveBtn.textContent = 'Save';
       saveBtn.addEventListener('click', () => {
-        const patch: { id: string; startDate?: string; endDate?: string } = {
-          id: String(task.id),
-        };
-        if (draftStart !== (task.startDate || '')) patch.startDate = draftStart;
-        if (draftEnd   !== (task.endDate   || '')) patch.endDate   = draftEnd;
-        if (patch.startDate !== undefined || patch.endDate !== undefined) {
-          dispatch({ type: 'PATCH', patch });
+        // 0.185.15 — compute diff from drafts against task. Emits only the
+        // keys whose drafts differ from the task's current value. When
+        // schema is present, routes through the slot-level PATCH event (or
+        // a later onItemEdit wire if the host moves that direction); for
+        // the legacy date-only path, keeps the exact previous contract so
+        // date-only consumers see no behavior change.
+        const changes: Record<string, unknown> = {};
+        const keys = schema && schema.length
+          ? schema.filter((f) => !f.readOnly).map((f) => f.key)
+          : ['startDate', 'endDate'];
+        for (const k of keys) {
+          const draftVal = drafts[k];
+          const taskVal = (task as unknown as Record<string, unknown>)[k];
+          // Normalize null/undefined/empty-string so "no value" doesn't
+          // show as a spurious change on first save.
+          const dNorm = draftVal == null || draftVal === '' ? null : draftVal;
+          const tNorm = taskVal == null || taskVal === '' ? null : taskVal;
+          if (dNorm !== tNorm) changes[k] = draftVal;
+        }
+        if (Object.keys(changes).length > 0) {
+          // Legacy: dispatch PATCH with the task id + change fields inline,
+          // matching the previous date-only shape. IIFEApp's interceptor
+          // routes this through onPatch / onItemEdit uniformly. Non-date
+          // keys flow through the same path now that the callback type
+          // accepts Record<string, unknown>.
+          const patch: Record<string, unknown> = { id: String(task.id), ...changes };
+          dispatch({ type: 'PATCH', patch: patch as unknown as import('../../../types').TaskPatch });
         }
         dispatch({ type: 'SET_DETAIL_MODE', mode: 'view' });
       });
@@ -185,8 +275,16 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
       );
       cancelBtn.textContent = 'Cancel';
       cancelBtn.addEventListener('click', () => {
-        draftStart = task.startDate || '';
-        draftEnd   = task.endDate   || '';
+        // Reset drafts to task's current values on cancel.
+        if (schema && schema.length) {
+          drafts = {};
+          for (const f of schema) {
+            drafts[f.key] = (task as unknown as Record<string, unknown>)[f.key];
+          }
+        } else {
+          drafts.startDate = task.startDate || '';
+          drafts.endDate   = task.endDate   || '';
+        }
         dispatch({ type: 'SET_DETAIL_MODE', mode: 'view' });
       });
       actions.appendChild(cancelBtn);
