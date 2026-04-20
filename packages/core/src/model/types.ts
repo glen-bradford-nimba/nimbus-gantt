@@ -94,6 +94,17 @@ export interface GanttConfig {
   onTaskMove?: (task: GanttTask, startDate: string, endDate: string) => void | Promise<void>;
   onTaskResize?: (task: GanttTask, startDate: string, endDate: string) => void | Promise<void>;
   onTaskProgressChange?: (task: GanttTask, progress: number) => void | Promise<void>;
+  /** 0.185.16 — getter for canvas bar vertical-drag reprioritize. When
+   *  this returns true AND onBarReorderDrag is wired, a vertical-dominant
+   *  drag of a bar body commits a reorder (onBarReorderDrag callback)
+   *  instead of a date move (onTaskMove callback). Default: off. */
+  isBarReprioritizeEnabled?: () => boolean;
+  /** 0.185.16 — canvas bar reorder commit. Fires when the vertical-drag
+   *  gesture lands on a different row than the drag started on. Host
+   *  resolves the target row to newIndex/newPriorityGroup and forwards
+   *  via its own onItemReorder chain. targetTaskId is null when the
+   *  drop lands below the last row in the list. */
+  onBarReorderDrag?: (task: GanttTask, targetTaskId: string | null, targetRowIndex: number) => void | Promise<void>;
   onDependencyCreate?: (source: string, target: string, type: DependencyType) => void | Promise<void>;
   onDependencyClick?: (dep: GanttDependency) => void;
   onViewChange?: (zoomLevel: ZoomLevel, startDate: string, endDate: string) => void;
