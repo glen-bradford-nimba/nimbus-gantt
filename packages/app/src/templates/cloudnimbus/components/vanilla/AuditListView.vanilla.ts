@@ -296,6 +296,12 @@ export interface AuditListOptions {
    *  end users (roadmap DM-2: names-not-IDs). Pass `false` from
    *  dev/debug contexts only. */
   hideRecordIds?: boolean;
+  /** 0.185.5 — drag-to-reorder on the per-row 3-dot handle. When set, the
+   *  drag handle on each row becomes interactive; dropping on a different
+   *  row fires this callback with a newIndex derived from neighbor
+   *  sortOrders (midpoint) so the host persists the new order. Same
+   *  contract as MountOptions.onItemReorder — IIFEApp wires the two. */
+  onReorder?: (taskId: string, payload: { newIndex: number }) => void;
 }
 
 /**
@@ -323,6 +329,9 @@ export function renderAuditListView(
   // fall through task.name || task.id to the 18-char SF record ID which
   // should never reach end users.
   const hideRecordIds = options?.hideRecordIds ?? true;
+  // 0.185.5 — optional drag-to-reorder callback. When absent, drag handle
+  // stays visual-only (legacy v0 behavior).
+  const onReorder = options?.onReorder;
 
   // Compute audits once per task list; re-compute on data change. Tasks
   // change only when consumer calls renderAuditListView again with new
@@ -495,6 +504,142 @@ export function renderAuditListView(
     if (!clearLink) return;
     const anyFilter = filterChip !== 'all' || search.trim() !== '' || sortKey !== 'default';
     clearLink.style.display = anyFilter ? '' : 'none';
+  }
+
+  // ── 0.185.5 — Drag-to-reorder on 3-dot handle ────────────────────────────
+  // Minimal reorder: mousedown on a row's handle captures the task, window
+  // mousemove renders a ghost + insertion indicator, mouseup fires onReorder
+  // with a newIndex interpolated from the neighboring rows' sortOrders.
+  // Deliberately simpler than dragReparent (no parent-change / group-change
+  // semantics) — list view is a flat audit surface, not a hierarchical grid.
+  let drgTaskId: string | null = null;
+  let drgGhost: HTMLElement | null = null;
+  let drgLine: HTMLElement | null = null;
+  let drgInsertAfter: NormalizedTask | null = null;
+  let drgInsertBefore: NormalizedTask | null = null;
+
+  function cleanupReorderDrag(): void {
+    if (drgGhost) { drgGhost.remove(); drgGhost = null; }
+    if (drgLine) { drgLine.remove(); drgLine = null; }
+    drgTaskId = null; drgInsertAfter = null; drgInsertBefore = null;
+    document.body.style.cursor = '';
+  }
+
+  function startReorderDrag(e: MouseEvent, task: NormalizedTask): void {
+    if (!onReorder) return;
+    e.preventDefault();
+    e.stopPropagation();
+    drgTaskId = task.id;
+    document.body.style.cursor = 'grabbing';
+
+    drgGhost = document.createElement('div');
+    drgGhost.style.cssText = [
+      'position:fixed',
+      'z-index:10000',
+      'pointer-events:none',
+      `left:${e.clientX - 12}px`,
+      `top:${e.clientY - 14}px`,
+      'background:#dbeafe',
+      'border:2px solid #2563eb',
+      'border-radius:8px',
+      'padding:6px 12px',
+      'font-size:12px',
+      'font-weight:700',
+      'color:#1d4ed8',
+      'white-space:nowrap',
+      'max-width:320px',
+      'overflow:hidden',
+      'text-overflow:ellipsis',
+      'box-shadow:0 16px 40px rgba(37,99,235,0.4)',
+      'transform:rotate(-1.5deg) scale(1.04)',
+    ].join(';');
+    drgGhost.textContent = (task.title || task.name || task.id).slice(0, 60);
+    document.body.appendChild(drgGhost);
+
+    drgLine = document.createElement('div');
+    drgLine.style.cssText = [
+      'position:fixed',
+      'z-index:9999',
+      'pointer-events:none',
+      'height:2px',
+      'background:#3b82f6',
+      'box-shadow:0 0 4px rgba(59,130,246,0.5)',
+      'display:none',
+    ].join(';');
+    document.body.appendChild(drgLine);
+
+    window.addEventListener('mousemove', onReorderMove, true);
+    window.addEventListener('mouseup', onReorderUp, true);
+  }
+
+  function onReorderMove(e: MouseEvent): void {
+    if (!drgTaskId || !drgGhost) return;
+    drgGhost.style.left = (e.clientX - 12) + 'px';
+    drgGhost.style.top = (e.clientY - 14) + 'px';
+
+    // Find the row under the cursor. Walk the visible list rows and pick
+    // the one whose mid-Y is closest above the pointer.
+    const rows = Array.from(host.querySelectorAll<HTMLElement>('[data-list-row="1"]'));
+    let above: HTMLElement | null = null;
+    let below: HTMLElement | null = null;
+    for (const r of rows) {
+      const rect = r.getBoundingClientRect();
+      const mid = rect.top + rect.height / 2;
+      if (e.clientY < mid) { below = r; break; }
+      above = r;
+    }
+    const aboveId = above?.getAttribute('data-task-id') || null;
+    const belowId = below?.getAttribute('data-task-id') || null;
+    drgInsertAfter = aboveId ? (tasks.find((t) => t.id === aboveId) || null) : null;
+    drgInsertBefore = belowId ? (tasks.find((t) => t.id === belowId) || null) : null;
+
+    // Render insertion indicator line at the gap between the two rows.
+    if (drgLine) {
+      if (below) {
+        const rect = below.getBoundingClientRect();
+        drgLine.style.display = 'block';
+        drgLine.style.left = rect.left + 'px';
+        drgLine.style.top = (rect.top - 1) + 'px';
+        drgLine.style.width = rect.width + 'px';
+      } else if (above) {
+        const rect = above.getBoundingClientRect();
+        drgLine.style.display = 'block';
+        drgLine.style.left = rect.left + 'px';
+        drgLine.style.top = (rect.bottom - 1) + 'px';
+        drgLine.style.width = rect.width + 'px';
+      } else {
+        drgLine.style.display = 'none';
+      }
+    }
+  }
+
+  function onReorderUp(): void {
+    window.removeEventListener('mousemove', onReorderMove, true);
+    window.removeEventListener('mouseup', onReorderUp, true);
+    const taskId = drgTaskId;
+    const after = drgInsertAfter;
+    const before = drgInsertBefore;
+    cleanupReorderDrag();
+    if (!taskId || !onReorder) return;
+    if (!after && !before) return; // dropped off-list
+
+    // Compute newIndex as midpoint of neighbor sortOrders (or next-int
+    // when only one neighbor). Matches the sparse-int convention the
+    // gantt sidebar's dragReparent uses.
+    const afterSort  = after  ? (Number((after  as { sortOrder?: number }).sortOrder)  || 0) : 0;
+    const beforeSort = before ? (Number((before as { sortOrder?: number }).sortOrder) || 0) : 0;
+    let newIndex: number;
+    if (after && before && afterSort !== beforeSort) {
+      newIndex = (afterSort + beforeSort) / 2;
+    } else if (after && !before) {
+      newIndex = afterSort + 1000;
+    } else if (!after && before) {
+      newIndex = beforeSort - 1000;
+    } else {
+      // Neighbors share a sortOrder — fall back to 1000-step offset.
+      newIndex = afterSort + 500;
+    }
+    onReorder(taskId, { newIndex });
   }
 
   function resetAllFilters(): void {
@@ -838,18 +983,27 @@ export function renderAuditListView(
       'cursor:pointer',
     ].join(';');
 
-    // Drag handle (visual only — drag-to-reorder ports in 0.183)
+    // Drag handle — interactive when onReorder is wired (0.185.5).
     const drag = el('span', '');
     drag.style.cssText = [
       'color:#cbd5e1',
       'font-size:14px',
-      'cursor:grab',
+      'cursor:' + (onReorder ? 'grab' : 'default'),
       'user-select:none',
       'flex-shrink:0',
+      'padding:0 4px',
     ].join(';');
     drag.textContent = '\u2807'; // ⠇ vertical dots
-    drag.title = 'Drag to reorder (coming in 0.183)';
+    drag.title = onReorder ? 'Drag to reorder' : 'Drag to reorder (disabled)';
+    drag.setAttribute('data-reorder-handle', '1');
+    drag.setAttribute('data-task-id', task.id);
+    if (onReorder) {
+      drag.addEventListener('mousedown', (e) => startReorderDrag(e, task));
+    }
     top.appendChild(drag);
+    // Mark the row for drop-target detection
+    row.setAttribute('data-list-row', '1');
+    row.setAttribute('data-task-id', task.id);
 
     // Chevron
     const chev = el('span', '');

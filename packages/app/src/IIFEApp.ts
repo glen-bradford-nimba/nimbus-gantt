@@ -1704,6 +1704,12 @@ export class IIFEApp {
         renderAuditListView(ganttHost, allTasks, {
           progressLabel: tplConfig.progressLabel,
           hideRecordIds: tplConfig.hideRecordIds,
+          // 0.185.5 — forward the host's onItemReorder contract so the
+          // list-view 3-dot handle persists drops through the same path
+          // the gantt sidebar uses.
+          onReorder: options.onItemReorder
+            ? (taskId, payload) => { void options.onItemReorder!(taskId, payload); }
+            : undefined,
         });
       } else {
         const labelMap: Record<string, string> = {

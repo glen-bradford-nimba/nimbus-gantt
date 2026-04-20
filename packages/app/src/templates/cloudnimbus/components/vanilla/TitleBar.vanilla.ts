@@ -302,6 +302,35 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     // Attach Row 2 to the outer titlebar (always present; Row 1 already
     // appended above when enabledViews.length > 1).
     root.appendChild(rowMain);
+
+    // 0.185.5 — Status color legend. Compact horizontal strip so users can
+    // decode what the bar colors mean (In Flight / Next Up / Backlog /
+    // Blocked / Paused / Done) without having to guess. Reads from the
+    // same STAGE_TO_CATEGORY_COLOR buckets the renderer uses.
+    const legend = el('div', 'flex items-center gap-3 px-3 py-1 text-[10px] text-slate-500 border-t border-slate-100');
+    legend.setAttribute('data-slot-part', 'status-legend');
+    const legendItems: Array<{ label: string; color: string }> = [
+      { label: 'In Flight', color: '#10b981' },
+      { label: 'Next Up',   color: '#3b82f6' },
+      { label: 'Backlog',   color: '#f59e0b' },
+      { label: 'Blocked',   color: '#ef4444' },
+      { label: 'Paused',    color: '#94a3b8' },
+      { label: 'Done',      color: '#cbd5e1' },
+    ];
+    const legendLabel = el('span', 'text-[9px] text-slate-400 uppercase tracking-wide');
+    legendLabel.textContent = 'Status';
+    legend.appendChild(legendLabel);
+    for (const item of legendItems) {
+      const chip = el('span', 'flex items-center gap-1');
+      const dot = el('span', '');
+      dot.style.cssText = `width:8px;height:8px;border-radius:50%;background:${item.color};display:inline-block`;
+      chip.appendChild(dot);
+      const lbl = el('span', '');
+      lbl.textContent = item.label;
+      chip.appendChild(lbl);
+      legend.appendChild(chip);
+    }
+    root.appendChild(legend);
   }
 
   render(initial);
