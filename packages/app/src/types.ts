@@ -197,6 +197,13 @@ export interface MountOptions {
     zoom?: string;
   };
 
+  /** 0.185.11 — enables the drop-onto-row nest + bucket-header deparent
+   *  gestures. Default FALSE. When false, drag only reorders (within
+   *  group or across groups via bucket header drop); `newParentId` is
+   *  never emitted. Flip true after the host's reparent handler is
+   *  stable. Runtime-toggleable via AdminPanel checkbox. */
+  enableDragReparent?: boolean;
+
   /** 0.185.4 — record-URL template for the task-detail panel's ID chip.
    *  When provided, DetailPanel renders the task ID as an `<a href>` link
    *  with `{id}` in the template replaced by `task.id`. When omitted, ID

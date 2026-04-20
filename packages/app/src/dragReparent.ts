@@ -38,6 +38,11 @@ export function startDragReparent(
   allTasks: NormalizedTask[],
   depthMap: Record<string, number>,
   onPatch: (patch: TaskPatch) => void,
+  // 0.185.11 — runtime getter for the reparent-enabled flag. Called on
+  // every pointermove so AdminPanel toggles take effect on the next drag
+  // without requiring a re-mount. When false, nest + deparent + horizontal-
+  // drag-depth gestures are all suppressed; only sibling reorder emits.
+  isReparentEnabled: () => boolean = () => false,
 ): () => void {
   const DRAG_THRESHOLD = 6;
   const LEAF_STEP = 10;
@@ -89,6 +94,12 @@ export function startDragReparent(
     ) as HTMLElement[];
     const vis = allRows.filter(r => r !== dragRow && r !== spacer);
 
+    // 0.185.11 — runtime check. When reparent is disabled, skip both the
+    // deparent-onto-bucket-header and the nest-onto-row-middle gestures,
+    // AND neutralize the horizontal-drag-depth logic in the sibling-reorder
+    // path so parentId always stays at the dragged task's current parent.
+    const reparentOn = isReparentEnabled();
+
     // 0.185.7 — deparent detection: when the cursor is over a group-header
     // row (bucket header), the drop becomes an explicit deparent. Emits
     // `newParentId: null` so the task becomes a root-level child of the
@@ -102,7 +113,8 @@ export function startDragReparent(
       const rect = gr.getBoundingClientRect();
       if (clientY >= rect.top && clientY <= rect.bottom) { overGroupRow = gr; break; }
     }
-    if (overGroupRow) {
+    // 0.185.11 — gesture-gate: deparent is part of reparent semantics.
+    if (overGroupRow && reparentOn) {
       // Resolve the bucket from the group-header's data-task-id.
       const tid = overGroupRow.getAttribute('data-task-id') || '';
       let bucket = '';
@@ -129,14 +141,17 @@ export function startDragReparent(
     // this row the new parent of the dragged task." The existing
     // horizontal-drag depth gesture is preserved for power users; this
     // adds a more discoverable gesture without removing the old one.
+    // 0.185.11 — gesture-gate: skip nest detection when reparent is off.
     let nestIntoRow: HTMLElement | null = null;
-    for (const row of vis) {
-      const rect = row.getBoundingClientRect();
-      const nestTop = rect.top + rect.height * 0.25;
-      const nestBottom = rect.top + rect.height * 0.75;
-      if (clientY >= nestTop && clientY <= nestBottom) {
-        nestIntoRow = row;
-        break;
+    if (reparentOn) {
+      for (const row of vis) {
+        const rect = row.getBoundingClientRect();
+        const nestTop = rect.top + rect.height * 0.25;
+        const nestBottom = rect.top + rect.height * 0.75;
+        if (clientY >= nestTop && clientY <= nestBottom) {
+          nestIntoRow = row;
+          break;
+        }
       }
     }
 
@@ -194,10 +209,20 @@ export function startDragReparent(
     const aboveDepth = aboveId != null ? (depthMap[aboveId] || 0) : -1;
     const aboveHasExpand = !!(rowAbove && rowAbove.querySelector('.ng-expand-icon'));
     const maxDepth = rowAbove == null ? 0 : (aboveHasExpand ? aboveDepth + 1 : aboveDepth);
-    const depthDelta = Math.round((clientX - dragStartX) / 25);
+    // 0.185.11 — gesture-gate: when reparent is off, force depthDelta=0 so
+    // the dragged task stays at its original depth (same parent). Users
+    // dragging horizontally won't accidentally change hierarchy.
+    const depthDelta = reparentOn ? Math.round((clientX - dragStartX) / 25) : 0;
     const desiredDepth = Math.max(0, Math.min(maxDepth, dragStartDepth + depthDelta));
     let parentId: string | null = null;
-    if (desiredDepth > 0) {
+    if (!reparentOn) {
+      // Force parentId to the dragged task's current parent — even when the
+      // new row position would "naturally" imply a different ancestor via
+      // the aboveId chain at same depth. Pure reorder semantics: no parent
+      // change regardless of where the user drops.
+      const currentTask = dragTaskId ? taskById[dragTaskId] : null;
+      parentId = currentTask ? ((currentTask.parentWorkItemId as string | null) || null) : null;
+    } else if (desiredDepth > 0) {
       let curId: string | null = aboveId;
       while (curId) {
         const d = depthMap[curId] || 0;

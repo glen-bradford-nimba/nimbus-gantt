@@ -329,6 +329,10 @@ const ADMIN_TOGGLEABLE_FEATURES: Array<{ key: string; label: string }> = [
   { key: 'hoursColumn',          label: 'Hours column' },
   { key: 'budgetUsedColumn',     label: 'Budget-used column' },
   { key: 'headerRowCompletionBar', label: 'Header completion bar' },
+  // 0.185.11 — drag-to-reparent. Default OFF. When ON: drop-onto-row
+  // middle = nest under, drop-on-bucket-header = deparent, horizontal
+  // drag changes depth. When OFF: pure reorder, no parent changes.
+  { key: 'enableDragReparent',   label: 'Enable drag to reparent' },
 ];
 
 type AdminDispatch = (ev: { type: 'TOGGLE_ADMIN' } | { type: 'TOGGLE_ADVISOR' } | { type: 'TOGGLE_FEATURE'; key: string }) => void;
@@ -627,6 +631,11 @@ export class IIFEApp {
     if (options.cssUrl) tplConfig.stylesheet = { ...tplConfig.stylesheet, url: options.cssUrl };
     if (options.engine) tplConfig.engine = options.engine;
     if (options.recordUrlTemplate) tplConfig.recordUrlTemplate = options.recordUrlTemplate;
+    // 0.185.11 — wire enableDragReparent mount option → tplConfig.features.
+    // Default FALSE (reparent gesture off); consumers must opt in explicitly.
+    // AdminPanel can toggle at runtime via the existing featureOverrides path.
+    tplConfig.features.enableDragReparent = options.enableDragReparent === true;
+    try { console.log('[NG config] enableDragReparent=', tplConfig.features.enableDragReparent); } catch (_e) { /* ok */ }
 
     /* ── engineOnly: React owns chrome — just run the gantt engine ──── */
     if (options.engineOnly) {
@@ -789,7 +798,7 @@ export class IIFEApp {
       let cleanupShading: (() => void) | null = null;
       let cleanupDrag: (() => void) | null = null;
       if (tplConfig.features.depthShading) cleanupShading = startDepthShading(ganttEl, depthMap);
-      if (tplConfig.features.dragReparent) cleanupDrag    = startDragReparent(ganttEl, allTasks, depthMap, options.onPatch || (() => { /* no-op */ }));
+      if (tplConfig.features.dragReparent) cleanupDrag    = startDragReparent(ganttEl, allTasks, depthMap, options.onPatch || (() => { /* no-op */ }), () => !!tplConfig.features.enableDragReparent);
 
       const cleanup = () => {
         if (cleanupShading) cleanupShading();
@@ -1934,7 +1943,7 @@ export class IIFEApp {
       // patches (parent / sortOrder / priorityGroup) go through the async
       // onItemReorder contract when wired. Date-only patches still land
       // on legacy onTaskPatch.
-      if (tplConfig.features.dragReparent) cleanupDrag    = startDragReparent(ganttEl, allTasks, depthMap, interceptedOnPatch);
+      if (tplConfig.features.dragReparent) cleanupDrag    = startDragReparent(ganttEl, allTasks, depthMap, interceptedOnPatch, () => !!tplConfig.features.enableDragReparent);
 
       /* IM-7 (0.183) — scroll emission. Attach AFTER the dragReparent
        * cleanup is assigned so the scroll-listener cleanup chains onto
