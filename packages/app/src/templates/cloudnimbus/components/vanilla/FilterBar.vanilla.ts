@@ -47,6 +47,16 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
   searchInput.placeholder = 'Search T-NNNN, title, owner…';
 
   function render(p: SlotProps) {
+    // 0.185.12 — preserve search-input focus across re-renders. clear(inner)
+    // detaches every child, which drops DOM focus even though the input
+    // element is held in closure. Save focus + caret state before clear,
+    // restore after the tree is rebuilt. Without this, dispatching
+    // SET_SEARCH on every keystroke re-renders FilterBar, drops focus, and
+    // users can only type one character at a time before re-clicking.
+    const hadSearchFocus = (document.activeElement === searchInput);
+    const selStart = hadSearchFocus ? searchInput.selectionStart : null;
+    const selEnd   = hadSearchFocus ? searchInput.selectionEnd   : null;
+
     clear(inner);
     const { config, state, dispatch, data } = p;
 
@@ -160,6 +170,18 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
       rst.textContent = 'Reset changes';
       rst.addEventListener('click', () => dispatch({ type: 'RESET_PATCHES' }));
       inner.appendChild(rst);
+    }
+
+    // 0.185.12 — restore search-input focus + caret if the user was typing.
+    // Scheduled via microtask-ish Promise.resolve so the browser finishes
+    // attaching the input before we call focus() — avoids a silent focus-
+    // restoration failure on some browsers when the element was only just
+    // re-appended.
+    if (hadSearchFocus) {
+      try { searchInput.focus(); } catch (_e) { /* ok */ }
+      if (selStart !== null && selEnd !== null) {
+        try { searchInput.setSelectionRange(selStart, selEnd); } catch (_e) { /* ok */ }
+      }
     }
   }
 
