@@ -406,6 +406,7 @@ export class IIFEApp {
     if (options.onExitFullscreen)  tplConfig.onExitFullscreen  = options.onExitFullscreen;
     if (options.cssUrl) tplConfig.stylesheet = { ...tplConfig.stylesheet, url: options.cssUrl };
     if (options.engine) tplConfig.engine = options.engine;
+    if (options.recordUrlTemplate) tplConfig.recordUrlTemplate = options.recordUrlTemplate;
 
     /* ── engineOnly: React owns chrome — just run the gantt engine ──── */
     if (options.engineOnly) {

@@ -197,6 +197,14 @@ export interface MountOptions {
     zoom?: string;
   };
 
+  /** 0.185.4 — record-URL template for the task-detail panel's ID chip.
+   *  When provided, DetailPanel renders the task ID as an `<a href>` link
+   *  with `{id}` in the template replaced by `task.id`. When omitted, ID
+   *  stays as plain text. Example (DH):
+   *    recordUrlTemplate: '/lightning/r/delivery__WorkItem__c/{id}/view'
+   *  Library does NOT navigate itself — host-provided anchors handle it. */
+  recordUrlTemplate?: string;
+
   /** 0.185.1 — declarative initial focus date. When set, the library
    *  computes scrollLeft to land the given date at the left edge of the
    *  viewport, snapped to start-of-period for the active zoom:

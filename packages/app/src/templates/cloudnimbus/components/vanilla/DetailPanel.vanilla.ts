@@ -53,9 +53,29 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
     const dot = el('span', 'w-2.5 h-2.5 rounded-full flex-shrink-0');
     dot.style.background = catColor;
     lwrap.appendChild(dot);
-    const idSp = el('span', 'text-[10px] font-mono font-bold text-slate-500 flex-shrink-0');
-    idSp.textContent = String(task.id);
-    lwrap.appendChild(idSp);
+    // 0.185.4 — when config.recordUrlTemplate is set, render the ID as an
+    // `<a href>` so users can navigate to the underlying record. Template
+    // replaces `{id}` with the task id. When absent, ID stays plain text
+    // (legacy). Library never navigates itself — the anchor is a passive
+    // <a> and the browser/host handles the nav.
+    const urlTemplate = p.config?.recordUrlTemplate;
+    let idEl: HTMLElement;
+    if (urlTemplate && task.id) {
+      const a = document.createElement('a');
+      a.className = 'text-[10px] font-mono font-bold text-slate-500 hover:text-slate-900 hover:underline flex-shrink-0';
+      a.textContent = String(task.id);
+      a.href = urlTemplate.replace('{id}', encodeURIComponent(String(task.id)));
+      a.setAttribute('target', '_top');
+      a.setAttribute('title', 'Open record');
+      // Don't let the click bubble to row-click handlers that might toggle
+      // the detail panel closed on us.
+      a.addEventListener('click', (e) => { e.stopPropagation(); });
+      idEl = a;
+    } else {
+      idEl = el('span', 'text-[10px] font-mono font-bold text-slate-500 flex-shrink-0');
+      idEl.textContent = String(task.id);
+    }
+    lwrap.appendChild(idEl);
     const titleSp = el('span', 'text-xs font-bold text-slate-900 truncate');
     titleSp.textContent = task.title;
     lwrap.appendChild(titleSp);

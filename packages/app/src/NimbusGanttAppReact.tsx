@@ -50,6 +50,9 @@ export interface NimbusGanttAppProps {
   /** Fired when the user clicks the fullscreen-mode "← Exit Full Screen"
    *  button in TitleBar. */
   onExitFullscreen?: () => void;
+  /** 0.185.4 — record URL template for the DetailPanel ID chip.
+   *  `{id}` is replaced with the task id. */
+  recordUrlTemplate?: string;
   /** Optional runtime audit-submit handler. When present, AuditPanel's
    *  Submit+commit button calls this; when absent, commit is local-only. */
   onAuditSubmit?: AuditSubmitHandler;
@@ -114,6 +117,7 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
       if (props.isDirty !== undefined) cfg.isDirty = props.isDirty;
       if (props.onEnterFullscreen) cfg.onEnterFullscreen = props.onEnterFullscreen;
       if (props.onExitFullscreen)  cfg.onExitFullscreen  = props.onExitFullscreen;
+      if (props.recordUrlTemplate) cfg.recordUrlTemplate = props.recordUrlTemplate;
       return cfg;
     },
     [tplInput, mode, props.overrides, props.engine, props.onAuditSubmit, props.isDirty, props.onEnterFullscreen, props.onExitFullscreen],

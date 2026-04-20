@@ -330,19 +330,41 @@ export class CanvasRenderer {
     const { ctx } = this;
     const radius = theme.barBorderRadius;
 
+    // 0.185.4 — live drag preview. When a bar is being dragged, offset the
+    // active edge(s) by the pixel delta so the bar visually follows the
+    // cursor instead of jumping on release. Computed once per render.
+    const drag = state.dragState;
+    const dragDeltaX = drag ? (drag.currentX - drag.startX) : 0;
+    const MIN_BAR_W = 4;
+
     for (const layout of layouts) {
       // The layout positions are in content-space coordinates (0-based from top
       // of the scrollable body). Convert to screen coordinates by:
       //  - Adding bodyTop to shift below the fixed header
       //  - Subtracting scrollY for vertical scroll
       // Horizontal scroll is handled by the ctx.translate(-scrollX, 0) above.
-      const barX = layout.x;
+      let barX = layout.x;
       const barY = layout.barY - scrollY + bodyTop;
-      const barW = layout.width;
+      let barW = layout.width;
       const barH = layout.barHeight;
 
       // Skip bars that are fully outside the visible body region
       if (barY + barH < bodyTop || barY > bodyTop + bodyHeight) continue;
+
+      // Apply drag preview offset for the bar under an active drag gesture.
+      const isDragActive = drag && drag.taskId === layout.taskId;
+      if (isDragActive) {
+        if (drag!.type === 'move') {
+          barX += dragDeltaX;
+        } else if (drag!.type === 'resize-left') {
+          const newX = barX + dragDeltaX;
+          const newW = barW - dragDeltaX;
+          if (newW >= MIN_BAR_W) { barX = newX; barW = newW; }
+        } else if (drag!.type === 'resize-right') {
+          const newW = barW + dragDeltaX;
+          if (newW >= MIN_BAR_W) { barW = newW; }
+        }
+      }
 
       if (layout.isMilestone) {
         this.renderMilestone(barX, barY, barH, layout.color, theme, state.selectedIds.has(layout.taskId));
@@ -354,6 +376,9 @@ export class CanvasRenderer {
 
       // ── Progress fill ──────────────────────────────────────────────────
       if (config.showProgress && layout.progressWidth > 0) {
+        // During a move drag the progress fill follows the bar; during a
+        // resize the original progress width is preserved but clipped to
+        // the new bar bounds via the same clip path.
         const progressColor = this.darkenColor(layout.color, 0.2);
         ctx.save();
         ctx.beginPath();
@@ -366,6 +391,20 @@ export class CanvasRenderer {
 
       // ── Selection border ───────────────────────────────────────────────
       if (state.selectedIds.has(layout.taskId)) {
+        this.strokeRoundedRect(
+          barX,
+          barY,
+          barW,
+          barH,
+          radius,
+          theme.barSelectedBorder,
+          SELECTION_BORDER_WIDTH,
+        );
+      }
+
+      // Outline the bar under active drag so the preview is visually distinct
+      // from the committed state (helps when the delta is small).
+      if (isDragActive) {
         this.strokeRoundedRect(
           barX,
           barY,
