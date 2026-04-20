@@ -305,6 +305,170 @@ function mountAltCanvasView(
   });
 }
 
+/**
+ * 0.185.8 — Admin panel. Floating surface listing user-toggleable feature
+ * flags from tplConfig.features. Each checkbox dispatches TOGGLE_FEATURE
+ * so the state reducer records the override. IIFEApp's state-change path
+ * reconciles the override back onto tplConfig.features before rebuildView
+ * runs, so toggles take effect on the next rebuild tick.
+ *
+ * Whitelisted toggles (runtime-safe): hoursColumn, budgetUsedColumn,
+ * headerRowCompletionBar, statsPanel, filterBar, zoomBar, sidebar,
+ * auditPanel, hrsWkStrip, depthShading. Interaction flags (dragReparent,
+ * detailPanel, titleBar, groupByToggle, hideCompletedToggle) are not
+ * toggleable at runtime — flipping them mid-session causes visible seams.
+ */
+const ADMIN_TOGGLEABLE_FEATURES: Array<{ key: string; label: string }> = [
+  { key: 'statsPanel',           label: 'Stats panel' },
+  { key: 'filterBar',            label: 'Filter bar' },
+  { key: 'zoomBar',              label: 'Zoom bar' },
+  { key: 'sidebar',              label: 'Sidebar' },
+  { key: 'auditPanel',           label: 'Audit panel' },
+  { key: 'hrsWkStrip',           label: 'Hours/week strip' },
+  { key: 'depthShading',         label: 'Depth shading' },
+  { key: 'hoursColumn',          label: 'Hours column' },
+  { key: 'budgetUsedColumn',     label: 'Budget-used column' },
+  { key: 'headerRowCompletionBar', label: 'Header completion bar' },
+];
+
+type AdminDispatch = (ev: { type: 'TOGGLE_ADMIN' } | { type: 'TOGGLE_ADVISOR' } | { type: 'TOGGLE_FEATURE'; key: string }) => void;
+
+function renderAdminPanel(
+  container: HTMLElement,
+  state: AppState,
+  dispatch: AdminDispatch,
+  tplConfig: TemplateConfig,
+): void {
+  const id = 'nga-admin-panel';
+  let panel = container.querySelector<HTMLElement>(`#${id}`);
+  if (!state.adminOpen) {
+    if (panel) panel.remove();
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = id;
+    panel.style.cssText = [
+      'position:absolute',
+      'top:60px',
+      'right:12px',
+      'width:260px',
+      'max-height:calc(100vh - 120px)',
+      'overflow:auto',
+      'background:#ffffff',
+      'border:1px solid #e5e7eb',
+      'border-radius:8px',
+      'box-shadow:0 12px 32px rgba(15,23,42,0.18)',
+      'padding:12px 14px',
+      'z-index:9998',
+      'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+    ].join(';');
+    container.appendChild(panel);
+  }
+  panel.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px';
+  const title = document.createElement('div');
+  title.textContent = 'Admin — Feature Toggles';
+  title.style.cssText = 'font-size:12px;font-weight:700;color:#1f2937';
+  header.appendChild(title);
+  const close = document.createElement('button');
+  close.textContent = '\u00D7';
+  close.style.cssText = 'background:none;border:none;font-size:18px;line-height:1;color:#64748b;cursor:pointer;padding:0 4px';
+  close.addEventListener('click', () => dispatch({ type: 'TOGGLE_ADMIN' }));
+  header.appendChild(close);
+  panel.appendChild(header);
+
+  const hint = document.createElement('div');
+  hint.textContent = 'Toggle chrome surfaces on/off. Changes apply immediately.';
+  hint.style.cssText = 'font-size:10px;color:#64748b;margin-bottom:10px;line-height:1.4';
+  panel.appendChild(hint);
+
+  const features = tplConfig.features as unknown as Record<string, boolean | undefined>;
+  for (const item of ADMIN_TOGGLEABLE_FEATURES) {
+    const base = features[item.key];
+    const override = state.featureOverrides[item.key];
+    const on = override === undefined ? !!base : override;
+
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:11px;color:#1f2937';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = on;
+    cb.style.cssText = 'cursor:pointer';
+    cb.addEventListener('change', () => dispatch({ type: 'TOGGLE_FEATURE', key: item.key }));
+    row.appendChild(cb);
+
+    const lbl = document.createElement('span');
+    lbl.textContent = item.label;
+    row.appendChild(lbl);
+
+    panel.appendChild(row);
+  }
+}
+
+/**
+ * 0.185.8 — Advisor panel. Honest "coming soon" body for the narrative-mode
+ * feature until the Claude-API infrastructure is designed (auth path, CSP
+ * allowances under LWS, error surface, streaming UX). The button wiring and
+ * panel framing are in place so restoration in a later cut is pure body work
+ * — no chrome plumbing to redo.
+ */
+function renderAdvisorPanel(
+  container: HTMLElement,
+  state: AppState,
+  dispatch: AdminDispatch,
+): void {
+  const id = 'nga-advisor-panel';
+  let panel = container.querySelector<HTMLElement>(`#${id}`);
+  if (!state.advisorOpen) {
+    if (panel) panel.remove();
+    return;
+  }
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = id;
+    panel.style.cssText = [
+      'position:absolute',
+      'top:60px',
+      'right:282px',
+      'width:300px',
+      'background:#ffffff',
+      'border:1px solid #e5e7eb',
+      'border-radius:8px',
+      'box-shadow:0 12px 32px rgba(15,23,42,0.18)',
+      'padding:14px 16px',
+      'z-index:9998',
+      'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+    ].join(';');
+    container.appendChild(panel);
+  }
+  panel.innerHTML = '';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:10px';
+  const title = document.createElement('div');
+  title.textContent = 'Advisor — Narrative Mode';
+  title.style.cssText = 'font-size:12px;font-weight:700;color:#1f2937';
+  header.appendChild(title);
+  const close = document.createElement('button');
+  close.textContent = '\u00D7';
+  close.style.cssText = 'background:none;border:none;font-size:18px;line-height:1;color:#64748b;cursor:pointer;padding:0 4px';
+  close.addEventListener('click', () => dispatch({ type: 'TOGGLE_ADVISOR' }));
+  header.appendChild(close);
+  panel.appendChild(header);
+
+  const body = document.createElement('div');
+  body.style.cssText = 'font-size:11px;color:#475569;line-height:1.5';
+  body.innerHTML =
+    '<p style="margin:0 0 8px 0"><strong>Coming in a later cut.</strong></p>' +
+    '<p style="margin:0 0 8px 0">Advisor mode turns the visible task list + date range into a Claude-generated narrative walkthrough of what the timeline actually says.</p>' +
+    '<p style="margin:0;color:#64748b">Restoration pending API infrastructure decisions (auth, CSP under LWS, streaming UX, error handling).</p>';
+  panel.appendChild(body);
+}
+
 function renderComingSoon(container: HTMLElement, viewLabel: string): void {
   container.innerHTML = '';
   const wrap = el('div', [
@@ -1384,10 +1548,24 @@ export class IIFEApp {
         // Apply fullscreen class to host container — escapes Salesforce chrome.
         if (state.fullscreen) container.classList.add('nga-fullscreen');
         else container.classList.remove('nga-fullscreen');
+        // 0.185.8 — reconcile feature overrides onto tplConfig.features before
+        // anything downstream reads them. State owns the override; tplConfig
+        // owns the defaults. On every state change we recompute the live
+        // value so renderSlots + rebuildView pick up toggles from the Admin
+        // panel without needing to thread state.featureOverrides through
+        // every call site.
+        reconcileFeatureOverrides();
         renderSlots();
-        // Re-render the gantt/view content if the view changed.
-        if (ev.type === 'SET_VIEW' || ev.type === 'SET_GROUP_BY' || ev.type === 'SET_FILTER' ||
-            ev.type === 'SET_SEARCH' || ev.type === 'TOGGLE_HIDE_COMPLETED') {
+        // Re-render the gantt/view content if the view changed OR if a
+        // feature toggle changed a column-affecting flag (hoursColumn,
+        // budgetUsedColumn, headerRowCompletionBar).
+        const viewChangingEvents = ['SET_VIEW','SET_GROUP_BY','SET_FILTER','SET_SEARCH','TOGGLE_HIDE_COMPLETED'];
+        if (viewChangingEvents.indexOf(ev.type) >= 0) {
+          rebuildView();
+        } else if (ev.type === 'TOGGLE_FEATURE') {
+          // Column-affecting feature toggles require a rebuild; slot-visibility
+          // toggles are handled by renderSlots alone. Rebuild unconditionally
+          // — cheap relative to the user-initiated gesture and safe.
           rebuildView();
         } else if (ev.type === 'SET_ZOOM') {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1396,6 +1574,23 @@ export class IIFEApp {
           // events, so emit here directly. Debounced inside emitViewport.
           emitViewport();
         }
+      }
+    }
+
+    // 0.185.8 — snapshot of tplConfig.features at mount time; overrides
+    // are applied on top of this snapshot so un-checking then re-checking
+    // a toggle restores the original default value rather than whatever
+    // tplConfig.features held a tick ago.
+    const FEATURE_DEFAULTS: Record<string, boolean | undefined> = {};
+    function snapshotFeatureDefaults(): void {
+      const f = tplConfig.features as unknown as Record<string, boolean | undefined>;
+      for (const k of Object.keys(f)) FEATURE_DEFAULTS[k] = f[k];
+    }
+    function reconcileFeatureOverrides(): void {
+      const f = tplConfig.features as unknown as Record<string, boolean | undefined>;
+      for (const k of Object.keys(FEATURE_DEFAULTS)) {
+        const override = state.featureOverrides[k];
+        f[k] = override === undefined ? FEATURE_DEFAULTS[k] : override;
       }
     }
 
@@ -1462,6 +1657,14 @@ export class IIFEApp {
       if (contentInst) {
         ganttHost = contentInst.el.querySelector<HTMLElement>('[data-nga-gantt-host="1"]');
       }
+
+      // 0.185.8 — Admin / Advisor floating panels. Render inline here so
+      // they live in the same root as other chrome and participate in
+      // the same destroy/rebuild cycle. Both respect state.adminOpen /
+      // state.advisorOpen. Advisor is an honest "coming soon" body until
+      // Claude-API infrastructure is scoped.
+      renderAdminPanel(container, state, dispatch, tplConfig);
+      renderAdvisorPanel(container, state, dispatch);
     }
 
     /* ── Gantt engine mount ─────────────────────────────────────────── */
@@ -1789,6 +1992,9 @@ export class IIFEApp {
     }
 
     /* ── First render ───────────────────────────────────────────────── */
+    // 0.185.8 — capture feature defaults before any user-driven override
+    // could land so reconcileFeatureOverrides has a stable baseline.
+    snapshotFeatureDefaults();
     renderSlots();
     try {
       const renderedSlots: string[] = [];

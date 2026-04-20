@@ -99,6 +99,16 @@ export interface AppState {
   fullscreen: boolean;
   selectedTaskId: string | null;
   pendingPatchCount: number;
+  /** 0.185.8 — Admin panel visibility. When true, a floating feature-flag
+   *  toggle surface overlays the chrome. Wired to TitleBar's Admin button. */
+  adminOpen: boolean;
+  /** 0.185.8 — Advisor panel visibility. Currently an honest "coming soon"
+   *  stub body pending Claude-API infrastructure decisions. */
+  advisorOpen: boolean;
+  /** 0.185.8 — runtime overrides for template FeatureFlags. Admin panel
+   *  writes here via TOGGLE_FEATURE; buildGanttCols + other consumers
+   *  merge with tplConfig.features so toggles take effect on rebuildView. */
+  featureOverrides: Record<string, boolean>;
 }
 
 export type AppEvent =
@@ -116,7 +126,10 @@ export type AppEvent =
   | { type: 'TOGGLE_FULLSCREEN' }
   | { type: 'SELECT_TASK'; taskId: string | null }
   | { type: 'PATCH'; patch: TaskPatch }
-  | { type: 'RESET_PATCHES' };
+  | { type: 'RESET_PATCHES' }
+  | { type: 'TOGGLE_ADMIN' }
+  | { type: 'TOGGLE_ADVISOR' }
+  | { type: 'TOGGLE_FEATURE'; key: string };
 
 export interface PatchLogEntry {
   ts: Date;

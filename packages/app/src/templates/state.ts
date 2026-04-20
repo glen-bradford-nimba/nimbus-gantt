@@ -18,6 +18,9 @@ export const INITIAL_STATE: AppState = {
   fullscreen: false,
   selectedTaskId: null,
   pendingPatchCount: 0,
+  adminOpen: false,
+  advisorOpen: false,
+  featureOverrides: {},
 };
 
 export function reduceAppState(state: AppState, event: AppEvent): AppState {
@@ -55,6 +58,24 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
       return { ...state, pendingPatchCount: state.pendingPatchCount + 1 };
     case 'RESET_PATCHES':
       return { ...state, pendingPatchCount: 0 };
+    case 'TOGGLE_ADMIN':
+      return { ...state, adminOpen: !state.adminOpen };
+    case 'TOGGLE_ADVISOR':
+      return { ...state, advisorOpen: !state.advisorOpen };
+    case 'TOGGLE_FEATURE': {
+      const current = state.featureOverrides[event.key];
+      // First toggle: flip the tplConfig default (unknown → false, since we
+      // don't see the default here). Subsequent toggles flip the override.
+      // Consumers merge overrides ON TOP of tplConfig.features, so an
+      // override of `false` masks a true default and vice versa.
+      return {
+        ...state,
+        featureOverrides: {
+          ...state.featureOverrides,
+          [event.key]: current === undefined ? false : !current,
+        },
+      };
+    }
     default:
       return state;
   }

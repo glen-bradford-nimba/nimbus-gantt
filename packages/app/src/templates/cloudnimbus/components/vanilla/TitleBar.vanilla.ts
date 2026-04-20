@@ -61,10 +61,9 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
   root.setAttribute('data-slot', 'TitleBar');
   let currentProps = initial;
 
-  // Admin / Advisor / Unpin are placeholder toggles (not in AppState yet).
-  // Keep their "on" state here so the button can flip visually for user feedback.
-  let adminOn = false;
-  let advisorOn = false;
+  // 0.185.8 — Admin + Advisor now read their on/off state from AppState
+  // (state.adminOpen, state.advisorOpen) and dispatch TOGGLE_ADMIN /
+  // TOGGLE_ADVISOR events. Unpin stays a local placeholder for now.
   let unpinOn = false; // "Unpin" shown when chromeVisible (default true in v9)
 
   function render(p: SlotProps) {
@@ -253,29 +252,29 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       rowMain.appendChild(fsBtn);
     }
 
-    // Admin — no-op placeholder
+    // 0.185.8 — Admin button: dispatches TOGGLE_ADMIN; state.adminOpen
+    // drives the button's on/off appearance. AdminPanel slot reads the
+    // same state to show/hide.
+    const adminOn = !!state.adminOpen;
     const adminBtn = el('button',
       CLS_PILL_BTN_BASE + ' ' + (adminOn ? CLS_RIGHT_ADMIN_ON : CLS_RIGHT_ADMIN_OFF));
     adminBtn.textContent = 'Admin';
-    adminBtn.title = 'Advanced feature toggles';
+    adminBtn.title = 'Feature toggles';
     adminBtn.addEventListener('click', () => {
-      adminOn = !adminOn;
-      // eslint-disable-next-line no-console
-      console.log('[TitleBar] admin toggled →', adminOn);
-      render(currentProps);
+      dispatch({ type: 'TOGGLE_ADMIN' });
     });
     rowMain.appendChild(adminBtn);
 
-    // Advisor — no-op placeholder
+    // 0.185.8 — Advisor button: dispatches TOGGLE_ADVISOR. AdvisorPanel
+    // currently shows an honest "coming soon" body pending Claude-API
+    // infrastructure decisions (auth path, CSP, error surface).
+    const advisorOn = !!state.advisorOpen;
     const advisorBtn = el('button',
       CLS_PILL_BTN_BASE + ' ' + (advisorOn ? CLS_RIGHT_ADVISOR_ON : CLS_RIGHT_ADVISOR_OFF));
     advisorBtn.textContent = 'Advisor';
-    advisorBtn.title = 'Scope advisor — local analysis, no API needed';
+    advisorBtn.title = 'Claude-powered narrative mode';
     advisorBtn.addEventListener('click', () => {
-      advisorOn = !advisorOn;
-      // eslint-disable-next-line no-console
-      console.log('[TitleBar] advisor toggled →', advisorOn);
-      render(currentProps);
+      dispatch({ type: 'TOGGLE_ADVISOR' });
     });
     rowMain.appendChild(advisorBtn);
 
