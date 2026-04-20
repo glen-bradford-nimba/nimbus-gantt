@@ -3,6 +3,7 @@
  * Brand + version pill + view-mode pills + sidebar/stats/audit toggles +
  * zoom pills + group-by toggle + summary.
  */
+import { useEffect, useState } from 'react';
 import type { SlotProps, ViewMode, ZoomLevel, GroupBy } from '../../types';
 import { CLOUD_NIMBUS_VIEW_MODES } from '../defaults';
 import {
@@ -19,6 +20,79 @@ const GROUPS: GroupBy[] = ['priority', 'epic'];
 
 function Sep() {
   return <span className={CLS_SEP}>|</span>;
+}
+
+/**
+ * 0.185.10 — Fullscreen API button (React). Mirrors the vanilla TitleBar's
+ * default fullscreen path. Uses browser Fullscreen API on the template root
+ * element; subscribes to fullscreenchange so the label flips on Esc exit.
+ */
+function FullscreenApiButton() {
+  const [isFs, setIsFs] = useState<boolean>(() => {
+    if (typeof document === 'undefined') return false;
+    const doc = document as Document & { webkitFullscreenElement?: Element; msFullscreenElement?: Element };
+    return !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement);
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onChange = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element; msFullscreenElement?: Element };
+      setIsFs(!!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    document.addEventListener('webkitfullscreenchange', onChange);
+    document.addEventListener('msfullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      document.removeEventListener('webkitfullscreenchange', onChange);
+      document.removeEventListener('msfullscreenchange', onChange);
+    };
+  }, []);
+
+  const onClick = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    try {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element;
+        webkitExitFullscreen?: () => Promise<void>;
+        msFullscreenElement?: Element;
+        msExitFullscreen?: () => Promise<void>;
+      };
+      const active = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement);
+      if (active) {
+        if (doc.exitFullscreen)         await doc.exitFullscreen();
+        else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
+        else if (doc.msExitFullscreen)     await doc.msExitFullscreen();
+      } else {
+        const btn = e.currentTarget;
+        const target = (btn.closest('[data-nga-template-root]') as HTMLElement | null)
+          || document.documentElement;
+        const anyEl = target as unknown as {
+          requestFullscreen?: () => Promise<void>;
+          webkitRequestFullscreen?: () => Promise<void>;
+          msRequestFullscreen?: () => Promise<void>;
+        };
+        if (anyEl.requestFullscreen)         await anyEl.requestFullscreen();
+        else if (anyEl.webkitRequestFullscreen) await anyEl.webkitRequestFullscreen();
+        else if (anyEl.msRequestFullscreen)     await anyEl.msRequestFullscreen();
+      }
+    } catch (err) {
+      // Fullscreen request can reject if not initiated from a user gesture
+      // or in a sandboxed iframe. Surface to console; don't break the UI.
+      try { console.error('[NG fs-btn] Fullscreen API threw', err); } catch (_e) { /* ok */ }
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      data-nga-fullscreen-api="1"
+      className={CLS_PILL_BTN_BASE + ' bg-slate-700 text-white border-slate-700'}
+      onClick={onClick}
+    >
+      {isFs ? '← Exit Full Screen' : 'Full Screen'}
+    </button>
+  );
 }
 
 const HOURS_PER_MONTH = 170; // 80 Glen + 50 Mahi + 40 Antima
@@ -163,11 +237,12 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
         </a>
       ) : null}
       {(() => {
-        // Precedence: fullscreenUrl (hide if already on it, else navigate)
-        // > onExitFullscreen callback (SF Standalone host-nav)
-        // > native TOGGLE_FULLSCREEN (fallback — React driver in 0.182
-        //   doesn't currently render that native-toggle button; see vanilla
-        //   path for the full 4-branch logic).
+        // 0.185.10 — Precedence:
+        //   1. fullscreenUrl (legacy URL-nav, hide if already on target)
+        //   2. onExitFullscreen (legacy host-exit for VF-wrapped surfaces)
+        //   3. Fullscreen API (default) — real fullscreen on the template
+        //      root, no navigation, Esc exits, state tracked via
+        //      fullscreenchange listener.
         const fsUrl = config.fullscreenUrl;
         const onCurrentFsUrl = !!(fsUrl && typeof location !== 'undefined' && location.pathname === fsUrl);
         if (onCurrentFsUrl) return null;
@@ -179,7 +254,7 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
               className={CLS_PILL_BTN_BASE + ' bg-slate-700 text-white border-slate-700'}
               onClick={() => { window.location.href = fsUrl; }}
             >
-              Fullscreen
+              Full Screen
             </button>
           );
         }
@@ -195,7 +270,11 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
             </button>
           );
         }
-        return null;
+        // Fullscreen API path — default for SF embedded surface and any
+        // consumer not opting into URL-nav or host-exit.
+        return (
+          <FullscreenApiButton />
+        );
       })()}
       </div>
       {/* 0.185.5 — Status color legend. Mirror of the vanilla TitleBar

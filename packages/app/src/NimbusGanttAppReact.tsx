@@ -316,6 +316,10 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
       ref: rootRef,
       className: rootClassName,
       'data-template': tplConfig.templateName,
+      // 0.185.10 — marker for the Fullscreen API button to find the request
+      // target ancestor via closest(). Keeps React driver parity with the
+      // vanilla mount path (IIFEApp sets the same attribute on container).
+      'data-nga-template-root': '1',
       style: { ...style, position: (style.position as 'relative' | undefined) || 'relative' },
     },
     createElement(Fragment, null, ...children),
