@@ -939,8 +939,55 @@ export class IIFEApp {
       chromeVisible = next;
       applyChromeVisibility();
       renderSlots();
+      // 0.185.9 — when chrome hides, render a small floating "show toolbar"
+      // button so users can bring the TitleBar back without a handle call.
+      // When chrome shows, remove the button. Before this, once the user
+      // clicked Unpin the chrome disappeared permanently from their POV —
+      // the only recovery path was `handle.toggleChrome(true)` from a
+      // developer console, which is not a user-facing recovery.
+      updateRepinButton();
     }
     tplConfig.toggleChrome = runToggleChrome;
+
+    let repinButtonEl: HTMLElement | null = null;
+    function updateRepinButton(): void {
+      if (chromeVisible) {
+        if (repinButtonEl) {
+          try { repinButtonEl.remove(); } catch (_e) { /* ok */ }
+          repinButtonEl = null;
+        }
+        return;
+      }
+      if (repinButtonEl) return; // already shown
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-nga-repin', '1');
+      btn.textContent = '\u{1F4CC} Show toolbar';
+      btn.title = 'Restore toolbar';
+      btn.style.cssText = [
+        'position:absolute',
+        'top:8px',
+        'right:8px',
+        'z-index:60',
+        'padding:6px 12px',
+        'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+        'font-size:11px',
+        'font-weight:600',
+        'color:#1f2937',
+        'background:#ffffff',
+        'border:1px solid #e5e7eb',
+        'border-radius:6px',
+        'box-shadow:0 2px 6px rgba(15,23,42,0.08)',
+        'cursor:pointer',
+      ].join(';');
+      btn.addEventListener('click', () => {
+        try { console.log('[NG repin click] restoring chrome'); } catch (_e) { /* ok */ }
+        runToggleChrome(true);
+      });
+      if (!container.style.position) container.style.position = 'relative';
+      container.appendChild(btn);
+      repinButtonEl = btn;
+    }
 
     /* ── Root shell ─────────────────────────────────────────────────── */
     injectLegacyNgCss();
@@ -2073,6 +2120,7 @@ export class IIFEApp {
       if (cleanupShading) cleanupShading();
       if (cleanupDrag)    cleanupDrag();
       if (cleanupEmbeddedBtn) cleanupEmbeddedBtn();
+      if (repinButtonEl) { try { repinButtonEl.remove(); } catch (_e) { /* ok */ void 0; } repinButtonEl = null; }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (ganttInst) { try { (ganttInst as any).destroy(); } catch (_e) { /* ok */ void 0; } }
       slotInstances.forEach((inst) => inst.destroy());
