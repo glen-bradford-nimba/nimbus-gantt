@@ -45,6 +45,16 @@ export interface FeatureFlags {
    *  rows alongside the DM-4 per-item bars. Optional, resolver defaults
    *  to true. Pass `false` to suppress the fill (label stays). */
   headerRowCompletionBar?: boolean;
+  /** 0.185.11 — enables the drop-onto-row nest + drop-on-bucket-header
+   *  deparent gestures shipped in 0.185.6-7. Default FALSE so simple
+   *  reorder-within-group + cross-group reorder are the only drag outcomes
+   *  (no accidental nesting). Flip true via mount option or AdminPanel
+   *  checkbox once the host's reparent handler is stable. When false:
+   *    - No green nest-zone highlight on row middles
+   *    - No amber deparent highlight on bucket headers
+   *    - Horizontal drag offset doesn't change depth — parent stays fixed
+   *    - onItemReorder payload never carries newParentId (parent unchanged) */
+  enableDragReparent?: boolean;
 }
 
 /* ── §1.3 Theme tokens ──────────────────────────────────────────────────── */
