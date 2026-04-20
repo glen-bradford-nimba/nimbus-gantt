@@ -12,8 +12,11 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `7a33285` *(0.185.1 initialFocusDate + scrollToDate)* |
-| Commit subject | `feat(0.185.1): initialFocusDate mount option + handle.scrollToDate` |
+| Commit SHA (source — latest) | `df51a3b` *(0.185.25 chrome polish + liveDataUpdate flag)* |
+| Commit subject | `feat(0.185.25): chrome polish + liveDataUpdate flag` |
+| 0.185.25 chrome polish + liveDataUpdate | `df51a3b` |
+| 0.185.24 bucket-scoped dragReparent | `5799b53` |
+| 0.185.1 initialFocusDate + scrollToDate | `7a33285` |
 | 0.185 batchMode + handle verbs | `5ba6d16` |
 | 0.184 audit preview modal | `b9a3ccf` |
 | 0.183.4 drag-save regression fix | `702d6b0` |
@@ -76,8 +79,66 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **205,425 bytes** (~201 KB)
-- sha256: `81fa4e1d786d803e5170e60d670b027026bdd6d1da9deb717757f16a141dcca1`
+- Size: **255,946 bytes** (~250 KB)
+- sha256: `ea16d5b5c84e8c1511f3e249ebca0dcfd54b08493f11301c7426d572ad7930fe`
+
+**0.185.25 — chrome polish + live-data-update hardening** (source
+`df51a3b`). DH CC, re-copy this bundle into
+`staticresources/nimbusganttapp.resource`.
+
+1. **Search bar single-char typing fixed.** Root cause: `document.activeElement === searchInput`
+   identity check in `FilterBar.vanilla.ts:56` returns the shadow host (not the
+   input) inside Salesforce's Locker/LWS shadow DOM, so the focus-preservation
+   branch was never entering. Replaced the activeElement check with
+   own-listener state (`focus`/`blur` on the input toggles a local boolean).
+   Works on every surface, no more one-char-at-a-time re-click.
+2. **Auto-Schedule button stays visible** (Glen's call 2026-04-20: "i want it;
+   DH sorts out what it does"). Click still hits the placeholder
+   `console.log('[FilterBar] auto-schedule (placeholder)')` stub. Follow-up:
+   NG emits an `onAutoSchedule(taskIds?: string[])` callback; DH wires it to
+   `DeliveryWorkItemETAService.cls` or equivalent scheduler.
+3. **Audit panel defaults collapsed.** `auditPanelOpen: true → false` in
+   `state.ts`. TitleBar Audit toggle still opens it — same UX, just quieter
+   first paint.
+4. **Hrs/Wk strip defaults collapsed + gets a Hrs/Wk toggle** next to Audit
+   in the TitleBar. Added `hrsWkStripOpen: boolean` to AppState +
+   `TOGGLE_HRSWK_STRIP` event + reducer case + toggle button (vanilla + React)
+   + render gating in `HrsWkStrip.vanilla.ts` / `HrsWkStrip.tsx`. Mirrors the
+   existing AuditPanel pattern exactly.
+5. **`liveDataUpdate` feature flag (default true).** Public `setTasks()`
+   now routes through `refreshGantt()` — light-touch `setData()` on the
+   engine — instead of `rebuildView()` (full destroy + re-mount). Kills
+   the post-drop "snap 2-4 times" glitch when hosts fire setTasks multiple
+   times during drop settlement (optimistic → server response → refetch).
+   Canvas, scroll position, and timescale survive. Legacy behavior still
+   available via `overrides.features.liveDataUpdate = false`. DH CC — on
+   your side, you may also want to reduce to one setTasks call per drop;
+   this flag just makes NG robust to the multi-call pattern either way.
+
+Files touched (all `packages/app/src/`):
+- `IIFEApp.ts` — setTasks routes through refreshGantt under liveDataUpdate flag
+- `templates/state.ts` — audit default + hrs/wk default + TOGGLE_HRSWK_STRIP case
+- `templates/types.ts` — `hrsWkStripOpen`, `TOGGLE_HRSWK_STRIP`, `liveDataUpdate`
+- `templates/cloudnimbus/components/vanilla/FilterBar.vanilla.ts` — search focus fix
+- `templates/cloudnimbus/components/vanilla/TitleBar.vanilla.ts` — Hrs/Wk toggle btn
+- `templates/cloudnimbus/components/vanilla/HrsWkStrip.vanilla.ts` — render gate
+- `templates/cloudnimbus/components/TitleBar.tsx` — React Hrs/Wk toggle btn
+- `templates/cloudnimbus/components/HrsWkStrip.tsx` — React render gate
+
+No localStorage persistence yet — if DH wants toggle-state to survive page
+reload, say so and NG will add a minimal persist helper. For now both
+toggles reset to closed on every mount.
+
+DH-side TODO: none. This is an NG-only pass; data contract unchanged.
+
+Prior entry (0.185.24 bucket-scoped dragReparent `5799b53`):
+- `dragReparent.ts` hit-test now filters visible rows by `priorityGroup`
+  before computing `rowAbove`/`rowBelow`. Closes the `targetSort=23000`
+  glitch at bucket top + symmetric bottom-of-bucket boundary bug —
+  the walk was crossing bucket lines and picking preceding bucket's
+  last row as the above-row.
+
+Prior entry (0.185.1 `7a33285`):
 - **Must re-copy.** `7a33285` (0.185.1) adds for DH Full Bleed unblock:
   - **`initialFocusDate?: string`** mount option — declarative
     "land on this date" with snap-to-period (week → Mon, month → 1st,
