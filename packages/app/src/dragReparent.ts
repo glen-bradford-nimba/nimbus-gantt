@@ -20,6 +20,11 @@ interface InsertionPoint {
   targetBucket: string;
   targetSortOrder: number;
   insertBeforeRow: HTMLElement | null;
+  /** 0.185.6 — when non-null, the drop is interpreted as "make this row the
+   *  new parent of the dragged task" (drop-onto-row nesting gesture). When
+   *  null, the drop is sibling-reorder and `insertBeforeRow` positions the
+   *  spacer. Mutually exclusive with `insertBeforeRow`. */
+  nestIntoRow: HTMLElement | null;
 }
 
 export function startDragReparent(
@@ -77,6 +82,65 @@ export function startDragReparent(
       ganttContainer.querySelectorAll('.ng-grid-row:not(.ng-group-row)')
     ) as HTMLElement[];
     const vis = allRows.filter(r => r !== dragRow && r !== spacer);
+
+    // 0.185.6 — drop-onto-row nest detection. When the cursor sits inside
+    // the middle 50% of a row's body (top 25% = insert-above, bottom 25%
+    // = insert-below, middle = nest-under), interpret the drop as "make
+    // this row the new parent of the dragged task." The existing
+    // horizontal-drag depth gesture is preserved for power users; this
+    // adds a more discoverable gesture without removing the old one.
+    let nestIntoRow: HTMLElement | null = null;
+    for (const row of vis) {
+      const rect = row.getBoundingClientRect();
+      const nestTop = rect.top + rect.height * 0.25;
+      const nestBottom = rect.top + rect.height * 0.75;
+      if (clientY >= nestTop && clientY <= nestBottom) {
+        nestIntoRow = row;
+        break;
+      }
+    }
+
+    const targetBucket = getGroupAtY(clientY) || dragSourceGroup || '';
+
+    if (nestIntoRow) {
+      // Don't allow nesting a row into itself or into its own descendant
+      // (would orphan the subtree). Cheap check: walk the target's ancestor
+      // chain; if it contains the dragged task, reject the nest gesture
+      // and fall through to sibling-reorder semantics.
+      const targetId = nestIntoRow.getAttribute('data-task-id');
+      let cycleDetected = false;
+      if (targetId && dragTaskId) {
+        let cur: string | null = targetId;
+        while (cur) {
+          if (cur === dragTaskId) { cycleDetected = true; break; }
+          const t = taskById[cur];
+          cur = t ? ((t.parentWorkItemId as string | null) || null) : null;
+        }
+      }
+      if (!cycleDetected && targetId) {
+        // New sortOrder: end of target's existing children + 1000, so the
+        // dragged task appears as the last child of the target.
+        let maxChildSort = 0;
+        Object.keys(depthMap).forEach((id) => {
+          const t = taskById[id];
+          if (t && (t.parentWorkItemId as string | null) === targetId) {
+            const s = getSortOrder(id);
+            if (s > maxChildSort) maxChildSort = s;
+          }
+        });
+        const nestDepth = (depthMap[targetId] || 0) + 1;
+        return {
+          parentId: targetId,
+          depth: nestDepth,
+          targetBucket,
+          targetSortOrder: maxChildSort + 1000,
+          insertBeforeRow: null,
+          nestIntoRow,
+        };
+      }
+      // Fall through: cycle or missing target → treat as sibling reorder.
+    }
+
     let rowAbove: HTMLElement | null = null;
     let rowBelow: HTMLElement | null = null;
     for (let i = 0; i < vis.length; i++) {
@@ -109,8 +173,7 @@ export function startDragReparent(
     const targetSort = (sortAbove !== sortBelow)
       ? (sortAbove + sortBelow) / 2
       : (aboveIdx >= 0 ? (aboveIdx + 1) * 1000 : 500);
-    const targetBucket = getGroupAtY(clientY) || dragSourceGroup || '';
-    return { parentId, depth: desiredDepth, targetBucket, targetSortOrder: targetSort, insertBeforeRow: rowBelow };
+    return { parentId, depth: desiredDepth, targetBucket, targetSortOrder: targetSort, insertBeforeRow: rowBelow, nestIntoRow: null };
   }
 
   function cleanupDrag() {
@@ -122,6 +185,12 @@ export function startDragReparent(
     ganttContainer.querySelectorAll<HTMLElement>('.ng-group-row.ng-drop-target').forEach((row) => {
       row.classList.remove('ng-drop-target');
       row.style.boxShadow = '';
+    });
+    // 0.185.6 — clear any nest-target row highlight.
+    ganttContainer.querySelectorAll<HTMLElement>('.ng-nest-target').forEach((row) => {
+      row.classList.remove('ng-nest-target');
+      row.style.boxShadow = '';
+      row.style.background = '';
     });
     dragTaskId = null; dragSourceGroup = null; dragRow = null; hasMoved = false; pendingIP = null;
   }
@@ -204,19 +273,42 @@ export function startDragReparent(
     pendingIP = ip;
     if (spacer) {
       const tb = dragRow ? dragRow.parentElement : null;
-      if (tb) {
+      if (ip.nestIntoRow) {
+        // 0.185.6 — nesting gesture: hide the spacer (no insertion line)
+        // because the drop target is a row, not a gap between rows. Park
+        // the spacer out of view so it doesn't visually pollute the list.
+        if (tb && spacer.parentElement === tb) spacer.remove();
+      } else if (tb) {
         if (ip.insertBeforeRow && ip.insertBeforeRow !== spacer) tb.insertBefore(spacer, ip.insertBeforeRow);
         else if (!ip.insertBeforeRow) tb.appendChild(spacer);
+        const indent = INDENT_BASE + ip.depth * LEAF_STEP;
+        const lbl = spacer.querySelector<HTMLElement>('td span');
+        if (lbl) lbl.style.paddingLeft = (indent + 8) + 'px';
       }
-      const indent = INDENT_BASE + ip.depth * LEAF_STEP;
-      const lbl = spacer.querySelector<HTMLElement>('td span');
-      if (lbl) lbl.style.paddingLeft = (indent + 8) + 'px';
     }
     // 0.185.5 — cross-group target highlight. When the drop target bucket
     // differs from the source bucket, highlight the target bucket header
     // so the user sees where the drop will land. Toggle on per-move; the
     // bucket DOM is the `.ng-group-row` with a matching data-task-id.
     updateBucketHighlight(ip.targetBucket);
+    // 0.185.6 — nest-target row highlight. When the cursor is in a row's
+    // middle zone (nest gesture), highlight that row to show "this will
+    // become the parent." Distinct from the cross-group bucket highlight.
+    updateNestHighlight(ip.nestIntoRow);
+  }
+
+  function updateNestHighlight(target: HTMLElement | null): void {
+    const prev = ganttContainer.querySelectorAll<HTMLElement>('.ng-nest-target');
+    prev.forEach((row) => {
+      row.classList.remove('ng-nest-target');
+      row.style.boxShadow = '';
+      row.style.background = '';
+    });
+    if (!target) return;
+    target.classList.add('ng-nest-target');
+    // Inset green shadow distinguishes nest from blue cross-group highlight.
+    target.style.boxShadow = 'inset 0 0 0 2px #10b981';
+    target.style.background = 'rgba(16,185,129,0.08)';
   }
 
   function updateBucketHighlight(targetBucket: string | null): void {
