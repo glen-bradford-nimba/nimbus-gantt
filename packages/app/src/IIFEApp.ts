@@ -1547,6 +1547,40 @@ export class IIFEApp {
       merged.forEach((p) => onTaskReorderAsync(p));
     }
     function interceptedOnPatch(patch: TaskPatch): void {
+      // 0.185.21 — centralized sortOrder collision-breaker. Applies to ALL
+      // paths that emit a sortOrder (canvas vertical drag, sidebar drag,
+      // future list-view drag reorder). Clustered DB values (from many
+      // past midpoint inserts) can cause a fresh midpoint to land exactly
+      // on an existing task's value, making the save a visual no-op.
+      // Nudge by a tiny epsilon (0.0001 per retry, capped at 100 attempts)
+      // until unique within the target bucket. Only runs when sortOrder
+      // is explicitly set on the patch.
+      if (typeof patch.sortOrder === 'number') {
+        // Determine the target bucket: use explicit priorityGroup from
+        // the patch if present, else the source task's existing bucket.
+        const srcTaskForCollision = allTasks.find((t) => t.id === patch.id);
+        const tgtBucketForCollision = patch.priorityGroup !== undefined
+          ? patch.priorityGroup
+          : (srcTaskForCollision ? srcTaskForCollision.priorityGroup : null);
+        if (tgtBucketForCollision) {
+          const existing = new Set<number>(
+            allTasks
+              .filter((t) => t.priorityGroup === tgtBucketForCollision && t.id !== patch.id)
+              .map((t) => Number(t.sortOrder) || 0)
+          );
+          const origCandidate = patch.sortOrder;
+          let candidate = origCandidate;
+          let attempts = 0;
+          while (existing.has(candidate) && attempts < 100) {
+            candidate += 0.0001;
+            attempts++;
+          }
+          if (candidate !== origCandidate) {
+            try { console.log('[NG sort-collision] broken', 'taskId=', patch.id, 'orig=', origCandidate, '→ new=', candidate, 'attempts=', attempts); } catch (_e) { /* ok */ }
+            patch.sortOrder = candidate;
+          }
+        }
+      }
       const hasStructural =
         patch.parentId !== undefined ||
         patch.priorityGroup !== undefined ||
@@ -1936,6 +1970,11 @@ export class IIFEApp {
               }
             }
           }
+          // 0.185.21 — collision breaker is centralized in
+          // interceptedOnPatch so all reorder paths (canvas vertical,
+          // sidebar drag, list-view drag) share the same logic. Handler
+          // computes the midpoint here; interceptedOnPatch nudges it off
+          // any existing task's value before the flush.
           try {
             console.log('[NG bar-reorder] emitting',
               'src=', task.id, 'srcSort=', Number(srcTask.sortOrder) || 0,
