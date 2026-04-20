@@ -104,7 +104,7 @@ export interface GanttConfig {
    *  resolves the target row to newIndex/newPriorityGroup and forwards
    *  via its own onItemReorder chain. targetTaskId is null when the
    *  drop lands below the last row in the list. */
-  onBarReorderDrag?: (task: GanttTask, targetTaskId: string | null, targetRowIndex: number) => void | Promise<void>;
+  onBarReorderDrag?: (task: GanttTask, targetTaskId: string | null, targetRowIndex: number, targetBucketId?: string | null) => void | Promise<void>;
   onDependencyCreate?: (source: string, target: string, type: DependencyType) => void | Promise<void>;
   onDependencyClick?: (dep: GanttDependency) => void;
   onViewChange?: (zoomLevel: ZoomLevel, startDate: string, endDate: string) => void;
