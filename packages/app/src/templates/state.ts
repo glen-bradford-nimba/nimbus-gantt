@@ -21,6 +21,7 @@ export const INITIAL_STATE: AppState = {
   adminOpen: false,
   advisorOpen: false,
   featureOverrides: {},
+  openDetailTaskIds: [],
 };
 
 export function reduceAppState(state: AppState, event: AppEvent): AppState {
@@ -36,14 +37,40 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
     case 'TOGGLE_STATS':   return { ...state, statsOpen: !state.statsOpen };
     case 'TOGGLE_DETAIL': {
       const opening = event.taskId !== undefined;
+      // 0.185.18 — multi-instance: opening with a taskId appends to
+      // openDetailTaskIds (or moves it to the end if already open, so
+      // repeat-click brings the panel to the top of the stack). Closing
+      // with no taskId clears all open panels (keeps legacy "× clears
+      // the detail" semantics when the host hasn't wired per-panel
+      // closes). Per-panel close goes through CLOSE_DETAIL.
+      if (opening) {
+        const tid = event.taskId!;
+        const existing = state.openDetailTaskIds.filter((id) => id !== tid);
+        return {
+          ...state,
+          detailOpen: true,
+          selectedTaskId: tid,
+          detailMode: event.editMode ? 'edit' : 'view',
+          openDetailTaskIds: [...existing, tid],
+        };
+      }
+      // Legacy no-arg toggle: close all panels.
       return {
         ...state,
-        detailOpen: opening ? true : !state.detailOpen,
-        selectedTaskId: opening ? event.taskId! : state.selectedTaskId,
-        // When opening: use editMode payload (default 'view'). When closing
-        // or toggling (no taskId): keep existing detailMode — v10 dblclick
-        // sets editMode:true, plain click leaves it 'view'.
-        detailMode: opening ? (event.editMode ? 'edit' : 'view') : state.detailMode,
+        detailOpen: !state.detailOpen,
+        detailMode: state.detailMode,
+        openDetailTaskIds: state.detailOpen ? [] : state.openDetailTaskIds,
+      };
+    }
+    case 'CLOSE_DETAIL': {
+      // 0.185.18 — remove a single panel by taskId, leave others open.
+      const next = state.openDetailTaskIds.filter((id) => id !== event.taskId);
+      const nextSelected = next.length > 0 ? next[next.length - 1] : null;
+      return {
+        ...state,
+        openDetailTaskIds: next,
+        detailOpen: next.length > 0,
+        selectedTaskId: nextSelected,
       };
     }
     case 'SET_DETAIL_MODE':

@@ -39,7 +39,20 @@ export function ContentArea(props: SlotProps) {
       <div className={CLS_CONTENT} ref={ganttHostRef} data-nga-gantt-host="1">
         {/* engine mounts imperatively here */}
       </div>
-      {state.detailOpen && config.features.detailPanel ? <DetailPanel {...props} /> : null}
+      {/* 0.185.18 — multi-instance DetailPanels. Iterate openDetailTaskIds
+          so triage can keep several open side-by-side. Each panel is
+          pinned to a specific taskId via forTaskId prop. Stacking offset
+          applied per index. */}
+      {config.features.detailPanel && state.openDetailTaskIds && state.openDetailTaskIds.length > 0
+        ? state.openDetailTaskIds.map((tid, i) => (
+            <DetailPanel
+              key={tid}
+              {...props}
+              forTaskId={tid}
+              stackIndex={i}
+            />
+          ))
+        : (state.detailOpen && config.features.detailPanel ? <DetailPanel {...props} /> : null)}
     </div>
   );
 }

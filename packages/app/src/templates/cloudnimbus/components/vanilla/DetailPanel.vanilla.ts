@@ -11,9 +11,18 @@ import type { SlotProps, VanillaSlotInstance, FieldDescriptor } from '../../../t
 import { CLS_DETAIL, CLS_DETAIL_HEADER, CLS_DETAIL_BODY, CLS_CATEGORY_PILL } from '../shared/classes';
 import { el, clear } from '../shared/el';
 
-export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
+export function DetailPanelVanilla(
+  initial: SlotProps,
+  // 0.185.18 — optional override: when given, this panel instance renders
+  // the specified task regardless of state.selectedTaskId. ContentArea
+  // passes this when iterating state.openDetailTaskIds so each panel
+  // stays pinned to its own task. When omitted, falls back to the
+  // pre-0.185.18 behavior of rendering state.selectedTaskId.
+  forTaskId?: string,
+): VanillaSlotInstance {
   const root = el('div', CLS_DETAIL);
   root.setAttribute('data-slot', 'DetailPanel');
+  if (forTaskId) root.setAttribute('data-task-id', forTaskId);
 
   // Local draft state — mirrors the React slot's useState. Re-initialised
   // every time the selected task or edit mode flips.
@@ -58,8 +67,12 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
   function render(p: SlotProps) {
     clear(root);
     const { state, data, dispatch } = p;
-    if (!state.selectedTaskId) { root.style.display = 'none'; return; }
-    const task = data.tasks.find((t) => String(t.id) === state.selectedTaskId);
+    // 0.185.18 — if this panel instance is pinned to a specific taskId
+    // (multi-panel case), render that task. Otherwise fall back to
+    // state.selectedTaskId for single-panel legacy behavior.
+    const targetId = forTaskId || state.selectedTaskId;
+    if (!targetId) { root.style.display = 'none'; return; }
+    const task = data.tasks.find((t) => String(t.id) === targetId);
     if (!task) { root.style.display = 'none'; return; }
     root.style.display = '';
 
@@ -164,7 +177,23 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
     }
     lwrap.appendChild(idEl);
     const titleSp = el('span', 'text-xs font-bold text-slate-900 truncate');
-    titleSp.textContent = task.title;
+    // 0.185.18 — dirty indicator. "•" prefix when any draft differs from
+    // task's current value. Useful in multi-panel mode to spot which
+    // panels have unsaved edits at a glance.
+    let dirty = false;
+    if (editing) {
+      const dirtyKeys = schema && schema.length
+        ? schema.filter((f) => !f.readOnly).map((f) => f.key)
+        : ['startDate', 'endDate'];
+      for (const k of dirtyKeys) {
+        const dv = drafts[k];
+        const tv = (task as unknown as Record<string, unknown>)[k];
+        const dn = dv == null || dv === '' ? null : dv;
+        const tn = tv == null || tv === '' ? null : tv;
+        if (dn !== tn) { dirty = true; break; }
+      }
+    }
+    titleSp.textContent = (dirty ? '\u2022 ' : '') + task.title;
     lwrap.appendChild(titleSp);
     header.appendChild(lwrap);
 
@@ -190,7 +219,14 @@ export function DetailPanelVanilla(initial: SlotProps): VanillaSlotInstance {
     const closeBtn = el('button', 'text-slate-400 hover:text-slate-700 text-sm px-1 transition-colors');
     closeBtn.textContent = '\u00D7'; // ×
     closeBtn.setAttribute('title', 'Close');
-    closeBtn.addEventListener('click', () => dispatch({ type: 'TOGGLE_DETAIL' }));
+    // 0.185.18 — multi-instance: when this panel is pinned to a specific
+    // task (forTaskId set), × closes just this panel. When running in
+    // legacy single-panel mode (forTaskId undefined), fall back to the
+    // broad TOGGLE_DETAIL so the old UX still works.
+    closeBtn.addEventListener('click', () => {
+      if (forTaskId) dispatch({ type: 'CLOSE_DETAIL', taskId: forTaskId });
+      else dispatch({ type: 'TOGGLE_DETAIL' });
+    });
     rwrap.appendChild(closeBtn);
     header.appendChild(rwrap);
     root.appendChild(header);
