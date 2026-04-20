@@ -1846,37 +1846,105 @@ export class IIFEApp {
         // onItemReorder chain so DH's handler receives the same payload
         // shape as the sidebar reorder path.
         isBarReprioritizeEnabled: () => !!tplConfig.features.enableDragBarToReprioritize,
-        onBarReorderDrag: (task: { id: string }, targetTaskId: string | null, targetRowIndex: number) => {
-          try { console.log('[NG] main onBarReorderDrag received', task?.id, '→ target=', targetTaskId, 'rowIdx=', targetRowIndex); } catch (_e) { /* ok */ }
+        onBarReorderDrag: (task: { id: string }, targetTaskId: string | null, targetRowIndex: number, targetBucketId?: string | null) => {
+          try { console.log('[NG] main onBarReorderDrag received', task?.id, '→ target=', targetTaskId, 'rowIdx=', targetRowIndex, 'bucket=', targetBucketId); } catch (_e) { /* ok */ }
           if (!task || !task.id || isBucketId(task.id)) return;
-          // Resolve target task's bucket + sortOrder neighborhood.
           const srcTask = allTasks.find((t) => t.id === task.id);
           if (!srcTask) return;
-          const tgtTask = targetTaskId ? allTasks.find((t) => t.id === targetTaskId) : null;
-          // When target is in a different bucket than source, emit a
-          // cross-group reorder (priorityGroup + sortOrder). Same bucket:
-          // sortOrder only.
+          const tgtTask = targetTaskId && !isBucketId(targetTaskId)
+            ? allTasks.find((t) => t.id === targetTaskId)
+            : null;
+
+          // 0.185.19 — resolve target bucket. Priority:
+          //   1. DragManager's targetBucketId (from preceding bucket-header
+          //      layout) — present when the cursor is anywhere below a
+          //      bucket header, including below the last task row.
+          //   2. Target task's priorityGroup — fallback when no header
+          //      precedes and the cursor landed directly on a task row.
+          //   3. Source task's priorityGroup — final fallback (no bucket
+          //      change, same-bucket reorder).
+          const resolvedBucket = targetBucketId
+            || (tgtTask && tgtTask.priorityGroup ? tgtTask.priorityGroup : null)
+            || srcTask.priorityGroup
+            || null;
+
           const patch: TaskPatch = { id: task.id };
-          if (tgtTask && tgtTask.priorityGroup && tgtTask.priorityGroup !== srcTask.priorityGroup) {
-            patch.priorityGroup = tgtTask.priorityGroup;
+          if (resolvedBucket && resolvedBucket !== srcTask.priorityGroup) {
+            patch.priorityGroup = resolvedBucket;
           }
-          // Compute target sortOrder: midpoint between target row and its
-          // neighbor in the drop direction. Simpler first version: place
-          // adjacent to target by +500 or -500 depending on whether source
-          // is above or below target in current layout. Host's pass-through
-          // Apex writes the value as-is.
-          if (tgtTask) {
-            const srcSort = Number(srcTask.sortOrder) || 0;
-            const tgtSort = Number(tgtTask.sortOrder) || 0;
-            patch.sortOrder = srcSort < tgtSort ? tgtSort + 500 : tgtSort - 500;
+
+          // 0.185.19 — compute target sortOrder using proper "above/between/
+          // below" zone logic within the resolved bucket. Get tasks in the
+          // bucket sorted by sortOrder ASC; find the target's position in
+          // that list; place adjacent using midpoint math.
+          const bucketTasks = allTasks
+            .filter((t) => t.priorityGroup === resolvedBucket && t.id !== task.id)
+            .sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0));
+
+          if (bucketTasks.length === 0) {
+            // Empty bucket — any sortOrder works.
+            patch.sortOrder = 1000;
+          } else if (!tgtTask || !bucketTasks.find((t) => t.id === tgtTask.id)) {
+            // Target is null (below last row) OR target task isn't in the
+            // resolved bucket (cross-bucket drop where the resolved bucket
+            // came from targetBucketId, not from target task). Default:
+            // place at the BOTTOM of the resolved bucket (max + 1000).
+            const maxSort = bucketTasks[bucketTasks.length - 1];
+            patch.sortOrder = (Number(maxSort.sortOrder) || 0) + 1000;
           } else {
-            // Drop below last row. Use max sortOrder in target bucket + 1000.
-            const bucket = patch.priorityGroup || srcTask.priorityGroup;
-            const maxSort = allTasks
-              .filter((t) => t.priorityGroup === bucket)
-              .reduce((mx, t) => Math.max(mx, Number(t.sortOrder) || 0), 0);
-            patch.sortOrder = maxSort + 1000;
+            // Target task is in the resolved bucket. Place the source
+            // ADJACENT to the target: if source's current sortOrder is
+            // less than target's, place below target (srcSort < tgtSort
+            // means source appeared ABOVE target in the sorted list;
+            // dropping means user wants source to be BELOW target now —
+            // so new sortOrder = tgtSort + 500, then siblings keep their
+            // order). Symmetric for the other direction.
+            const tgtIdx = bucketTasks.findIndex((t) => t.id === tgtTask.id);
+            const tgtSort = Number(tgtTask.sortOrder) || 0;
+            const srcSort = Number(srcTask.sortOrder) || 0;
+            const crossBucket = srcTask.priorityGroup !== resolvedBucket;
+            if (crossBucket) {
+              // Cross-bucket: insert above the target (take its place).
+              // Compute midpoint between previous sibling and target.
+              const prev = tgtIdx > 0 ? bucketTasks[tgtIdx - 1] : null;
+              if (prev) {
+                const prevSort = Number(prev.sortOrder) || 0;
+                patch.sortOrder = (prevSort + tgtSort) / 2;
+              } else {
+                patch.sortOrder = tgtSort - 500;
+              }
+            } else {
+              // Same-bucket: use srcSort vs tgtSort to decide direction.
+              if (srcSort < tgtSort) {
+                // Moving DOWN: insert between target and its next sibling
+                // (or just below target if target is last).
+                const next = tgtIdx < bucketTasks.length - 1 ? bucketTasks[tgtIdx + 1] : null;
+                if (next) {
+                  patch.sortOrder = (tgtSort + (Number(next.sortOrder) || 0)) / 2;
+                } else {
+                  patch.sortOrder = tgtSort + 500;
+                }
+              } else {
+                // Moving UP: insert between target and its previous sibling
+                // (or just above target if target is first).
+                const prev = tgtIdx > 0 ? bucketTasks[tgtIdx - 1] : null;
+                if (prev) {
+                  patch.sortOrder = ((Number(prev.sortOrder) || 0) + tgtSort) / 2;
+                } else {
+                  patch.sortOrder = tgtSort - 500;
+                }
+              }
+            }
           }
+          try {
+            console.log('[NG bar-reorder] emitting',
+              'src=', task.id, 'srcSort=', Number(srcTask.sortOrder) || 0,
+              'srcBucket=', srcTask.priorityGroup,
+              'target=', targetTaskId, 'targetBucket=', targetBucketId,
+              'resolvedBucket=', resolvedBucket,
+              'bucketTaskCount=', bucketTasks.length,
+              '→ patch=', JSON.stringify(patch));
+          } catch (_e) { /* ok */ }
           interceptedOnPatch(patch);
         },
       });

@@ -82,10 +82,15 @@ export interface DragManagerOptions {
    *  option is absent, vertical drag behaves as today (shifts both
    *  dates when a move gesture, dispatches TASK_MOVE). */
   isBarReprioritizeEnabled?: () => boolean;
+  /** 0.185.19 — targetBucketId added. Resolved from the preceding
+   *  bucket header in the layouts list (taskId prefix `__bucket_header__`)
+   *  so cross-bucket drops below the last row in a bucket can
+   *  identify the target bucket without needing a target task. */
   onBarReorderDrag?: (
     task: GanttTask,
     targetTaskId: string | null,
     targetRowIndex: number,
+    targetBucketId?: string | null,
   ) => void | Promise<void>;
   /** IM-6 (0.183) — optional scroll controller that enables pan-on-deadspace.
    *  When provided, a pointerdown on non-bar canvas area enters pan mode:
@@ -491,8 +496,24 @@ export class DragManager {
           ));
           const targetLayout = layouts.find((l) => l.rowIndex === targetRowIndex);
           const targetTaskId = targetLayout ? targetLayout.taskId : null;
-          try { console.log('[NG engine] drag commit bar-reorder', task.id, '→ row=', targetRowIndex, 'target=', targetTaskId); } catch (_e) { /* ok */ }
-          this.options.onBarReorderDrag?.(task, targetTaskId, targetRowIndex);
+          // 0.185.19 — resolve target bucket by walking layouts backward
+          // to find the nearest preceding bucket-header row. This lets
+          // the host identify the target bucket for cross-bucket drops
+          // below the last task row in a bucket (where targetLayout is
+          // null). Bucket headers are synthetic layouts whose taskId
+          // starts with `__bucket_header__` per PriorityGroupingPlugin.
+          let targetBucketId: string | null = null;
+          // Sort by rowIndex ascending once so the scan is linear.
+          const sortedLayouts = layouts.slice().sort((a, b) => a.rowIndex - b.rowIndex);
+          for (const layout of sortedLayouts) {
+            if (layout.rowIndex > targetRowIndex) break;
+            const id = layout.taskId;
+            if (typeof id === 'string' && id.indexOf('__bucket_header__') === 0) {
+              targetBucketId = id.slice('__bucket_header__'.length);
+            }
+          }
+          try { console.log('[NG engine] drag commit bar-reorder', task.id, '→ row=', targetRowIndex, 'target=', targetTaskId, 'bucket=', targetBucketId); } catch (_e) { /* ok */ }
+          this.options.onBarReorderDrag?.(task, targetTaskId, targetRowIndex, targetBucketId);
           break;
         }
 
