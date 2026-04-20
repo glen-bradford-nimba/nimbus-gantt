@@ -50,6 +50,12 @@ function isFullscreenApiSupported(): boolean {
   // API surface; return false so the button falls back to local toggle.
   try { void (document as Document & { webkitFullscreenElement?: Element }).fullscreenElement; }
   catch (_e) { return false; }
+  // 0.185.14 — iframe context is also a no-go. See TitleBar.vanilla.ts
+  // for the full rationale — fullscreen-within-iframe is ambiguous
+  // across SF's one.app, VF, and Lightning Out, so fall back to
+  // TOGGLE_FULLSCREEN local-expand instead.
+  try { if (typeof window !== 'undefined' && window.top !== window.self) return false; }
+  catch (_e) { return false; }
   const anyEl = document.documentElement as unknown as { requestFullscreen?: unknown; webkitRequestFullscreen?: unknown };
   return !!(anyEl.requestFullscreen || anyEl.webkitRequestFullscreen);
 }
@@ -290,10 +296,22 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
             </button>
           );
         }
-        // Fullscreen API path — default for SF embedded surface and any
-        // consumer not opting into URL-nav or host-exit.
+        // 0.185.14 — Fullscreen API path only when really usable (not
+        // iframed, not LWS-blocked). When unsupported, fall back to the
+        // TOGGLE_FULLSCREEN local-expand button so the label only flips
+        // when the screen actually changes.
+        if (isFullscreenApiSupported()) {
+          return <FullscreenApiButton />;
+        }
         return (
-          <FullscreenApiButton />
+          <button
+            type="button"
+            data-nga-fullscreen-toggle="1"
+            className={CLS_PILL_BTN_BASE + ' bg-slate-700 text-white border-slate-700'}
+            onClick={() => dispatch({ type: 'TOGGLE_FULLSCREEN' })}
+          >
+            {state.fullscreen ? '← Exit Full Screen' : 'Full Screen'}
+          </button>
         );
       })()}
       </div>

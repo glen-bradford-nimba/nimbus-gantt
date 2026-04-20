@@ -60,6 +60,23 @@ function resolveFullscreenApi(): FsApi | null {
   // access throws, return null so the button falls through to the legacy
   // TOGGLE_FULLSCREEN local-toggle path (safe on every surface).
   try { void doc.fullscreenElement; } catch (_e) { return null; }
+  // 0.185.14 — iframe check. Browser Fullscreen API on a target inside
+  // an iframe (Salesforce's one.app embedded surface, VF-wrapped pages,
+  // Lightning Out iframes) behaves ambiguously — some surfaces deny the
+  // request silently, some go fullscreen within the iframe viewport
+  // only (SF chrome stays visible), some fullscreen correctly. Rather
+  // than pretend to support this, detect the iframe context and fall
+  // through to the TOGGLE_FULLSCREEN local-expand path, which uses the
+  // nga-fullscreen CSS class to grow the container within its parent.
+  // Visually consistent, always works, matches the embedded-mode UX.
+  try {
+    if (typeof window !== 'undefined' && window.top !== window.self) return null;
+  } catch (_e) {
+    // Accessing window.top can throw in some cross-origin contexts —
+    // treat a throw as "in an iframe" since that's the case that
+    // triggers the exception.
+    return null;
+  }
   const request = (el: HTMLElement): Promise<void> => {
     const anyEl = el as unknown as {
       requestFullscreen?: () => Promise<void>;

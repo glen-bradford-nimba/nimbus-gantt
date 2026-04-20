@@ -2134,8 +2134,14 @@ export class IIFEApp {
     // the TitleBar button label flips between "Full Screen" and "Exit Full
     // Screen" on Esc-exit or programmatic transitions. Same listener covers
     // both vendor-prefixed and standard events.
+    // 0.185.14 — also re-assert the repin button after any fullscreen
+    // transition. Entering/exiting fullscreen can leave the floating button
+    // in an inconsistent state (detached, wrong z-index under the new
+    // backdrop, etc.). Re-invoking updateRepinButton is a cheap defensive
+    // restore — the function is idempotent on the chromeVisible check.
     const onFullscreenChange = (): void => {
       try { renderSlots(); } catch (_e) { /* ok */ }
+      try { updateRepinButton(); } catch (_e) { /* ok */ }
     };
     try {
       document.addEventListener('fullscreenchange', onFullscreenChange);
