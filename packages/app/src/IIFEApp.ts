@@ -29,6 +29,8 @@ import {
 import { startDepthShading } from './depthShading';
 import { startDragReparent } from './dragReparent';
 import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/AuditListView.vanilla';
+import { renderTreemap } from './renderers/treemap';
+import { renderBubble } from './renderers/bubble';
 
 import { resolveTemplate } from './templates/resolver';
 import { INITIAL_STATE, reduceAppState } from './templates/state';
@@ -249,6 +251,60 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, css?: string): HTMLEl
  * "stubs are worse than absence in cut context" feedback principle, those
  * stubs created a worse first impression than an honest placeholder.
  */
+/**
+ * 0.185.7 — mount a canvas-based alt view (treemap or bubble). Creates a
+ * DPI-scaled canvas sized to the container and invokes the passed renderer
+ * function with the current task list and a minimal theme. Re-runs on
+ * every rebuildView call since view-mode changes flow through that path.
+ */
+type AltRenderer = (
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  tasks: NormalizedTask[],
+  opts: {
+    colorMap: Record<string, string>;
+    hoveredId?: string | null;
+    theme: { bg: string; text: string; altRowBg: string; textMuted: string; font: string };
+  },
+) => void;
+
+function mountAltCanvasView(
+  container: HTMLElement,
+  tasks: NormalizedTask[],
+  renderer: AltRenderer,
+  colorMap: Record<string, string>,
+): void {
+  container.innerHTML = '';
+  const canvas = document.createElement('canvas');
+  canvas.style.display = 'block';
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  container.appendChild(canvas);
+  const rect = container.getBoundingClientRect();
+  const w = Math.max(320, Math.floor(rect.width));
+  const h = Math.max(240, Math.floor(rect.height));
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.scale(dpr, dpr);
+  renderer(ctx, w, h, tasks, {
+    colorMap,
+    hoveredId: null,
+    theme: {
+      bg: '#ffffff',
+      text: '#1f2937',
+      altRowBg: 'rgba(229,231,235,0.4)',
+      textMuted: '#64748b',
+      font: '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif',
+    },
+  });
+}
+
 function renderComingSoon(container: HTMLElement, viewLabel: string): void {
   container.innerHTML = '';
   const wrap = el('div', [
@@ -1711,9 +1767,20 @@ export class IIFEApp {
             ? (taskId, payload) => { void options.onItemReorder!(taskId, payload); }
             : undefined,
         });
+      } else if (state.viewMode === 'treemap' || state.viewMode === 'bubbles') {
+        // 0.185.7 — wire the treemap + bubble canvas renderers that have
+        // been sitting unreferenced in packages/app/src/renderers/. Each
+        // gets a sized canvas matching the host, DPI-scaled for crispness
+        // on retina displays. Re-runs on every state change that reaches
+        // rebuildView — no animation loop needed for static views.
+        mountAltCanvasView(
+          ganttHost,
+          allTasks,
+          state.viewMode === 'treemap' ? renderTreemap : renderBubble,
+          options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
+        );
       } else {
         const labelMap: Record<string, string> = {
-          treemap: 'Treemap', bubbles: 'Bubbles',
           calendar: 'Calendar', flow: 'Flow',
         };
         renderComingSoon(ganttHost, labelMap[state.viewMode] || state.viewMode);
