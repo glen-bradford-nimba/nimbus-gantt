@@ -84,6 +84,29 @@ export interface ScreenPos {
   y: number;
 }
 
+/**
+ * 0.185.26 — host-supplied button rendered in the TitleBar's right cluster,
+ * immediately before the Full Screen button. Lets hosts (e.g. DH) surface
+ * chrome-level affordances (show-header toggle, etc.) without NG owning the
+ * label or the behavior. Zero-length array = invisible; no flag needed.
+ *
+ * `pressed` reflects toggle state — rendered with the same "active"
+ * visual as the existing toggle pills (Audit, Hrs/Wk). Hosts flip it by
+ * calling `handle.setTitleBarButtons(newButtons)` after their state changes.
+ */
+export interface TitleBarButton {
+  /** Stable identifier for keying; must be unique within the array. */
+  id: string;
+  /** Displayed text. */
+  label: string;
+  /** Click handler. Library does not prescribe behavior. */
+  onClick: () => void;
+  /** Optional toggle-pressed visual state. Default false. */
+  pressed?: boolean;
+  /** Optional tooltip. */
+  title?: string;
+}
+
 /** Origin of a task click — canvas bar vs grid row. v5 used this to decide
  *  whether to open the detail panel (canvas) or just highlight (grid). */
 export type TaskClickSource = 'canvas' | 'grid';
@@ -315,6 +338,13 @@ export interface MountOptions {
    *  to 'embedded'. Consumers can flip at runtime via `handle.toggleChrome()`. */
   chromeVisibleDefault?: boolean;
 
+  /** 0.185.26 — host-supplied buttons rendered in TitleBar's right cluster,
+   *  immediately before the Full Screen button. Each button carries its own
+   *  label, click handler, and optional pressed state. Default: none.
+   *  Use `handle.setTitleBarButtons(newButtons)` for runtime updates (e.g.
+   *  toggling the pressed state after a click). */
+  titleBarButtons?: TitleBarButton[];
+
   /** 0.185 — when true, drag-edits and reorders are BUFFERED inside the IIFE
    *  instead of firing onItemEdit / onItemReorder per-edit. The host commits
    *  the whole buffer via `handle.commitEdits()` (typically wired to the
@@ -418,6 +448,12 @@ export interface AppInstance {
    *  callback — these edits never existed as far as persistence is
    *  concerned. */
   discardEdits?(): void;
+
+  /** 0.185.26 — runtime update of the host-supplied TitleBar buttons. Pass
+   *  the full desired array (not a diff); replacing pressed state on an
+   *  existing button is the typical use. Re-renders the TitleBar slot.
+   *  No-op on engineOnly mounts. */
+  setTitleBarButtons?(buttons: TitleBarButton[]): void;
 
   /** 0.185.1 — scroll the gantt so `date` lands at the LEFT edge of the
    *  viewport. Host doesn't need to know `pxPerDay` for the current zoom —

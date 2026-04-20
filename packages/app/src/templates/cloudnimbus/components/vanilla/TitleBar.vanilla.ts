@@ -300,6 +300,23 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     });
     rowMain.appendChild(unpinBtn);
 
+    // 0.185.26 — host-supplied TitleBar buttons. Rendered in array order
+    // immediately before the Full Screen button so hosts control relative
+    // position via config.titleBarButtons. Uses the same pill visual as
+    // the built-in toggles (Audit / Hrs/Wk). pressed:true flips the blue
+    // "active" variant.
+    const hostBtns = config.titleBarButtons || [];
+    hostBtns.forEach((b) => {
+      const cls = CLS_PILL_BTN_BASE + ' ' + (b.pressed ? CLS_PILL_BTN_ACTIVE_BLUE : CLS_PILL_BTN_IDLE_BLUE);
+      const btn = el('button', cls) as HTMLButtonElement;
+      btn.type = 'button';
+      btn.textContent = b.label;
+      if (b.title) btn.title = b.title;
+      btn.setAttribute('data-nga-host-btn', b.id);
+      btn.addEventListener('click', () => { try { b.onClick(); } catch (_e) { /* host owns errors */ } });
+      rowMain.appendChild(btn);
+    });
+
     // Fullscreen button — three dispatch modes in precedence order:
     //   1. config.fullscreenUrl set + user already on that URL → button
     //      is HIDDEN (already there; button would be a no-op).

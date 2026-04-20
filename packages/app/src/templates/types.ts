@@ -354,6 +354,19 @@ export interface TemplateConfig {
    *  present, DetailPanel renders inputs per descriptor instead of the
    *  default date-only edit view. */
   fieldSchema?: FieldDescriptor[];
+  /** 0.185.26 — host-supplied TitleBar buttons passed through from
+   *  MountOptions. TitleBar renders these in the right cluster
+   *  immediately before the Full Screen button. Hosts update via
+   *  `handle.setTitleBarButtons(newButtons)`. Type imported lazily
+   *  via `unknown[]` here so this file stays free of types.ts imports
+   *  (types.ts imports templates/types.ts already — avoid cycle). */
+  titleBarButtons?: Array<{
+    id: string;
+    label: string;
+    onClick: () => void;
+    pressed?: boolean;
+    title?: string;
+  }>;
   /** CH-1 / 0.183.1 — runtime chrome-visibility toggle. Wired by IIFEApp to
    *  the same closure that backs `handle.toggleChrome()`. Slots (e.g. the
    *  TitleBar Unpin button) call this to hide chrome without needing the

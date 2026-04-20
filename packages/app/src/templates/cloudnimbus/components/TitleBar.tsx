@@ -274,6 +274,21 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
           API docs
         </a>
       ) : null}
+      {(config.titleBarButtons || []).map((b) => (
+        <button
+          key={b.id}
+          type="button"
+          data-nga-host-btn={b.id}
+          title={b.title}
+          className={
+            CLS_PILL_BTN_BASE + ' ' +
+            (b.pressed ? CLS_PILL_BTN_ACTIVE_BLUE : CLS_PILL_BTN_IDLE_BLUE)
+          }
+          onClick={() => { try { b.onClick(); } catch (_e) { /* host owns errors */ } }}
+        >
+          {b.label}
+        </button>
+      ))}
       {(() => {
         // 0.185.10 — Precedence:
         //   1. fullscreenUrl (legacy URL-nav, hide if already on target)

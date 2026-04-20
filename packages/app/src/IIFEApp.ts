@@ -638,6 +638,10 @@ export class IIFEApp {
     // 0.185.15 — pipe fieldSchema mount option through to tplConfig so
     // DetailPanel (vanilla + React) can read it via slot props.
     if (options.fieldSchema) tplConfig.fieldSchema = options.fieldSchema;
+    // 0.185.26 — pipe titleBarButtons mount option through to tplConfig so
+    // TitleBar (vanilla + React) can render them before the Full Screen
+    // button. Runtime updates flow via handle.setTitleBarButtons(...).
+    if (options.titleBarButtons) tplConfig.titleBarButtons = options.titleBarButtons;
     // 0.185.11 — wire enableDragReparent mount option → tplConfig.features.
     // Default FALSE (reparent gesture off); consumers must opt in explicitly.
     // AdminPanel can toggle at runtime via the existing featureOverrides path.
@@ -2416,6 +2420,14 @@ export class IIFEApp {
           const x = gi.timeScale?.dateToX?.(snapped);
           if (typeof x === 'number') gi.scrollManager?.scrollToX?.(Math.max(0, x));
         } catch (_e) { /* ok */ }
+      },
+      /** 0.185.26 — runtime update of host-supplied TitleBar buttons. Pass
+       *  the full desired array (not a diff); replacing `pressed` state on
+       *  an existing button is the typical use. Re-renders slots so the
+       *  TitleBar picks up the new array immediately — no remount. */
+      setTitleBarButtons(buttons) {
+        tplConfig.titleBarButtons = buttons;
+        renderSlots();
       },
       /** 0.185 — visual-only revert. Restores `original` on every buffered
        *  task and clears the buffer. Host never sees a callback. Use when

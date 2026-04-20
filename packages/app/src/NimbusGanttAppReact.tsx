@@ -57,6 +57,10 @@ export interface NimbusGanttAppProps {
    *  present, panel renders inputs per descriptor instead of the
    *  default date-only edit view. See FieldDescriptor in types.ts. */
   fieldSchema?: import('./types').FieldDescriptor[];
+  /** 0.185.26 — host-supplied buttons rendered in TitleBar's right
+   *  cluster, immediately before the Full Screen button. See
+   *  TitleBarButton in types.ts. */
+  titleBarButtons?: import('./types').TitleBarButton[];
   /** Optional runtime audit-submit handler. When present, AuditPanel's
    *  Submit+commit button calls this; when absent, commit is local-only. */
   onAuditSubmit?: AuditSubmitHandler;
@@ -123,9 +127,10 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
       if (props.onExitFullscreen)  cfg.onExitFullscreen  = props.onExitFullscreen;
       if (props.recordUrlTemplate) cfg.recordUrlTemplate = props.recordUrlTemplate;
       if (props.fieldSchema) cfg.fieldSchema = props.fieldSchema;
+      if (props.titleBarButtons) cfg.titleBarButtons = props.titleBarButtons;
       return cfg;
     },
-    [tplInput, mode, props.overrides, props.engine, props.onAuditSubmit, props.isDirty, props.onEnterFullscreen, props.onExitFullscreen],
+    [tplInput, mode, props.overrides, props.engine, props.onAuditSubmit, props.isDirty, props.onEnterFullscreen, props.onExitFullscreen, props.titleBarButtons],
   );
 
   const [state, rawDispatch] = useReducer(reduceAppState, INITIAL_STATE);
