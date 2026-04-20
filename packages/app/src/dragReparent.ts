@@ -197,12 +197,30 @@ export function startDragReparent(
       // Fall through: cycle or missing target → treat as sibling reorder.
     }
 
+    // 0.185.24 — bucket-scoped hit-test. Determine the target bucket
+    // from cursor Y BEFORE computing rowAbove/rowBelow, then filter
+    // vis to only include rows in that bucket. Previously the walk
+    // crossed bucket boundaries when cursor was above the top of the
+    // source bucket, grabbing a row from the PRECEDING bucket as
+    // rowAbove. Midpoint of (preceding bucket's row, source bucket's
+    // first row) produced garbage values that never moved the task
+    // into its intended position.
+    const targetBucketForHitTest = getGroupAtY(clientY) || dragSourceGroup || '';
+    const bucketVis = targetBucketForHitTest
+      ? vis.filter((r) => {
+          const id = r.getAttribute('data-task-id');
+          if (!id) return false;
+          const t = taskById[id];
+          return !!t && (t.priorityGroup || '') === targetBucketForHitTest;
+        })
+      : vis;
+
     let rowAbove: HTMLElement | null = null;
     let rowBelow: HTMLElement | null = null;
-    for (let i = 0; i < vis.length; i++) {
-      const rect = vis[i].getBoundingClientRect();
-      if (clientY < rect.top + rect.height / 2) { rowBelow = vis[i]; break; }
-      rowAbove = vis[i];
+    for (let i = 0; i < bucketVis.length; i++) {
+      const rect = bucketVis[i].getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) { rowBelow = bucketVis[i]; break; }
+      rowAbove = bucketVis[i];
     }
     const aboveId = rowAbove ? rowAbove.getAttribute('data-task-id') : null;
     const belowId = rowBelow ? rowBelow.getAttribute('data-task-id') : null;
@@ -248,30 +266,37 @@ export function startDragReparent(
     //   4. Empty list → 1000
     const sortAbove = aboveId ? getSortOrder(aboveId) : NaN;
     const sortBelow = belowId ? getSortOrder(belowId) : NaN;
-    const aboveIdx = rowAbove ? vis.indexOf(rowAbove) : -1;
-    const belowIdx = rowBelow ? vis.indexOf(rowBelow) : -1;
+    // 0.185.24 — indexOf against bucketVis (bucket-scoped), not vis. Walks
+    // outward for distinct bounds only consider rows within the same bucket.
+    const aboveIdx = rowAbove ? bucketVis.indexOf(rowAbove) : -1;
+    const belowIdx = rowBelow ? bucketVis.indexOf(rowBelow) : -1;
 
     let targetSort: number;
     if (!rowAbove && !rowBelow) {
+      // Empty bucket — any value works; pick 1000 as the natural start.
       targetSort = 1000;
     } else if (!rowAbove) {
-      targetSort = sortBelow - 1000;
+      // Cursor above top of bucket. Place strictly above the first row.
+      // If the first row's sort is already small, halve it; else subtract
+      // 1000 to leave room for future inserts.
+      targetSort = sortBelow > 1000 ? sortBelow - 1000 : sortBelow / 2;
     } else if (!rowBelow) {
+      // Cursor below bottom of bucket. Place strictly below the last row.
       targetSort = sortAbove + 1000;
     } else if (sortAbove !== sortBelow) {
       targetSort = (sortAbove + sortBelow) / 2;
     } else {
-      // Cluster — walk outward for distinct bounds.
+      // Cluster — walk outward for distinct bounds WITHIN the bucket.
       let lo = -Infinity;
       for (let i = aboveIdx - 1; i >= 0; i--) {
-        const id = vis[i].getAttribute('data-task-id');
+        const id = bucketVis[i].getAttribute('data-task-id');
         if (!id) continue;
         const s = getSortOrder(id);
         if (s < sortAbove) { lo = s; break; }
       }
       let hi = Infinity;
-      for (let i = belowIdx + 1; i < vis.length; i++) {
-        const id = vis[i].getAttribute('data-task-id');
+      for (let i = belowIdx + 1; i < bucketVis.length; i++) {
+        const id = bucketVis[i].getAttribute('data-task-id');
         if (!id) continue;
         const s = getSortOrder(id);
         if (s > sortBelow) { hi = s; break; }
