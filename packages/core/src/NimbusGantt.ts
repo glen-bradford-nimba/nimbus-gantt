@@ -199,6 +199,13 @@ export class NimbusGantt {
           onTaskMove: config.onTaskMove,
           onTaskResize: config.onTaskResize,
           onTaskProgressChange: config.onTaskProgressChange,
+          // 0.185.16 — canvas bar vertical-drag reprioritize. Both are
+          // optional; DragManager only activates the gesture when the
+          // getter returns true AND the onBarReorderDrag callback is
+          // wired. Host (NG app) decides how to resolve target row to
+          // newIndex/newGroup and forward to onItemReorder.
+          isBarReprioritizeEnabled: config.isBarReprioritizeEnabled,
+          onBarReorderDrag: config.onBarReorderDrag,
           onTaskClick: (task: GanttTask) => {
             this.eventBus.emit('taskClick', task);
           },

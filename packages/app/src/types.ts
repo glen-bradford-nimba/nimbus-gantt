@@ -275,6 +275,13 @@ export interface MountOptions {
    *  stable. Runtime-toggleable via AdminPanel checkbox. */
   enableDragReparent?: boolean;
 
+  /** 0.185.16 — enables canvas-bar vertical drag to reprioritize. When
+   *  true, vertical-dominant drag of a bar body commits a reorder
+   *  via onItemReorder instead of shifting dates via onItemEdit.
+   *  Horizontal-dominant drag still shifts dates. Default FALSE.
+   *  Runtime-toggleable via AdminPanel checkbox. */
+  enableDragBarToReprioritize?: boolean;
+
   /** 0.185.4 — record-URL template for the task-detail panel's ID chip.
    *  When provided, DetailPanel renders the task ID as an `<a href>` link
    *  with `{id}` in the template replaced by `task.id`. When omitted, ID

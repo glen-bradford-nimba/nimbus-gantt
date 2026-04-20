@@ -333,6 +333,10 @@ const ADMIN_TOGGLEABLE_FEATURES: Array<{ key: string; label: string }> = [
   // middle = nest under, drop-on-bucket-header = deparent, horizontal
   // drag changes depth. When OFF: pure reorder, no parent changes.
   { key: 'enableDragReparent',   label: 'Enable drag to reparent' },
+  // 0.185.16 — canvas-bar vertical drag reprioritize. Default OFF.
+  // When ON: vertical-dominant drag of a bar commits a reorder
+  // instead of shifting dates. Horizontal drags still shift dates.
+  { key: 'enableDragBarToReprioritize', label: 'Prioritize by Gantt bar' },
 ];
 
 type AdminDispatch = (ev: { type: 'TOGGLE_ADMIN' } | { type: 'TOGGLE_ADVISOR' } | { type: 'TOGGLE_FEATURE'; key: string }) => void;
@@ -639,6 +643,9 @@ export class IIFEApp {
     // AdminPanel can toggle at runtime via the existing featureOverrides path.
     tplConfig.features.enableDragReparent = options.enableDragReparent === true;
     try { console.log('[NG config] enableDragReparent=', tplConfig.features.enableDragReparent); } catch (_e) { /* ok */ }
+    // 0.185.16 — same pattern for canvas-bar vertical drag reprioritize.
+    tplConfig.features.enableDragBarToReprioritize = options.enableDragBarToReprioritize === true;
+    try { console.log('[NG config] enableDragBarToReprioritize=', tplConfig.features.enableDragBarToReprioritize); } catch (_e) { /* ok */ }
 
     /* ── engineOnly: React owns chrome — just run the gantt engine ──── */
     if (options.engineOnly) {
@@ -1830,6 +1837,47 @@ export class IIFEApp {
           if (!orig || orig.startDate !== s) changes.startDate = s;
           if (!orig || orig.endDate !== e) changes.endDate = e;
           onTaskEditAsync(task.id, s, e, changes);
+        },
+        // 0.185.16 — canvas bar vertical-drag reprioritize. Getter reads
+        // the live feature flag (via tplConfig.features.enableDragBarToReprioritize
+        // which is already reconciled by reconcileFeatureOverrides each
+        // state change). Callback resolves target row → newSortOrder +
+        // optional newPriorityGroup, then routes through the existing
+        // onItemReorder chain so DH's handler receives the same payload
+        // shape as the sidebar reorder path.
+        isBarReprioritizeEnabled: () => !!tplConfig.features.enableDragBarToReprioritize,
+        onBarReorderDrag: (task: { id: string }, targetTaskId: string | null, targetRowIndex: number) => {
+          try { console.log('[NG] main onBarReorderDrag received', task?.id, '→ target=', targetTaskId, 'rowIdx=', targetRowIndex); } catch (_e) { /* ok */ }
+          if (!task || !task.id || isBucketId(task.id)) return;
+          // Resolve target task's bucket + sortOrder neighborhood.
+          const srcTask = allTasks.find((t) => t.id === task.id);
+          if (!srcTask) return;
+          const tgtTask = targetTaskId ? allTasks.find((t) => t.id === targetTaskId) : null;
+          // When target is in a different bucket than source, emit a
+          // cross-group reorder (priorityGroup + sortOrder). Same bucket:
+          // sortOrder only.
+          const patch: TaskPatch = { id: task.id };
+          if (tgtTask && tgtTask.priorityGroup && tgtTask.priorityGroup !== srcTask.priorityGroup) {
+            patch.priorityGroup = tgtTask.priorityGroup;
+          }
+          // Compute target sortOrder: midpoint between target row and its
+          // neighbor in the drop direction. Simpler first version: place
+          // adjacent to target by +500 or -500 depending on whether source
+          // is above or below target in current layout. Host's pass-through
+          // Apex writes the value as-is.
+          if (tgtTask) {
+            const srcSort = Number(srcTask.sortOrder) || 0;
+            const tgtSort = Number(tgtTask.sortOrder) || 0;
+            patch.sortOrder = srcSort < tgtSort ? tgtSort + 500 : tgtSort - 500;
+          } else {
+            // Drop below last row. Use max sortOrder in target bucket + 1000.
+            const bucket = patch.priorityGroup || srcTask.priorityGroup;
+            const maxSort = allTasks
+              .filter((t) => t.priorityGroup === bucket)
+              .reduce((mx, t) => Math.max(mx, Number(t.sortOrder) || 0), 0);
+            patch.sortOrder = maxSort + 1000;
+          }
+          interceptedOnPatch(patch);
         },
       });
 

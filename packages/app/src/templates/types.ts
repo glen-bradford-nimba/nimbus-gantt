@@ -56,6 +56,13 @@ export interface FeatureFlags {
    *    - Horizontal drag offset doesn't change depth — parent stays fixed
    *    - onItemReorder payload never carries newParentId (parent unchanged) */
   enableDragReparent?: boolean;
+  /** 0.185.16 — enables canvas-bar vertical drag to reprioritize. When
+   *  true, a vertical-dominant drag of a bar body commits a reorder
+   *  (new sortOrder derived from target row + cross-group move when
+   *  target is in a different bucket) instead of the default date-
+   *  shift behavior. Horizontal-dominant drags still shift dates.
+   *  Default FALSE. Runtime-toggleable via AdminPanel checkbox. */
+  enableDragBarToReprioritize?: boolean;
 }
 
 /* ── §1.3 Theme tokens ──────────────────────────────────────────────────── */

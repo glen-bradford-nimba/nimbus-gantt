@@ -73,6 +73,20 @@ export interface DragManagerOptions {
   onHover?: (task: GanttTask | null, x: number, y: number, color: string) => void;
   readOnly: boolean;
   headerHeight?: number;
+  /** 0.185.16 — when set, enables drag-bar-to-reprioritize on canvas.
+   *  Vertical-dominant drag of a bar body crosses rows to change the
+   *  task's sortOrder (and priorityGroup, if the drop row is in a
+   *  different bucket). Called on drop with the target task's id + the
+   *  target row index. Host computes the correct newIndex/newGroup
+   *  and forwards through onItemReorder. When flag returns false or
+   *  option is absent, vertical drag behaves as today (shifts both
+   *  dates when a move gesture, dispatches TASK_MOVE). */
+  isBarReprioritizeEnabled?: () => boolean;
+  onBarReorderDrag?: (
+    task: GanttTask,
+    targetTaskId: string | null,
+    targetRowIndex: number,
+  ) => void | Promise<void>;
   /** IM-6 (0.183) — optional scroll controller that enables pan-on-deadspace.
    *  When provided, a pointerdown on non-bar canvas area enters pan mode:
    *  subsequent pointermove events update scroll via setScrollPosition, and
@@ -455,7 +469,34 @@ export class DragManager {
 
     switch (hitType) {
       case 'bar': {
-        // Move: shift both start and end by the same offset
+        // 0.185.16 — if canvas bar reprioritize is enabled AND the drag was
+        // vertical-dominant, interpret as reorder instead of date move.
+        // Axis dominance: compare abs(pixelDeltaY) to abs(pixelDeltaX) plus
+        // a small bias so purely-horizontal drags never accidentally
+        // register as vertical (the threshold of 2x keeps the default
+        // date-drag feel intact).
+        const pixelDeltaY = e.clientY - this.dragStartY;
+        const absX = Math.abs(pixelDeltaX);
+        const absY = Math.abs(pixelDeltaY);
+        const reprioritizeEnabled = !!this.options.isBarReprioritizeEnabled
+          && this.options.isBarReprioritizeEnabled();
+        const verticalDominant = absY > absX * 1.5 && absY > 12;
+
+        if (reprioritizeEnabled && verticalDominant) {
+          // Resolve the target row from the pointer's canvas-space Y.
+          // canvasY is content-space (already adjusted for scroll/header).
+          const layouts = this.options.getLayouts();
+          const targetRowIndex = Math.max(0, Math.floor(
+            (this.toCanvasCoords(e).canvasY) / config.rowHeight,
+          ));
+          const targetLayout = layouts.find((l) => l.rowIndex === targetRowIndex);
+          const targetTaskId = targetLayout ? targetLayout.taskId : null;
+          try { console.log('[NG engine] drag commit bar-reorder', task.id, '→ row=', targetRowIndex, 'target=', targetTaskId); } catch (_e) { /* ok */ }
+          this.options.onBarReorderDrag?.(task, targetTaskId, targetRowIndex);
+          break;
+        }
+
+        // Default behavior — move: shift both start and end by the same offset
         const days = pixelsToDays(pixelDeltaX, timeScale);
         const newStart = addDays(this.dragOriginalStartDate, days);
         const newEnd = addDays(this.dragOriginalEndDate, days);
