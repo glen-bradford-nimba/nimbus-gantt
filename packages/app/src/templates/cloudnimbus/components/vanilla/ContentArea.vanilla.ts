@@ -27,7 +27,10 @@ export function ContentAreaVanilla(initial: SlotProps): VanillaSlotInstance {
   host.setAttribute('data-nga-gantt-host', '1');
 
   let sidebarInst: VanillaSlotInstance | null = null;
-  let detailInst:  VanillaSlotInstance | null = null;
+  // 0.185.18 — multi-instance DetailPanels keyed by taskId. One VanillaSlotInstance
+  // per open task; preserved across re-renders so focus + drafts + panel
+  // position survive state updates that don't touch that panel's task.
+  const detailInsts: Map<string, VanillaSlotInstance> = new Map();
 
   function render(p: SlotProps) {
     clear(root);
@@ -47,13 +50,36 @@ export function ContentAreaVanilla(initial: SlotProps): VanillaSlotInstance {
 
     root.appendChild(host);
 
-    if (p.state.detailOpen && p.config.features.detailPanel) {
-      if (!detailInst) detailInst = DetailPanelVanilla(p);
-      else detailInst.update(p);
-      root.appendChild(detailInst.el);
-    } else if (detailInst) {
-      detailInst.destroy();
-      detailInst = null;
+    // 0.185.18 — render one DetailPanel per open task id. Stack with a
+    // cascading offset so stacked panels don't fully overlap. Clean up
+    // any panels whose tasks are no longer in openDetailTaskIds.
+    if (p.config.features.detailPanel) {
+      const openIds = p.state.openDetailTaskIds || [];
+      // Destroy panels for tasks that are no longer open
+      for (const [tid, inst] of detailInsts) {
+        if (!openIds.includes(tid)) {
+          inst.destroy();
+          detailInsts.delete(tid);
+        }
+      }
+      // Create / update panels for each open task id
+      openIds.forEach((tid, index) => {
+        let inst = detailInsts.get(tid);
+        if (!inst) {
+          inst = DetailPanelVanilla(p, tid);
+          detailInsts.set(tid, inst);
+          // Cascade offset for panels opened without a manual drag — stack
+          // each new panel 30px down + 30px left so they're individually
+          // distinguishable. Users can drag any panel individually.
+          const offset = index * 30;
+          inst.el.style.transform = `translate(-${offset}px, -${offset}px)`;
+        }
+        inst.update(p);
+        root.appendChild(inst.el);
+      });
+    } else if (detailInsts.size > 0) {
+      for (const inst of detailInsts.values()) inst.destroy();
+      detailInsts.clear();
     }
   }
 
@@ -63,7 +89,8 @@ export function ContentAreaVanilla(initial: SlotProps): VanillaSlotInstance {
     update: render,
     destroy() {
       if (sidebarInst) sidebarInst.destroy();
-      if (detailInst)  detailInst.destroy();
+      for (const inst of detailInsts.values()) inst.destroy();
+      detailInsts.clear();
       clear(root);
       if (root.parentNode) root.parentNode.removeChild(root);
     },

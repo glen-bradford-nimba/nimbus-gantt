@@ -14,10 +14,20 @@ import { useEffect, useRef, useState } from 'react';
 import type { SlotProps, FieldDescriptor } from '../../types';
 import { CLS_DETAIL, CLS_DETAIL_HEADER, CLS_DETAIL_BODY, CLS_CATEGORY_PILL } from './shared/classes';
 
-export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
+export function DetailPanel({
+  state,
+  data,
+  dispatch,
+  config,
+  forTaskId,
+  stackIndex,
+}: SlotProps & { forTaskId?: string; stackIndex?: number }) {
   const editing = state.detailMode === 'edit';
-  const task = state.selectedTaskId
-    ? data.tasks.find((t) => String(t.id) === state.selectedTaskId)
+  // 0.185.18 — when pinned to a specific taskId (multi-panel), render
+  // that task. Otherwise fall back to state.selectedTaskId.
+  const targetId = forTaskId || state.selectedTaskId;
+  const task = targetId
+    ? data.tasks.find((t) => String(t.id) === targetId)
     : undefined;
 
   const schema = config.fieldSchema;
@@ -125,9 +135,14 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
     window.addEventListener('mouseup', onUp);
   };
 
+  // 0.185.18 — stack offset: cascade panels when multiple are open so
+  // they're individually distinguishable. Offset applied via transform
+  // to avoid interfering with user-dragged position.
+  const stackOffset = (stackIndex || 0) * 30;
+  const transform = stackOffset > 0 ? `translate(-${stackOffset}px, -${stackOffset}px)` : undefined;
   const panelStyle: React.CSSProperties = pos
-    ? { left: pos.x, top: pos.y, width: 380, borderColor: categoryColor }
-    : { bottom: 80, right: 24, width: 380, borderColor: categoryColor };
+    ? { left: pos.x, top: pos.y, width: 380, borderColor: categoryColor, transform }
+    : { bottom: 80, right: 24, width: 380, borderColor: categoryColor, transform };
 
   return (
     <div
@@ -157,7 +172,23 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
           ) : (
             <span className="text-[10px] font-mono font-bold text-slate-500 flex-shrink-0">{taskId}</span>
           )}
-          <span className="text-xs font-bold text-slate-900 truncate">{task.title}</span>
+          {/* 0.185.18 — dirty indicator: "•" prefix when drafts differ
+              from task's current values. Only shown in edit mode. */}
+          <span className="text-xs font-bold text-slate-900 truncate">
+            {(editing && (() => {
+              const keys = schema && schema.length
+                ? schema.filter((f) => !f.readOnly).map((f) => f.key)
+                : ['startDate', 'endDate'];
+              for (const k of keys) {
+                const dv = drafts[k];
+                const tv = (task as unknown as Record<string, unknown>)[k];
+                const dn = dv == null || dv === '' ? null : dv;
+                const tn = tv == null || tv === '' ? null : tv;
+                if (dn !== tn) return '• ';
+              }
+              return '';
+            })()) || ''}{task.title}
+          </span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0 ml-2">
           <button
@@ -178,7 +209,12 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
           <button
             type="button"
             className="text-slate-400 hover:text-slate-700 text-sm px-1 transition-colors"
-            onClick={() => dispatch({ type: 'TOGGLE_DETAIL' })}
+            onClick={() => {
+              // 0.185.18 — multi-instance: close just this panel when
+              // pinned to a specific taskId; legacy broad close otherwise.
+              if (forTaskId) dispatch({ type: 'CLOSE_DETAIL', taskId: forTaskId });
+              else dispatch({ type: 'TOGGLE_DETAIL' });
+            }}
             title="Close"
           >
             &times;

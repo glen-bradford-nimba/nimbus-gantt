@@ -123,6 +123,12 @@ export interface AppState {
   /** 0.185.8 — Advisor panel visibility. Currently an honest "coming soon"
    *  stub body pending Claude-API infrastructure decisions. */
   advisorOpen: boolean;
+  /** 0.185.18 — ordered list of task IDs with open DetailPanel instances.
+   *  Rendering iterates this list so multiple panels can be open at once
+   *  (triage side-by-side). TOGGLE_DETAIL(taskId) appends to this array;
+   *  CLOSE_DETAIL(taskId) removes the specific id. `selectedTaskId` stays
+   *  as the most-recently-opened for single-panel backwards-compat. */
+  openDetailTaskIds: string[];
   /** 0.185.8 — runtime overrides for template FeatureFlags. Admin panel
    *  writes here via TOGGLE_FEATURE; buildGanttCols + other consumers
    *  merge with tplConfig.features so toggles take effect on rebuildView. */
@@ -147,7 +153,8 @@ export type AppEvent =
   | { type: 'RESET_PATCHES' }
   | { type: 'TOGGLE_ADMIN' }
   | { type: 'TOGGLE_ADVISOR' }
-  | { type: 'TOGGLE_FEATURE'; key: string };
+  | { type: 'TOGGLE_FEATURE'; key: string }
+  | { type: 'CLOSE_DETAIL'; taskId: string };
 
 export interface PatchLogEntry {
   ts: Date;
