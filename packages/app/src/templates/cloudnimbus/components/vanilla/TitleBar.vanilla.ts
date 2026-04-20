@@ -52,6 +52,14 @@ function resolveFullscreenApi(): FsApi | null {
     msFullscreenElement?: Element;
     msExitFullscreen?: () => Promise<void>;
   };
+  // 0.185.13 — LWS probe. Salesforce Lightning Web Security blocks reads
+  // of document.fullscreenElement on VF / Lightning Out surfaces with
+  // "Cannot access fullscreenElement". 0.185.10 called this unguarded
+  // during render → the throw killed TitleBar → whole gantt failed to
+  // mount on LWS-strict surfaces. Probe once at init: if the property
+  // access throws, return null so the button falls through to the legacy
+  // TOGGLE_FULLSCREEN local-toggle path (safe on every surface).
+  try { void doc.fullscreenElement; } catch (_e) { return null; }
   const request = (el: HTMLElement): Promise<void> => {
     const anyEl = el as unknown as {
       requestFullscreen?: () => Promise<void>;
@@ -64,13 +72,20 @@ function resolveFullscreenApi(): FsApi | null {
     return Promise.reject(new Error('Fullscreen API not supported'));
   };
   const exit = (): Promise<void> => {
-    if (doc.exitFullscreen)         return doc.exitFullscreen();
-    if (doc.webkitExitFullscreen)   return doc.webkitExitFullscreen();
-    if (doc.msExitFullscreen)       return doc.msExitFullscreen();
+    try {
+      if (doc.exitFullscreen)         return doc.exitFullscreen();
+      if (doc.webkitExitFullscreen)   return doc.webkitExitFullscreen();
+      if (doc.msExitFullscreen)       return doc.msExitFullscreen();
+    } catch (_e) { /* LWS blocked */ }
     return Promise.reject(new Error('exitFullscreen not supported'));
   };
   const element = (): Element | null => {
-    return doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement || null;
+    try {
+      return doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement || null;
+    } catch (_e) {
+      // LWS can block the property read at any time; treat as "not in fullscreen."
+      return null;
+    }
   };
   const anyEl = document.documentElement as unknown as { requestFullscreen?: unknown; webkitRequestFullscreen?: unknown };
   if (!anyEl.requestFullscreen && !anyEl.webkitRequestFullscreen) return null;

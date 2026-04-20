@@ -26,39 +26,61 @@ function Sep() {
  * 0.185.10 — Fullscreen API button (React). Mirrors the vanilla TitleBar's
  * default fullscreen path. Uses browser Fullscreen API on the template root
  * element; subscribes to fullscreenchange so the label flips on Esc exit.
+ *
+ * 0.185.13 — LWS guard: every document.fullscreenElement read is wrapped
+ * in try/catch. Salesforce Lightning Web Security blocks that property
+ * on VF / Lightning Out surfaces ("Cannot access fullscreenElement"),
+ * and the throw killed the whole TitleBar render on 0.185.10. Guarded
+ * reads return null/false and the button degrades to a no-op (the useFs
+ * probe returns null so the FallbackButton below is used instead).
  */
-function FullscreenApiButton() {
-  const [isFs, setIsFs] = useState<boolean>(() => {
-    if (typeof document === 'undefined') return false;
+function readFullscreenElementSafe(): Element | null {
+  if (typeof document === 'undefined') return null;
+  try {
     const doc = document as Document & { webkitFullscreenElement?: Element; msFullscreenElement?: Element };
-    return !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement);
-  });
+    return doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement || null;
+  } catch (_e) {
+    return null;
+  }
+}
+
+function isFullscreenApiSupported(): boolean {
+  if (typeof document === 'undefined') return false;
+  // Probe: if reading fullscreenElement throws, LWS is blocking the whole
+  // API surface; return false so the button falls back to local toggle.
+  try { void (document as Document & { webkitFullscreenElement?: Element }).fullscreenElement; }
+  catch (_e) { return false; }
+  const anyEl = document.documentElement as unknown as { requestFullscreen?: unknown; webkitRequestFullscreen?: unknown };
+  return !!(anyEl.requestFullscreen || anyEl.webkitRequestFullscreen);
+}
+
+function FullscreenApiButton() {
+  const [isFs, setIsFs] = useState<boolean>(() => !!readFullscreenElementSafe());
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const onChange = () => {
-      const doc = document as Document & { webkitFullscreenElement?: Element; msFullscreenElement?: Element };
-      setIsFs(!!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement));
-    };
-    document.addEventListener('fullscreenchange', onChange);
-    document.addEventListener('webkitfullscreenchange', onChange);
-    document.addEventListener('msfullscreenchange', onChange);
+    const onChange = () => setIsFs(!!readFullscreenElementSafe());
+    try {
+      document.addEventListener('fullscreenchange', onChange);
+      document.addEventListener('webkitfullscreenchange', onChange);
+      document.addEventListener('msfullscreenchange', onChange);
+    } catch (_e) { /* LWS may block */ }
     return () => {
-      document.removeEventListener('fullscreenchange', onChange);
-      document.removeEventListener('webkitfullscreenchange', onChange);
-      document.removeEventListener('msfullscreenchange', onChange);
+      try {
+        document.removeEventListener('fullscreenchange', onChange);
+        document.removeEventListener('webkitfullscreenchange', onChange);
+        document.removeEventListener('msfullscreenchange', onChange);
+      } catch (_e) { /* ok */ }
     };
   }, []);
 
   const onClick = async (e: React.MouseEvent<HTMLButtonElement>) => {
     try {
       const doc = document as Document & {
-        webkitFullscreenElement?: Element;
         webkitExitFullscreen?: () => Promise<void>;
-        msFullscreenElement?: Element;
         msExitFullscreen?: () => Promise<void>;
       };
-      const active = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement);
+      const active = !!readFullscreenElementSafe();
       if (active) {
         if (doc.exitFullscreen)         await doc.exitFullscreen();
         else if (doc.webkitExitFullscreen) await doc.webkitExitFullscreen();
@@ -77,8 +99,6 @@ function FullscreenApiButton() {
         else if (anyEl.msRequestFullscreen)     await anyEl.msRequestFullscreen();
       }
     } catch (err) {
-      // Fullscreen request can reject if not initiated from a user gesture
-      // or in a sandboxed iframe. Surface to console; don't break the UI.
       try { console.error('[NG fs-btn] Fullscreen API threw', err); } catch (_e) { /* ok */ }
     }
   };
