@@ -10,7 +10,7 @@
  * fields don't exist on the framework's TaskPatch type and extending it is
  * out of Phase 3 scope.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SlotProps, FieldDescriptor } from '../../types';
 import { CLS_DETAIL, CLS_DETAIL_HEADER, CLS_DETAIL_BODY, CLS_CATEGORY_PILL } from './shared/classes';
 
@@ -85,14 +85,63 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
     dispatch({ type: 'SET_DETAIL_MODE', mode: 'view' });
   };
 
+  // 0.185.17 — draggable panel state. `pos` null = use default right/bottom
+  // anchor; otherwise absolute left/top in container coords. Persists across
+  // task switches within the same mount.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const dragState = useRef<{
+    startX: number; startY: number; origX: number; origY: number;
+  } | null>(null);
+
+  const onHeaderMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, select, textarea')) return;
+    e.preventDefault();
+    let origX = pos?.x ?? 0;
+    let origY = pos?.y ?? 0;
+    if (pos == null && rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect();
+      const parent = rootRef.current.parentElement;
+      const parentRect = parent ? parent.getBoundingClientRect() : { left: 0, top: 0 };
+      origX = rect.left - parentRect.left;
+      origY = rect.top - parentRect.top;
+      setPos({ x: origX, y: origY });
+    }
+    dragState.current = { startX: e.clientX, startY: e.clientY, origX, origY };
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: MouseEvent) => {
+      const s = dragState.current;
+      if (!s) return;
+      setPos({ x: s.origX + (ev.clientX - s.startX), y: s.origY + (ev.clientY - s.startY) });
+    };
+    const onUp = () => {
+      dragState.current = null;
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const panelStyle: React.CSSProperties = pos
+    ? { left: pos.x, top: pos.y, width: 380, borderColor: categoryColor }
+    : { bottom: 80, right: 24, width: 380, borderColor: categoryColor };
+
   return (
     <div
+      ref={rootRef}
       className={CLS_DETAIL}
       data-slot="DetailPanel"
       data-detail-mode={state.detailMode}
-      style={{ bottom: 80, right: 24, width: 380, borderColor: categoryColor }}
+      style={panelStyle}
     >
-      <div className={CLS_DETAIL_HEADER} style={{ background: categoryColor + '15' }}>
+      <div
+        className={CLS_DETAIL_HEADER}
+        style={{ background: categoryColor + '15', cursor: 'move', userSelect: 'none' }}
+        onMouseDown={onHeaderMouseDown}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: categoryColor }} />
           {config.recordUrlTemplate ? (
