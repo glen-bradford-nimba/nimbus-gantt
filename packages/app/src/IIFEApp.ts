@@ -631,6 +631,9 @@ export class IIFEApp {
     if (options.cssUrl) tplConfig.stylesheet = { ...tplConfig.stylesheet, url: options.cssUrl };
     if (options.engine) tplConfig.engine = options.engine;
     if (options.recordUrlTemplate) tplConfig.recordUrlTemplate = options.recordUrlTemplate;
+    // 0.185.15 — pipe fieldSchema mount option through to tplConfig so
+    // DetailPanel (vanilla + React) can read it via slot props.
+    if (options.fieldSchema) tplConfig.fieldSchema = options.fieldSchema;
     // 0.185.11 — wire enableDragReparent mount option → tplConfig.features.
     // Default FALSE (reparent gesture off); consumers must opt in explicitly.
     // AdminPanel can toggle at runtime via the existing featureOverrides path.

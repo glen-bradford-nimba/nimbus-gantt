@@ -53,6 +53,10 @@ export interface NimbusGanttAppProps {
   /** 0.185.4 — record URL template for the DetailPanel ID chip.
    *  `{id}` is replaced with the task id. */
   recordUrlTemplate?: string;
+  /** 0.185.15 — field schema for the DetailPanel edit surface. When
+   *  present, panel renders inputs per descriptor instead of the
+   *  default date-only edit view. See FieldDescriptor in types.ts. */
+  fieldSchema?: import('./types').FieldDescriptor[];
   /** Optional runtime audit-submit handler. When present, AuditPanel's
    *  Submit+commit button calls this; when absent, commit is local-only. */
   onAuditSubmit?: AuditSubmitHandler;
@@ -118,6 +122,7 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
       if (props.onEnterFullscreen) cfg.onEnterFullscreen = props.onEnterFullscreen;
       if (props.onExitFullscreen)  cfg.onExitFullscreen  = props.onExitFullscreen;
       if (props.recordUrlTemplate) cfg.recordUrlTemplate = props.recordUrlTemplate;
+      if (props.fieldSchema) cfg.fieldSchema = props.fieldSchema;
       return cfg;
     },
     [tplInput, mode, props.overrides, props.engine, props.onAuditSubmit, props.isDirty, props.onEnterFullscreen, props.onExitFullscreen],

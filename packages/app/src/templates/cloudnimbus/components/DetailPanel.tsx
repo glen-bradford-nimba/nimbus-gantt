@@ -11,7 +11,7 @@
  * out of Phase 3 scope.
  */
 import { useEffect, useState } from 'react';
-import type { SlotProps } from '../../types';
+import type { SlotProps, FieldDescriptor } from '../../types';
 import { CLS_DETAIL, CLS_DETAIL_HEADER, CLS_DETAIL_BODY, CLS_CATEGORY_PILL } from './shared/classes';
 
 export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
@@ -20,15 +20,29 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
     ? data.tasks.find((t) => String(t.id) === state.selectedTaskId)
     : undefined;
 
-  // Local draft state for editable fields. Resets whenever the selected task
-  // or edit mode flips — mirrors v5 FloatingDetailPanel's useEffect pattern.
-  const [draftStart, setDraftStart] = useState<string>(task?.startDate || '');
-  const [draftEnd, setDraftEnd] = useState<string>(task?.endDate || '');
+  const schema = config.fieldSchema;
+
+  // 0.185.15 — generalized draft state. Keyed by schema field name when
+  // schema is provided; falls back to startDate/endDate for legacy path.
+  const [drafts, setDrafts] = useState<Record<string, unknown>>(() => {
+    if (schema && schema.length && task) {
+      const d: Record<string, unknown> = {};
+      for (const f of schema) d[f.key] = (task as unknown as Record<string, unknown>)[f.key];
+      return d;
+    }
+    return { startDate: task?.startDate || '', endDate: task?.endDate || '' };
+  });
 
   useEffect(() => {
-    setDraftStart(task?.startDate || '');
-    setDraftEnd(task?.endDate || '');
-  }, [task?.id, task?.startDate, task?.endDate, editing]);
+    if (schema && schema.length && task) {
+      const d: Record<string, unknown> = {};
+      for (const f of schema) d[f.key] = (task as unknown as Record<string, unknown>)[f.key];
+      setDrafts(d);
+    } else {
+      setDrafts({ startDate: task?.startDate || '', endDate: task?.endDate || '' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task?.id, editing, schema]);
 
   if (!state.selectedTaskId) return null;
   if (!task) return null;
@@ -41,18 +55,32 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
   };
 
   const handleCancel = () => {
-    setDraftStart(task.startDate || '');
-    setDraftEnd(task.endDate || '');
+    if (schema && schema.length) {
+      const d: Record<string, unknown> = {};
+      for (const f of schema) d[f.key] = (task as unknown as Record<string, unknown>)[f.key];
+      setDrafts(d);
+    } else {
+      setDrafts({ startDate: task.startDate || '', endDate: task.endDate || '' });
+    }
     dispatch({ type: 'SET_DETAIL_MODE', mode: 'view' });
   };
 
   const handleSave = () => {
-    const patch: { id: string; startDate?: string; endDate?: string } = { id: taskId };
-    if (draftStart !== (task.startDate || '')) patch.startDate = draftStart;
-    if (draftEnd !== (task.endDate || '')) patch.endDate = draftEnd;
-    // Only dispatch when something actually changed — matches v5 behavior.
-    if (patch.startDate !== undefined || patch.endDate !== undefined) {
-      dispatch({ type: 'PATCH', patch });
+    // 0.185.15 — diff drafts against task, emit only changed keys.
+    const changes: Record<string, unknown> = {};
+    const keys = schema && schema.length
+      ? schema.filter((f) => !f.readOnly).map((f) => f.key)
+      : ['startDate', 'endDate'];
+    for (const k of keys) {
+      const draftVal = drafts[k];
+      const taskVal = (task as unknown as Record<string, unknown>)[k];
+      const dNorm = draftVal == null || draftVal === '' ? null : draftVal;
+      const tNorm = taskVal == null || taskVal === '' ? null : taskVal;
+      if (dNorm !== tNorm) changes[k] = draftVal;
+    }
+    if (Object.keys(changes).length > 0) {
+      const patch: Record<string, unknown> = { id: taskId, ...changes };
+      dispatch({ type: 'PATCH', patch: patch as unknown as import('../../types').TaskPatch });
     }
     dispatch({ type: 'SET_DETAIL_MODE', mode: 'view' });
   };
@@ -118,30 +146,44 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
           </span>
         </div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 pt-1">
-          <Field label="Status" value={task.stage || '—'} />
-          <Field label="Priority" value={task.priorityGroup || '—'} />
-          {editing ? (
-            <EditField
-              label="Start"
-              type="date"
-              value={draftStart}
-              onChange={setDraftStart}
-            />
+          {schema && schema.length ? (
+            schema.map((f) => (
+              <SchemaField
+                key={f.key}
+                desc={f}
+                editing={editing}
+                value={drafts[f.key]}
+                onChange={(v) => setDrafts((d) => ({ ...d, [f.key]: v }))}
+              />
+            ))
           ) : (
-            <Field label="Start" value={task.startDate || '—'} />
+            <>
+              <Field label="Status" value={task.stage || '—'} />
+              <Field label="Priority" value={task.priorityGroup || '—'} />
+              {editing ? (
+                <EditField
+                  label="Start"
+                  type="date"
+                  value={String(drafts.startDate ?? '')}
+                  onChange={(v) => setDrafts((d) => ({ ...d, startDate: v }))}
+                />
+              ) : (
+                <Field label="Start" value={task.startDate || '—'} />
+              )}
+              {editing ? (
+                <EditField
+                  label="End"
+                  type="date"
+                  value={String(drafts.endDate ?? '')}
+                  onChange={(v) => setDrafts((d) => ({ ...d, endDate: v }))}
+                />
+              ) : (
+                <Field label="End" value={task.endDate || '—'} />
+              )}
+              <Field label="Estimated" value={task.estimatedHours ? task.estimatedHours + 'h' : '—'} />
+              <Field label="Logged" value={task.loggedHours ? task.loggedHours + 'h' : '—'} />
+            </>
           )}
-          {editing ? (
-            <EditField
-              label="End"
-              type="date"
-              value={draftEnd}
-              onChange={setDraftEnd}
-            />
-          ) : (
-            <Field label="End" value={task.endDate || '—'} />
-          )}
-          <Field label="Estimated" value={task.estimatedHours ? task.estimatedHours + 'h' : '—'} />
-          <Field label="Logged" value={task.loggedHours ? task.loggedHours + 'h' : '—'} />
         </div>
 
         {editing && (
@@ -167,11 +209,90 @@ export function DetailPanel({ state, data, dispatch, config }: SlotProps) {
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, fullWidth }: { label: string; value: string; fullWidth?: boolean }) {
   return (
-    <div>
+    <div className={fullWidth ? 'col-span-2' : undefined}>
       <p className="text-[9px] text-slate-400 uppercase tracking-wide">{label}</p>
-      <p className="text-slate-900">{value}</p>
+      <p className="text-slate-900 whitespace-pre-wrap">{value}</p>
+    </div>
+  );
+}
+
+/**
+ * 0.185.15 — SchemaField. Renders a single FieldDescriptor based on the
+ * editing flag and the field's type. Textareas always span both columns
+ * so their content doesn't get cramped. readOnly descriptors render as
+ * Field (view-only) even when editing. Mirrors the vanilla renderField.
+ */
+function SchemaField({
+  desc,
+  editing,
+  value,
+  onChange,
+}: {
+  desc: FieldDescriptor;
+  editing: boolean;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const fullWidth = desc.type === 'textarea';
+  const currentVal = value == null ? '' : String(value);
+
+  if (!editing || desc.readOnly) {
+    return <Field label={desc.label} value={currentVal || '—'} fullWidth={fullWidth} />;
+  }
+
+  const cls =
+    'w-full px-1.5 py-0.5 text-xs text-slate-900 border border-slate-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-fuchsia-400';
+
+  let control;
+  if (desc.type === 'textarea') {
+    control = (
+      <textarea
+        className={cls + ' resize-y'}
+        rows={3}
+        value={currentVal}
+        placeholder={desc.placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  } else if (desc.type === 'picklist') {
+    control = (
+      <select
+        className={cls}
+        value={currentVal}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">{desc.placeholder || '—'}</option>
+        {(desc.options || []).map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+      </select>
+    );
+  } else {
+    const inputType = desc.type === 'number' ? 'number' : desc.type === 'date' ? 'date' : 'text';
+    control = (
+      <input
+        type={inputType}
+        className={cls}
+        value={currentVal}
+        placeholder={desc.placeholder}
+        min={desc.type === 'number' ? desc.min : undefined}
+        max={desc.type === 'number' ? desc.max : undefined}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(desc.type === 'number' ? (v === '' ? null : Number(v)) : v);
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className={fullWidth ? 'col-span-2' : undefined}>
+      <p className="text-[9px] text-slate-400 uppercase tracking-wide">{desc.label}</p>
+      {control}
     </div>
   );
 }

@@ -9,6 +9,7 @@ import type {
   MappedTask,
   NimbusGanttEngine,
   AppMode,
+  FieldDescriptor,
 } from '../types';
 import type { TaskStats } from '../pipeline';
 
@@ -323,6 +324,10 @@ export interface TemplateConfig {
   /** 0.185.4 — record-URL template passed through from MountOptions.
    *  DetailPanel renders task.id as an `<a href>` when this is set. */
   recordUrlTemplate?: string;
+  /** 0.185.15 — field schema passed through from MountOptions. When
+   *  present, DetailPanel renders inputs per descriptor instead of the
+   *  default date-only edit view. */
+  fieldSchema?: FieldDescriptor[];
   /** CH-1 / 0.183.1 — runtime chrome-visibility toggle. Wired by IIFEApp to
    *  the same closure that backs `handle.toggleChrome()`. Slots (e.g. the
    *  TitleBar Unpin button) call this to hide chrome without needing the
@@ -339,5 +344,6 @@ export type {
   MappedTask,
   NimbusGanttEngine,
   AppMode,
+  FieldDescriptor,
 } from '../types';
 export type { TaskStats } from '../pipeline';

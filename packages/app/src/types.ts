@@ -6,6 +6,41 @@ export interface PriorityBucket {
   order: number;
 }
 
+/**
+ * 0.185.15 — FieldDescriptor. Host-provided spec for a single row in the
+ * DetailPanel's edit surface. `key` matches the property on NormalizedTask
+ * (e.g. 'startDate', 'stage', 'estimatedHours'); `type` picks the widget
+ * rendered; `options` populates picklist choices; `readOnly` shows the
+ * value without an editable input even when the panel is in edit mode.
+ * The panel emits onItemEdit(taskId, changes) with only the keys whose
+ * drafts differ from the task's current value, so partial schemas (e.g.
+ * date-only) still produce minimal patches.
+ */
+export interface FieldDescriptor {
+  /** Property name on NormalizedTask, or a custom key host adapters map.
+   *  Common values: 'startDate', 'endDate', 'title', 'stage',
+   *  'priorityGroup', 'estimatedHours', 'loggedHours', 'description',
+   *  'acceptance', 'assignee'. Host decides how to persist keys that
+   *  don't map 1:1 to the NormalizedTask shape (via onItemEdit routing). */
+  key: string;
+  /** Human-readable label displayed above the input. */
+  label: string;
+  /** Widget type. `lookup` is reserved for future autocomplete widget; in
+   *  0.185.15 it renders as a plain text input. */
+  type: 'text' | 'date' | 'number' | 'textarea' | 'picklist' | 'lookup';
+  /** Options for picklist type. Ignored for other types. */
+  options?: string[];
+  /** When true, render the value but don't let the user edit it even in
+   *  edit mode. Useful for identifiers or computed fields surfaced for
+   *  context (e.g. record ID chip). */
+  readOnly?: boolean;
+  /** Optional min/max for number type. */
+  min?: number;
+  max?: number;
+  /** Optional placeholder text for text/textarea/number inputs. */
+  placeholder?: string;
+}
+
 export interface NormalizedTask {
   id: string;
   title: string;
@@ -139,7 +174,15 @@ export interface MountOptions {
    *  Latest edit wins; stale settles never revert. */
   onItemEdit?: (
     taskId: string,
-    changes: { startDate?: string; endDate?: string },
+    // 0.185.15 — widened from {startDate?, endDate?} to a permissive record
+    // so DetailPanel fieldSchema edits (stage, priority, hours, description,
+    // assignee, any host-custom key) flow through the same callback as
+    // drag-to-edit. Canvas-drag still emits only startDate/endDate (same
+    // shape as before), so existing handlers see no behavior change — the
+    // union just adds new possible keys when the host wires a fieldSchema.
+    // Host routes keys to the right Apex / persistence path; NG doesn't
+    // prescribe which fields exist on a task.
+    changes: { startDate?: string; endDate?: string } & Record<string, unknown>,
   ) => Promise<void> | void;
 
   /** Fired on single-click of a gantt bar (click, not drag). Host decides
@@ -196,6 +239,34 @@ export interface MountOptions {
     scrollTop?: number;
     zoom?: string;
   };
+
+  /** 0.185.15 — schema describing what fields the DetailPanel renders and
+   *  which are editable. When absent (or empty), DetailPanel falls back to
+   *  its legacy behavior: read-only Status + Priority + Estimated + Logged,
+   *  editable Start + End dates. When present, the schema fully replaces
+   *  that default and the panel renders exactly the descriptors given.
+   *
+   *  Hosts (DH, CN v12, v10 scratch) can pass different schemas — the
+   *  library doesn't prescribe which fields a surface should expose. Each
+   *  descriptor maps to a widget type (text, date, number, textarea,
+   *  picklist); on Save the panel diffs the drafts against the current
+   *  task and emits onItemEdit(taskId, changes) with ONLY the changed
+   *  keys, exactly matching the existing date-edit contract.
+   *
+   *  Example (DH):
+   *    fieldSchema: [
+   *      { key: 'startDate', label: 'Start',   type: 'date' },
+   *      { key: 'endDate',   label: 'End',     type: 'date' },
+   *      { key: 'stage',     label: 'Stage',   type: 'picklist',
+   *        options: ['Backlog','In Development','Ready for QA','Done'] },
+   *      { key: 'priorityGroup', label: 'Priority', type: 'picklist',
+   *        options: ['top-priority','active','backlog'] },
+   *      { key: 'estimatedHours', label: 'Hours', type: 'number', min: 0 },
+   *      { key: 'description', label: 'Description', type: 'text' },
+   *      { key: 'acceptance',  label: 'Acceptance', type: 'textarea' },
+   *    ]
+   */
+  fieldSchema?: FieldDescriptor[];
 
   /** 0.185.11 — enables the drop-onto-row nest + bucket-header deparent
    *  gestures. Default FALSE. When false, drag only reorders (within

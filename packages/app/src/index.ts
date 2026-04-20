@@ -24,6 +24,7 @@ export type {
   ScreenPos,
   TaskClickSource,
   AppMode,
+  FieldDescriptor,
 } from './types';
 
 export {
