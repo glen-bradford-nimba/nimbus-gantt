@@ -231,14 +231,72 @@ export function startDragReparent(
         curId = it ? (it.parentWorkItemId as string | null) : null;
       }
     }
-    const sortAbove = aboveId ? getSortOrder(aboveId) : 0;
-    const sortBelow = belowId ? getSortOrder(belowId) : sortAbove + 2;
-    // When both neighbours share the same sortOrder (common when all tasks start at 0)
-    // fall back to an index-based value so drops are distinguishable.
+    // 0.185.23 — distinct-bounds sortOrder computation. Replaces the old
+    // `(aboveIdx + 1) * 1000` fallback that produced bucket-agnostic index-
+    // based values (21000, 22000, 23000 ...) regardless of actual cursor
+    // position when rowAbove and rowBelow shared a sortOrder. Symptom:
+    // dragging any row into a cluster emitted the cluster's aboveIdx*1000
+    // which frequently collided with an existing task's value and looked
+    // like a no-op even when the cursor was at the top of the list.
+    //
+    // New logic: always find a STRICTLY-BETWEEN value.
+    //   1. Both neighbors exist and differ → midpoint
+    //   2. Only one neighbor → offset by ±1000 from the known side
+    //   3. Neighbors share a value (cluster) → walk outward in vis for
+    //      the nearest DISTINCT values above and below the cluster; use
+    //      midpoint of those outer bounds
+    //   4. Empty list → 1000
+    const sortAbove = aboveId ? getSortOrder(aboveId) : NaN;
+    const sortBelow = belowId ? getSortOrder(belowId) : NaN;
     const aboveIdx = rowAbove ? vis.indexOf(rowAbove) : -1;
-    const targetSort = (sortAbove !== sortBelow)
-      ? (sortAbove + sortBelow) / 2
-      : (aboveIdx >= 0 ? (aboveIdx + 1) * 1000 : 500);
+    const belowIdx = rowBelow ? vis.indexOf(rowBelow) : -1;
+
+    let targetSort: number;
+    if (!rowAbove && !rowBelow) {
+      targetSort = 1000;
+    } else if (!rowAbove) {
+      targetSort = sortBelow - 1000;
+    } else if (!rowBelow) {
+      targetSort = sortAbove + 1000;
+    } else if (sortAbove !== sortBelow) {
+      targetSort = (sortAbove + sortBelow) / 2;
+    } else {
+      // Cluster — walk outward for distinct bounds.
+      let lo = -Infinity;
+      for (let i = aboveIdx - 1; i >= 0; i--) {
+        const id = vis[i].getAttribute('data-task-id');
+        if (!id) continue;
+        const s = getSortOrder(id);
+        if (s < sortAbove) { lo = s; break; }
+      }
+      let hi = Infinity;
+      for (let i = belowIdx + 1; i < vis.length; i++) {
+        const id = vis[i].getAttribute('data-task-id');
+        if (!id) continue;
+        const s = getSortOrder(id);
+        if (s > sortBelow) { hi = s; break; }
+      }
+      if (isFinite(lo) && isFinite(hi)) {
+        targetSort = (lo + hi) / 2;
+      } else if (isFinite(lo)) {
+        targetSort = sortAbove + 1000; // cluster at top of known range
+      } else if (isFinite(hi)) {
+        targetSort = sortBelow - 1000; // cluster at bottom of known range
+      } else {
+        // Every visible row shares this sortOrder (degenerate).
+        // Pick a value that's definitely distinct.
+        targetSort = sortAbove + 1000;
+      }
+    }
+
+    try {
+      console.log('[NG dragReparent] targetSort computed',
+        'clientY=', clientY,
+        'aboveId=', aboveId, 'aboveSort=', sortAbove,
+        'belowId=', belowId, 'belowSort=', sortBelow,
+        '→ targetSort=', targetSort);
+    } catch (_e) { /* ok */ }
+
     return { parentId, depth: desiredDepth, targetBucket, targetSortOrder: targetSort, insertBeforeRow: rowBelow, nestIntoRow: null, deparent: false };
   }
 
