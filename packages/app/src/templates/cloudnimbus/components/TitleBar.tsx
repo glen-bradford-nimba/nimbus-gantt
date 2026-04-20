@@ -198,6 +198,31 @@ export function TitleBar({ config, state, dispatch, data }: SlotProps) {
         return null;
       })()}
       </div>
+      {/* 0.185.5 — Status color legend. Mirror of the vanilla TitleBar
+          legend so users can decode bar colors in both React and IIFE
+          mount paths. */}
+      <div
+        className="flex items-center gap-3 px-3 py-1 text-[10px] text-slate-500 border-t border-slate-100"
+        data-slot-part="status-legend"
+      >
+        <span className="text-[9px] text-slate-400 uppercase tracking-wide">Status</span>
+        {[
+          { label: 'In Flight', color: '#10b981' },
+          { label: 'Next Up',   color: '#3b82f6' },
+          { label: 'Backlog',   color: '#f59e0b' },
+          { label: 'Blocked',   color: '#ef4444' },
+          { label: 'Paused',    color: '#94a3b8' },
+          { label: 'Done',      color: '#cbd5e1' },
+        ].map((item) => (
+          <span key={item.label} className="flex items-center gap-1">
+            <span
+              className="inline-block w-2 h-2 rounded-full"
+              style={{ background: item.color }}
+            />
+            <span>{item.label}</span>
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

@@ -118,6 +118,11 @@ export function startDragReparent(
     if (spacer) { spacer.remove(); spacer = null; }
     if (dragRow) { dragRow.style.opacity = ''; dragRow.style.outline = ''; }
     document.body.style.cursor = '';
+    // 0.185.5 — clear any cross-group target highlight applied during drag.
+    ganttContainer.querySelectorAll<HTMLElement>('.ng-group-row.ng-drop-target').forEach((row) => {
+      row.classList.remove('ng-drop-target');
+      row.style.boxShadow = '';
+    });
     dragTaskId = null; dragSourceGroup = null; dragRow = null; hasMoved = false; pendingIP = null;
   }
 
@@ -206,6 +211,32 @@ export function startDragReparent(
       const indent = INDENT_BASE + ip.depth * LEAF_STEP;
       const lbl = spacer.querySelector<HTMLElement>('td span');
       if (lbl) lbl.style.paddingLeft = (indent + 8) + 'px';
+    }
+    // 0.185.5 — cross-group target highlight. When the drop target bucket
+    // differs from the source bucket, highlight the target bucket header
+    // so the user sees where the drop will land. Toggle on per-move; the
+    // bucket DOM is the `.ng-group-row` with a matching data-task-id.
+    updateBucketHighlight(ip.targetBucket);
+  }
+
+  function updateBucketHighlight(targetBucket: string | null): void {
+    const allGroupRows = ganttContainer.querySelectorAll<HTMLElement>('.ng-group-row');
+    allGroupRows.forEach((row) => {
+      row.classList.remove('ng-drop-target');
+      row.style.boxShadow = '';
+    });
+    if (!targetBucket || targetBucket === dragSourceGroup) return;
+    // Bucket headers have data-task-id like `__bucket_header__<bucket>` or
+    // `group-<bucket>`. Match either.
+    const target = Array.from(allGroupRows).find((row) => {
+      const tid = row.getAttribute('data-task-id') || '';
+      if (tid === `__bucket_header__${targetBucket}`) return true;
+      if (tid === `group-${targetBucket}`) return true;
+      return false;
+    });
+    if (target) {
+      target.classList.add('ng-drop-target');
+      target.style.boxShadow = 'inset 0 0 0 2px #3b82f6';
     }
   }
 
