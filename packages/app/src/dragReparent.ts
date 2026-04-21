@@ -206,14 +206,23 @@ export function startDragReparent(
     // first row) produced garbage values that never moved the task
     // into its intended position.
     const targetBucketForHitTest = getGroupAtY(clientY) || dragSourceGroup || '';
+    // 0.185.30 — bucketVis excludes the dragged task itself. Previously the
+    // dragged row stayed in bucketVis, so midpoint math between the row
+    // just above and the row just below the dragged row's NATURAL position
+    // produced the dragged row's OWN current sortOrder → no-op drop. Also
+    // blocks a symmetric self-reference at cluster walk boundaries.
     const bucketVis = targetBucketForHitTest
       ? vis.filter((r) => {
           const id = r.getAttribute('data-task-id');
           if (!id) return false;
+          if (id === dragTaskId) return false;
           const t = taskById[id];
           return !!t && (t.priorityGroup || '') === targetBucketForHitTest;
         })
-      : vis;
+      : vis.filter((r) => {
+          const id = r.getAttribute('data-task-id');
+          return !!id && id !== dragTaskId;
+        });
 
     let rowAbove: HTMLElement | null = null;
     let rowBelow: HTMLElement | null = null;
@@ -314,11 +323,50 @@ export function startDragReparent(
       }
     }
 
+    // 0.185.30 — collision-with-self detection. When the raw midpoint math
+    // lands on the dragged task's own current sortOrder, the drop is a
+    // no-op regardless of cursor intent. Happens most often when the user
+    // drags vertically but within their natural slot boundaries (bucketVis
+    // excludes the dragged row, so walk picks its existing neighbors and
+    // midpoint === dragged.currentSort). Nudge based on cursor direction
+    // relative to the dragged row's natural Y midpoint.
+    const dragCurrentSort = dragTaskId ? getSortOrder(dragTaskId) : NaN;
+    let collided = false;
+    if (dragTaskId && isFinite(dragCurrentSort) && targetSort === dragCurrentSort) {
+      collided = true;
+      const dragRect = dragRow ? dragRow.getBoundingClientRect() : null;
+      const dragMidY = dragRect ? dragRect.top + dragRect.height / 2 : clientY;
+      const goingUp = clientY < dragMidY;
+      // Nearest distinct sortOrder in bucketVis, relative to dragged's
+      // current value. bucketVis already excludes the dragged, so these
+      // are real neighbors.
+      let nearestAboveSort = -Infinity;
+      let nearestBelowSort = Infinity;
+      for (let i = 0; i < bucketVis.length; i++) {
+        const id = bucketVis[i].getAttribute('data-task-id');
+        if (!id) continue;
+        const s = getSortOrder(id);
+        if (s < dragCurrentSort && s > nearestAboveSort) nearestAboveSort = s;
+        if (s > dragCurrentSort && s < nearestBelowSort) nearestBelowSort = s;
+      }
+      if (goingUp) {
+        targetSort = isFinite(nearestAboveSort)
+          ? (nearestAboveSort + dragCurrentSort) / 2
+          : dragCurrentSort / 2; // top-of-bucket
+      } else {
+        targetSort = isFinite(nearestBelowSort)
+          ? (dragCurrentSort + nearestBelowSort) / 2
+          : dragCurrentSort + 1000; // bottom-of-bucket
+      }
+    }
+
     try {
       console.log('[NG dragReparent] targetSort computed',
         'clientY=', clientY,
         'aboveId=', aboveId, 'aboveSort=', sortAbove,
         'belowId=', belowId, 'belowSort=', sortBelow,
+        'dragSort=', dragCurrentSort,
+        'collided=', collided,
         '→ targetSort=', targetSort);
     } catch (_e) { /* ok */ }
 
