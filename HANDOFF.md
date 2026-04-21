@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `23ce4bb` *(0.185.28 pointerdown ctx-menu fallback)* |
-| Commit subject | `feat(0.185.28): pointerdown+button===2 ctx-menu fallback for LEX/Locker` |
+| Commit SHA (source — latest) | `e0e117d` *(0.185.29 ctx-menu diag + elementFromPoint fallback)* |
+| Commit subject | `feat(0.185.29): ctx-menu diag logs + elementFromPoint fallback` |
+| 0.185.29 ctx-menu diag + fallback | `e0e117d` |
 | 0.185.28 pointerdown ctx-menu | `23ce4bb` |
 | 0.185.27 dependencies wire-through | `26d2eae` |
 | 0.185.26 titleBarButtons slot | `534321d` |
@@ -82,12 +83,51 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **259,548 bytes** (~254 KB)
-- sha256: `ce65ef69d400f620202f06561b2982c3940d8ee59232d451ff7439cc3aabb053`
+- Size: **261,892 bytes** (~256 KB)
+- sha256: `b521f59bd05ac60dd6009bad3699d4e7817579a99215be99188365fa67c01023`
 
-**0.185.28 — pointerdown ctx-menu fallback for LEX/Locker** (source
-`23ce4bb`). DH CC, re-copy this bundle into
+**0.185.29 — ctx-menu diag + elementFromPoint fallback** (source
+`e0e117d`). DH CC, re-copy this bundle into
 `staticresources/nimbusganttapp.resource`.
+
+Glen's probe on `/c/DeliveryTimelineStandalone.app` (2026-04-21)
+proved the prior "LEX swallows contextmenu" narrative wrong — DH's
+document-level `[DH doc-pd]` / `[DH doc-cm]` probes DO fire. What
+failed in 0.185.28 was NG's `fireCtxMenu` resolver returning false
+(task not resolved), so `preventDefault` never ran and the host
+callback never fired.
+
+**Two changes in 0.185.29:**
+
+1. **Unconditional diag logs** in both listeners + resolver:
+   - `[NG ctx-pd]   x y tag`            — pointerdown button===2 fires
+   - `[NG ctx-cm]   x y tag`            — contextmenu fires
+   - `[NG ctx-resolve] target= rowId= last= resolved=`  — resolution
+   Next glen-walk session will tell us whether the listener fires at
+   all, and if so which resolution branch failed.
+
+2. **`document.elementFromPoint(clientX, clientY)` fallback** when the
+   standard lookup (grid-row `.closest` + `lastHoveredTaskId`) yields
+   null. Walks `.closest('[data-task-id]')` from whatever element is
+   at the click point. Handles canvas-bar right-clicks without a prior
+   pointermove hover (synthetic clicks, teleports, or hover races).
+
+Same changes on both mount paths (engineOnly + chrome-aware).
+
+**DH CC next step:** re-copy the bundle, redeploy, reload
+`/c/DeliveryTimelineStandalone.app` with Ctrl+Shift+R, right-click a
+canvas bar, paste the console output. Three possible outcomes:
+
+- `[NG ctx-pd]` fires + `[NG ctx-resolve] resolved=<id>` → fix landed,
+  remove diag in 0.185.30, then DH pops the menu.
+- `[NG ctx-pd]` fires + `[NG ctx-resolve] resolved= null` → elementFromPoint
+  also failed; need engine HitTest path. Ship 0.185.30 with it.
+- `[NG ctx-pd]` does NOT fire → listener isn't attached or something
+  upstream stopPropagates. Ship 0.185.30 with listener on document
+  itself (scoped to events within ganttEl bounds).
+
+Prior entry (0.185.28 `23ce4bb`) — pointerdown ctx-menu fallback for
+LEX/Locker:
 
 DH CC probe on glen-walk 2026-04-21 13:05 UTC confirmed Salesforce
 LEX/Locker suppresses the canvas `contextmenu` event before NG's
