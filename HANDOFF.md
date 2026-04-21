@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `16582e3` *(0.185.32 handle.taskAt + strip diag)* |
-| Commit subject | `feat(0.185.32): handle.taskAt(x, y) + strip 0.185.29/30/31 diag logs` |
+| Commit SHA (source — latest) | `24ba6d7` *(0.185.33 onReady + sideEffects, React-only)* |
+| Commit subject | `feat(0.185.33): onReady callback + sideEffects array for tree-shake` |
+| 0.185.33 React-only DX polish | `24ba6d7` |
 | 0.185.32 handle.taskAt | `16582e3` |
 | 0.185.31 document-level ctx-menu (superseded) | `fd7d023` |
 | 0.185.30 dragReparent collision fix | `ac76036` |
@@ -88,10 +89,45 @@ Prior entry (0.183 cut `41ec401`) added:
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
 - Size: **263,045 bytes** (~257 KB)
 - sha256: `81bf8cfe071d10718f0491a4badc2804d2cf06a00ce0de77f7bed9c2b7caafbe`
+  *(unchanged across 0.185.32 → 0.185.33 — 0.185.33 is React-ES-module-only)*
 
-**0.185.32 — handle.taskAt(x, y) + strip 0.185.29/30/31 diag logs**
-(source `16582e3`). DH CC, re-copy this bundle into
-`staticresources/nimbusganttapp.resource`.
+**0.185.33 — React adapter DX polish (React-only)** (source
+`24ba6d7`). DH CC: **no deploy needed** — IIFE bundle is bit-
+identical to 0.185.32. The release ships React-adapter
+improvements for CN/Vercel consumers only.
+
+Changes in `NimbusGanttAppReact.tsx`:
+- Added `onReady?: (handle | null) => void` prop. Fires on mount
+  with the handle, on unmount with null. Idiomatic for React 19
+  + Zustand / context-based state stores. Parallel to `handleRef`
+  (both can coexist; both fire if both provided).
+- `handleRef` unchanged — no breaking change.
+
+Changes in `packages/app/package.json`:
+- `sideEffects` array lists files with intentional side effects
+  (CSS imports, template-registration modules, IIFE entry).
+  Everything else is pure → Next.js/SWC can tree-shake unused
+  plugin exports from the ES module. Per Vercel benchmarks, this
+  + `experimental.optimizePackageImports` yields ~28% faster
+  builds on consumer sites.
+
+**DH CC — right-click (parallel dispatch by DH CC 2026-04-21):**
+DH's own research found the `oncontextmenu={handler}` template
+binding in `deliveryProFormaTimeline.html` fires correctly under
+LWS (element-level listener, not document-level — LEX suppression
+targets `document`). DH's 5-line change calls
+`this._mountHandle.taskAt(e.clientX, e.clientY)` from that
+handler. NG's 0.185.32 `handle.taskAt` contract is exactly what
+DH needs — no further NG change required for right-click UX.
+
+**0.185.34+ (deferred):** Tier 2 research ideas from 2026-04-21
+agents — `handle.version` + `handle.capabilities` feature
+detection, optional `CustomEvent`-based event bus parallel to
+callbacks. Not shipping yet; want to see how DH's right-click
+popover lands first.
+
+Prior entry (0.185.32 `16582e3`) — handle.taskAt(x, y) + strip
+0.185.29/30/31 diag logs:
 
 DH CC's 2026-04-21 14:12 UTC probe confirmed 0.185.31's in-bundle
 `document.addEventListener` never fires under LWS — DH's own
