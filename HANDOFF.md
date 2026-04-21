@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `24ba6d7` *(0.185.33 onReady + sideEffects, React-only)* |
-| Commit subject | `feat(0.185.33): onReady callback + sideEffects array for tree-shake` |
+| Commit SHA (source — latest) | `f75e643` *(0.185.34 dep type sanitization)* |
+| Commit subject | `fix(0.185.34): sanitize dependency.type before handoff to core` |
+| 0.185.34 dep type sanitization | `f75e643` |
 | 0.185.33 React-only DX polish | `24ba6d7` |
 | 0.185.32 handle.taskAt | `16582e3` |
 | 0.185.31 document-level ctx-menu (superseded) | `fd7d023` |
@@ -87,14 +88,42 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **263,045 bytes** (~257 KB)
-- sha256: `81bf8cfe071d10718f0491a4badc2804d2cf06a00ce0de77f7bed9c2b7caafbe`
-  *(unchanged across 0.185.32 → 0.185.33 — 0.185.33 is React-ES-module-only)*
+- Size: **264,391 bytes** (~258 KB)
+- sha256: `cb09aee2580e719af7a7082a73d71a3c624a55f58c82f16d9a65cce0ebe927ed`
 
-**0.185.33 — React adapter DX polish (React-only)** (source
-`24ba6d7`). DH CC: **no deploy needed** — IIFE bundle is bit-
-identical to 0.185.32. The release ships React-adapter
-improvements for CN/Vercel consumers only.
+**0.185.34 — CRITICAL mount-crash fix** (source `f75e643`). DH CC,
+re-copy this bundle into `staticresources/nimbusganttapp.resource`
+**before your next glen-walk test**. Without it, any dependency with
+a non-enum `type` value (Salesforce picklist strings like
+'Finish-Start') crashes the whole render pass.
+
+**Root cause:** core's `DependencyRenderer.getConnectionPoints`
+switch is exhaustive over `'FS' | 'SS' | 'FF' | 'SF'` with no
+default branch. Unknown `type` → undefined return →
+`Cannot destructure property 'sourceX' of ... as it is undefined`
+at render time → whole timeline fails to mount. This was the first
+real-dependency mount since 0.185.27 re-opened the pipe; the bug
+was latent until DH started passing actual deps from Apex.
+
+**Fix:** `normalizeDependencies()` at all four handoff sites
+(engineOnly + chrome-aware × initial-mount + setData). Accepts
+aliases like 'Finish-Start', 'FINISH_START', 'finish to start',
+lowercase, underscores — maps to terse NG enum. Falls back to
+'FS' for anything unrecognized. Also drops entries missing
+source or target.
+
+**Why app-layer not core:** avoids the two-static-resource
+redeploy (DH would need `nimbusgantt.resource` too if core changed).
+Also correct architectural split per recent Agent 1 research:
+host-facing boundary normalizes, internal core stays strict.
+Follow-up: add defensive default in core's `getConnectionPoints`
+too, next core rebuild cycle.
+
+**Stacks with 0.185.33's React improvements** — one bundle covers
+both.
+
+Prior entry (0.185.33 `24ba6d7`) — React adapter DX polish
+(React-only, bit-identical IIFE):
 
 Changes in `NimbusGanttAppReact.tsx`:
 - Added `onReady?: (handle | null) => void` prop. Fires on mount
