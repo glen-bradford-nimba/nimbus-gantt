@@ -16,7 +16,7 @@
  */
 import type {
   NormalizedTask, AppInstance, MountOptions, TaskPatch, NimbusGanttEngine,
-  PendingEdit, CommitEditsResult,
+  PendingEdit, CommitEditsResult, GanttDependency,
 } from './types';
 import type {
   TemplateOverrides, TemplateConfig, AppState, AppEvent, SlotProps, SlotData, PatchLogEntry,
@@ -676,6 +676,9 @@ export class IIFEApp {
 
       injectLegacyNgCss();
       let allTasks: NormalizedTask[] = options.tasks || [];
+      // 0.185.27 — dependencies re-exposed. Default [] keeps legacy
+      // behavior (no arrows) when host doesn't pass the option.
+      let allDependencies: GanttDependency[] = options.dependencies || [];
       const state: AppState = { ...INITIAL_STATE };
       const depthMap = buildDepthMap(allTasks);
       const filtered = applyFilter(allTasks, state.filter as 'active', state.search);
@@ -692,7 +695,7 @@ export class IIFEApp {
       };
 
       const inst = new eng.NimbusGantt(ganttEl, {
-        tasks: gtasks, dependencies: [], columns: buildGanttCols(tplConfig.features), theme: V3_THEME,
+        tasks: gtasks, dependencies: allDependencies, columns: buildGanttCols(tplConfig.features), theme: V3_THEME,
         rowHeight: 32, barHeight: 20, headerHeight: 32, gridWidth: 295,
         zoomLevel: state.zoom, showToday: true, showWeekends: true, showProgress: true,
         colorMap: options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
@@ -782,7 +785,7 @@ export class IIFEApp {
           getBucket: (task: { groupId?: string | null }) => task.groupId || null,
         }));
       }
-      inst.setData(gtasks, []);
+      inst.setData(gtasks, allDependencies);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
       // Initial viewport positioning. 0.185.1 priority order matches the
       // chrome-aware path: scrollLeft (px) > initialFocusDate (semantic) >
@@ -832,12 +835,22 @@ export class IIFEApp {
           ? buildTasks(buildTasksEpic(f))
           : buildTasks(f);
         const gi = inst as any;
-        if (typeof gi.setData === 'function') { gi.setData(g, []); try { gi.expandAll(); } catch (_e) { /* ok */ } }
+        if (typeof gi.setData === 'function') { gi.setData(g, allDependencies); try { gi.expandAll(); } catch (_e) { /* ok */ } }
       }
 
       return {
         setTasks(tasks: NormalizedTask[]) {
           allTasks = tasks;
+          _syncToCanvas();
+        },
+        /** 0.185.27 — full replace of tasks AND dependencies. Pass the
+         *  new deps array when the host has a fresh set (e.g. after Apex
+         *  refresh pulls both timeline data and getGanttDependencies in
+         *  parallel). Passing `undefined` leaves the existing deps alone
+         *  — equivalent to `setTasks(tasks)`. */
+        setData(tasks: NormalizedTask[], dependencies?: GanttDependency[]) {
+          allTasks = tasks;
+          if (dependencies !== undefined) allDependencies = dependencies;
           _syncToCanvas();
         },
         /** Called by NimbusGanttAppReact when the React filter/search state changes. */
@@ -894,6 +907,8 @@ export class IIFEApp {
       state = { ...state, zoom: options.initialViewport.zoom as AppState['zoom'] };
     }
     let allTasks: NormalizedTask[] = options.tasks || [];
+    // 0.185.27 — dependencies re-exposed on chrome-aware mount path too.
+    let allDependencies: GanttDependency[] = options.dependencies || [];
     const patchLog: PatchLogEntry[] = [];
 
     /* IM-7 (0.183) — Viewport emission helpers.
@@ -1795,7 +1810,7 @@ export class IIFEApp {
       let lastHoveredTaskId: string | null = null;
 
       ganttInst = new Ctor(ganttEl, {
-        tasks: gtasks, dependencies: [], columns: buildGanttCols(tplConfig.features), theme: V3_THEME,
+        tasks: gtasks, dependencies: allDependencies, columns: buildGanttCols(tplConfig.features), theme: V3_THEME,
         rowHeight: 32, barHeight: 20, headerHeight: 32, gridWidth: 295,
         zoomLevel: state.zoom, showToday: true, showWeekends: true, showProgress: true,
         colorMap: options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
@@ -2028,7 +2043,7 @@ export class IIFEApp {
         }));
       }
 
-      ganttInst.setData(gtasks, []);
+      ganttInst.setData(gtasks, allDependencies);
       try { ganttInst.expandAll(); } catch (_e) { /* ok */ void 0; }
 
       // Initial viewport positioning.
@@ -2127,7 +2142,7 @@ export class IIFEApp {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const gi = ganttInst as any;
         if (typeof gi.setData === 'function') {
-          gi.setData(gtasks, []);
+          gi.setData(gtasks, allDependencies);
           try { gi.expandAll(); } catch (_e) { /* ok */ void 0; }
         }
       } else {
@@ -2315,6 +2330,23 @@ export class IIFEApp {
         // Legacy rebuildView() path still runs when flag is off, or when the
         // engine isn't alive, or view mode isn't 'gantt' (non-gantt views
         // currently require rebuild).
+        const live = tplConfig.features.liveDataUpdate !== false;
+        if (live && ganttInst && state.viewMode === 'gantt') {
+          refreshGantt();
+        } else {
+          rebuildView();
+        }
+      },
+      /** 0.185.27 — full replace of tasks AND dependencies. Pass the
+       *  new deps array when the host has a fresh set (e.g. after Apex
+       *  refresh pulls both `getProFormaTimelineData` + `getGanttDependencies`
+       *  in parallel). Passing `undefined` leaves the existing deps alone —
+       *  equivalent to calling `setTasks(tasks)` alone. Routes through the
+       *  same liveDataUpdate-gated refresh path as setTasks. */
+      setData(tasks: NormalizedTask[], dependencies?: GanttDependency[]) {
+        allTasks = tasks;
+        if (dependencies !== undefined) allDependencies = dependencies;
+        depthMap = buildDepthMap(allTasks);
         const live = tplConfig.features.liveDataUpdate !== false;
         if (live && ganttInst && state.viewMode === 'gantt') {
           refreshGantt();

@@ -85,6 +85,27 @@ export interface ScreenPos {
 }
 
 /**
+ * 0.185.27 — dependency edge between two tasks. Mirrors core's
+ * GanttDependency shape exactly; duplicated here so the app layer
+ * stays free of core imports (core is window.NimbusGantt at IIFE
+ * runtime, not a bundler-resolved package).
+ *
+ * `source` is the predecessor (blocking) task; `target` is the
+ * successor (blocked) task. `type` defaults to 'FS' (finish-to-start);
+ * `lag` is days offset — positive delays, negative leads.
+ *
+ * DH Apex DTO field name is `dependencyType`, not `type`. Host adapters
+ * must map before passing (see dispatch-dh-dependencies-wire.md).
+ */
+export interface GanttDependency {
+  id: string;
+  source: string;
+  target: string;
+  type?: 'FS' | 'FF' | 'SS' | 'SF';
+  lag?: number;
+}
+
+/**
  * 0.185.26 — host-supplied button rendered in the TitleBar's right cluster,
  * immediately before the Full Screen button. Lets hosts (e.g. DH) surface
  * chrome-level affordances (show-header toggle, etc.) without NG owning the
@@ -154,6 +175,13 @@ export type AppMode = 'embedded' | 'fullscreen';
 
 export interface MountOptions {
   tasks: NormalizedTask[];
+  /** 0.185.27 — initial dependency edges rendered as arrows between bars.
+   *  The app layer previously stubbed dependencies:[] at both engine-init
+   *  sites; this re-exposes the pipe so hosts (DH via
+   *  `getGanttDependencies` Apex) can pass them through. Runtime updates
+   *  via `handle.setData(tasks, dependencies)`. Omit or pass [] for no
+   *  dependency rendering (legacy behavior). */
+  dependencies?: GanttDependency[];
   onPatch: (patch: TaskPatch) => Promise<void> | void;
   config?: Partial<AppConfig>;
   /** Pre-resolved engine — bypasses window.NimbusGantt lookup when provided. */
@@ -417,6 +445,12 @@ export interface CommitEditsFailure {
 
 export interface AppInstance {
   setTasks(tasks: NormalizedTask[]): void;
+  /** 0.185.27 — full replace of tasks AND dependencies. Use this when the
+   *  host has a fresh dependencies array (e.g. after Apex refresh pulls
+   *  both `getProFormaTimelineData` + `getGanttDependencies` in parallel).
+   *  Passing `undefined` for dependencies leaves the existing set alone —
+   *  equivalent to calling setTasks(tasks) alone. */
+  setData?(tasks: NormalizedTask[], dependencies?: GanttDependency[]): void;
   destroy(): void;
   /** Optional bridge methods exposed by the engineOnly IIFE mount so the
    *  React driver can forward slot state changes (filter/search, zoom,
