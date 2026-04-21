@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `e0e117d` *(0.185.29 ctx-menu diag + elementFromPoint fallback)* |
-| Commit subject | `feat(0.185.29): ctx-menu diag logs + elementFromPoint fallback` |
+| Commit SHA (source — latest) | `ac76036` *(0.185.30 dragReparent collision-with-self fix)* |
+| Commit subject | `feat(0.185.30): dragReparent collision-with-self fix for bucket-edge drops` |
+| 0.185.30 dragReparent collision fix | `ac76036` |
 | 0.185.29 ctx-menu diag + fallback | `e0e117d` |
 | 0.185.28 pointerdown ctx-menu | `23ce4bb` |
 | 0.185.27 dependencies wire-through | `26d2eae` |
@@ -83,12 +84,46 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **261,892 bytes** (~256 KB)
-- sha256: `b521f59bd05ac60dd6009bad3699d4e7817579a99215be99188365fa67c01023`
+- Size: **263,295 bytes** (~258 KB)
+- sha256: `603c0db0039920c9618ee8e537b779abe5658e72750c16df05c582d0311a63bc`
 
-**0.185.29 — ctx-menu diag + elementFromPoint fallback** (source
-`e0e117d`). DH CC, re-copy this bundle into
-`staticresources/nimbusganttapp.resource`.
+**0.185.30 — dragReparent collision-with-self fix** (source `ac76036`).
+DH CC, re-copy this bundle into `staticresources/nimbusganttapp.resource`.
+
+Glen's glen-walk session 2026-04-21: T-0114 couldn't move within its
+own top-priority bucket. Log trail:
+```
+aboveId=T-0135 aboveSort=13750.25
+belowId=T-0148 belowSort=25687.5625
+→ targetSort=19718.90625   ← T-0114's own current sortOrder
+```
+Every drop in T-0114's natural Y slot computed T-0114's own sortOrder,
+so the Apex write was a no-op. DH CC's "top-of-bucket clamp" framing
+was close but the underlying shape is broader: *anywhere in the
+dragged task's natural slot* computes to in-place.
+
+**Fix:** `bucketVis` excludes the dragged task (already implicit via
+`vis` filter; now explicit too, defense-in-depth). After midpoint math,
+if `targetSort === dragCurrentSort`, nudge based on cursor direction
+vs `dragRow.midY`:
+- cursor above dragRow's midY → user wants UP → midpoint of
+  nearestAboveSort + dragCurrentSort; or `dragCurrentSort / 2` when no
+  upstairs neighbor (top-of-bucket)
+- cursor below dragRow's midY → user wants DOWN → midpoint of
+  dragCurrentSort + nearestBelowSort; or `dragCurrentSort + 1000` when
+  no downstairs neighbor (bottom-of-bucket)
+
+Diag log now includes `dragSort=` and `collided=` fields so glen-walk
+sessions show exactly when the nudge branch fires. Previous "won't
+move" traces will now read `collided=true → targetSort=<nudged>`.
+
+**Stacks with 0.185.29.** DH CC — the right-click diag logs from
+0.185.29 (`[NG ctx-pd]` / `[NG ctx-cm]` / `[NG ctx-resolve]`) are
+still present in 0.185.30. Re-deploy both together; one bundle
+covers both fixes.
+
+Prior entry (0.185.29 `e0e117d`) — ctx-menu diag + elementFromPoint
+fallback:
 
 Glen's probe on `/c/DeliveryTimelineStandalone.app` (2026-04-21)
 proved the prior "LEX swallows contextmenu" narrative wrong — DH's
