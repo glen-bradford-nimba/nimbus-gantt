@@ -810,10 +810,37 @@ export class IIFEApp {
         try { console.log('[NG ctx-pd]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireContextMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
+      // 0.185.31 — document-level listeners for LWS/Locker. The shadow-DOM
+      // boundary retargets events before bubbling reaches our ganttEl
+      // listeners — DH CC's probe confirmed [DH doc-pd] / [DH doc-cm] fire
+      // at document but NG's ganttEl-scoped handlers never see them.
+      // Attach the same resolvers on document, filter by coordinate-inside
+      // ganttEl.getBoundingClientRect() so we only act on events over our
+      // surface. Uses `null` as target (e.target is the retargeted shadow
+      // host) to force fireContextMenu down the lastHoveredTaskId +
+      // elementFromPoint fallback path. ganttEl-scoped listeners above
+      // stay in place for non-LWS environments.
+      const isInsideGantt = (x: number, y: number): boolean => {
+        const r = ganttEl.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      };
+      const handleDocContextMenu = (e: MouseEvent) => {
+        if (!isInsideGantt(e.clientX, e.clientY)) return;
+        try { console.log('[NG ctx-cm-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
+        if (fireContextMenu(e.clientX, e.clientY, null)) e.preventDefault();
+      };
+      const handleDocPointerDown = (e: PointerEvent) => {
+        if (e.button !== 2) return;
+        if (!isInsideGantt(e.clientX, e.clientY)) return;
+        try { console.log('[NG ctx-pd-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
+        if (fireContextMenu(e.clientX, e.clientY, null)) e.preventDefault();
+      };
       ganttEl.addEventListener('mouseover', handleMouseOver);
       ganttEl.addEventListener('mouseleave', handleMouseLeave);
       ganttEl.addEventListener('contextmenu', handleContextMenu);
       ganttEl.addEventListener('pointerdown', handlePointerDown);
+      document.addEventListener('contextmenu', handleDocContextMenu, true);
+      document.addEventListener('pointerdown', handleDocPointerDown, true);
       if (typeof tplConfig.engine?.PriorityGroupingPlugin === 'function') {
         inst.use(tplConfig.engine.PriorityGroupingPlugin({
           buckets: tplConfig.buckets,
@@ -859,6 +886,8 @@ export class IIFEApp {
         ganttEl.removeEventListener('mouseleave', handleMouseLeave);
         ganttEl.removeEventListener('contextmenu', handleContextMenu);
         ganttEl.removeEventListener('pointerdown', handlePointerDown);
+        document.removeEventListener('contextmenu', handleDocContextMenu, true);
+        document.removeEventListener('pointerdown', handleDocPointerDown, true);
         try { inst.destroy(); } catch (_e) { /* ok */ }
         container.innerHTML = '';
       };
@@ -2072,10 +2101,29 @@ export class IIFEApp {
         try { console.log('[NG ctx-pd]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireCtxMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
+      // 0.185.31 — document-level sibling for LWS/Locker (see engineOnly
+      // path for the full rationale). Filters by coordinate-in-ganttEl-rect.
+      const isInsideGantt = (x: number, y: number): boolean => {
+        const r = ganttEl.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      };
+      const onDocContextMenu = (e: MouseEvent) => {
+        if (!isInsideGantt(e.clientX, e.clientY)) return;
+        try { console.log('[NG ctx-cm-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
+        if (fireCtxMenu(e.clientX, e.clientY, null)) e.preventDefault();
+      };
+      const onDocPointerDown = (e: PointerEvent) => {
+        if (e.button !== 2) return;
+        if (!isInsideGantt(e.clientX, e.clientY)) return;
+        try { console.log('[NG ctx-pd-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
+        if (fireCtxMenu(e.clientX, e.clientY, null)) e.preventDefault();
+      };
       ganttEl.addEventListener('mouseover', onMouseOver);
       ganttEl.addEventListener('mouseleave', onMouseLeave);
       ganttEl.addEventListener('contextmenu', onContextMenu);
       ganttEl.addEventListener('pointerdown', onPointerDown);
+      document.addEventListener('contextmenu', onDocContextMenu, true);
+      document.addEventListener('pointerdown', onDocPointerDown, true);
       // Attach cleanup — reuse cleanupDrag slot indirectly by stacking:
       const prevCleanupDrag = cleanupDrag;
       cleanupDrag = () => {
@@ -2083,6 +2131,8 @@ export class IIFEApp {
         ganttEl.removeEventListener('mouseleave', onMouseLeave);
         ganttEl.removeEventListener('contextmenu', onContextMenu);
         ganttEl.removeEventListener('pointerdown', onPointerDown);
+        document.removeEventListener('contextmenu', onDocContextMenu, true);
+        document.removeEventListener('pointerdown', onDocPointerDown, true);
         if (prevCleanupDrag) prevCleanupDrag();
       };
 
