@@ -772,75 +772,42 @@ export class IIFEApp {
       // fires inside LEX, so we listen for both and short-circuit to the
       // same callback. preventDefault on contextmenu belt-and-suspenders
       // suppresses the browser default menu on platforms where it leaks.
-      // Returns true if a callback fired (caller uses this to decide
-       // whether to preventDefault — we don't suppress the browser menu
-       // unless a host actually consumed the event).
-      const fireContextMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
-        if (!options.onTaskContextMenu) {
-          try { console.log('[NG ctx-resolve] no onTaskContextMenu wired'); } catch (_e) { /* ok */ }
-          return false;
-        }
+      // 0.185.32 — coordinate-based task resolver, exposed on the mount
+       // handle as `taskAt(x, y)`. Reused by both the internal event
+       // listeners (non-LWS hosts) and the public handle method (LWS
+       // hosts whose IIFE `document` reference is sandboxed — they catch
+       // contextmenu from their own LWC class and call taskAt).
+      const resolveTaskAt = (clientX: number, clientY: number, target: EventTarget | null): NormalizedTask | null => {
         const el = target as HTMLElement | null;
         const row = el?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
         const rowId = row?.getAttribute('data-task-id') ?? null;
         let taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
-        // 0.185.29 — elementFromPoint fallback for canvas-bar right-clicks.
-        // lastHoveredTaskId is populated by the engine's onHover callback on
-        // pointermove, but right-clicks without a prior move (synthetic,
-        // teleport, or race) leave it null. Walk from the exact point in the
-        // document to find any element carrying data-task-id.
         if (!taskId) {
           const hit = document.elementFromPoint?.(clientX, clientY) as HTMLElement | null;
           const hitRow = hit?.closest?.('[data-task-id]') as HTMLElement | null;
           const hitId = hitRow?.getAttribute('data-task-id');
           if (hitId && !isBucketId(hitId)) taskId = hitId;
         }
-        try { console.log('[NG ctx-resolve]', 'target=', el?.tagName, 'rowId=', rowId, 'last=', lastHoveredTaskId, 'resolved=', taskId); } catch (_e) { /* ok */ }
-        const t = findTaskById(taskId);
+        return findTaskById(taskId);
+      };
+      const fireContextMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
+        if (!options.onTaskContextMenu) return false;
+        const t = resolveTaskAt(clientX, clientY, target);
         if (!t) return false;
         options.onTaskContextMenu(t, { x: clientX, y: clientY });
         return true;
       };
       const handleContextMenu = (e: MouseEvent) => {
-        try { console.log('[NG ctx-cm]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireContextMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       const handlePointerDown = (e: PointerEvent) => {
         if (e.button !== 2) return;
-        try { console.log('[NG ctx-pd]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireContextMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
-      };
-      // 0.185.31 — document-level listeners for LWS/Locker. The shadow-DOM
-      // boundary retargets events before bubbling reaches our ganttEl
-      // listeners — DH CC's probe confirmed [DH doc-pd] / [DH doc-cm] fire
-      // at document but NG's ganttEl-scoped handlers never see them.
-      // Attach the same resolvers on document, filter by coordinate-inside
-      // ganttEl.getBoundingClientRect() so we only act on events over our
-      // surface. Uses `null` as target (e.target is the retargeted shadow
-      // host) to force fireContextMenu down the lastHoveredTaskId +
-      // elementFromPoint fallback path. ganttEl-scoped listeners above
-      // stay in place for non-LWS environments.
-      const isInsideGantt = (x: number, y: number): boolean => {
-        const r = ganttEl.getBoundingClientRect();
-        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-      };
-      const handleDocContextMenu = (e: MouseEvent) => {
-        if (!isInsideGantt(e.clientX, e.clientY)) return;
-        try { console.log('[NG ctx-cm-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
-        if (fireContextMenu(e.clientX, e.clientY, null)) e.preventDefault();
-      };
-      const handleDocPointerDown = (e: PointerEvent) => {
-        if (e.button !== 2) return;
-        if (!isInsideGantt(e.clientX, e.clientY)) return;
-        try { console.log('[NG ctx-pd-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
-        if (fireContextMenu(e.clientX, e.clientY, null)) e.preventDefault();
       };
       ganttEl.addEventListener('mouseover', handleMouseOver);
       ganttEl.addEventListener('mouseleave', handleMouseLeave);
       ganttEl.addEventListener('contextmenu', handleContextMenu);
       ganttEl.addEventListener('pointerdown', handlePointerDown);
-      document.addEventListener('contextmenu', handleDocContextMenu, true);
-      document.addEventListener('pointerdown', handleDocPointerDown, true);
       if (typeof tplConfig.engine?.PriorityGroupingPlugin === 'function') {
         inst.use(tplConfig.engine.PriorityGroupingPlugin({
           buckets: tplConfig.buckets,
@@ -886,8 +853,6 @@ export class IIFEApp {
         ganttEl.removeEventListener('mouseleave', handleMouseLeave);
         ganttEl.removeEventListener('contextmenu', handleContextMenu);
         ganttEl.removeEventListener('pointerdown', handlePointerDown);
-        document.removeEventListener('contextmenu', handleDocContextMenu, true);
-        document.removeEventListener('pointerdown', handleDocPointerDown, true);
         try { inst.destroy(); } catch (_e) { /* ok */ }
         container.innerHTML = '';
       };
@@ -917,6 +882,13 @@ export class IIFEApp {
           allTasks = tasks;
           if (dependencies !== undefined) allDependencies = dependencies;
           _syncToCanvas();
+        },
+        /** 0.185.32 — coordinate-based hit-test for host-driven right-click
+         *  UX in LWS/Locker contexts where NG's internal document listeners
+         *  silently no-op. Host attaches its own document listener, calls
+         *  taskAt(e.clientX, e.clientY) to resolve the task under the cursor. */
+        taskAt(clientX: number, clientY: number): NormalizedTask | null {
+          return resolveTaskAt(clientX, clientY, null);
         },
         /** Called by NimbusGanttAppReact when the React filter/search state changes. */
         setFilter(filter: string, search: string) {
@@ -1836,6 +1808,10 @@ export class IIFEApp {
     let cleanupShading: (() => void) | null = null;
     let cleanupDrag:    (() => void) | null = null;
     let depthMap = buildDepthMap(allTasks);
+    // 0.185.32 — coordinate-based hit-test, populated by initGantt and
+    // called from the public handle's taskAt(). Null when the engine
+    // hasn't mounted yet (e.g., taskAt called before mount settles).
+    let chromeTaskAt: ((x: number, y: number) => NormalizedTask | null) | null = null;
 
     function resolveEngine(): NimbusGanttEngine | null {
       if (options.engine) return options.engine;
@@ -2070,60 +2046,41 @@ export class IIFEApp {
       // 0.185.28 — shared resolver + pointerdown fallback (LEX/Locker
       // suppresses canvas contextmenu; pointerdown survives). See the
       // engineOnly sibling listener for the full rationale.
-      const fireCtxMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
-        if (!options.onTaskContextMenu) {
-          try { console.log('[NG ctx-resolve] no onTaskContextMenu wired'); } catch (_e) { /* ok */ }
-          return false;
-        }
+      // 0.185.32 — chrome-aware resolver. Shape mirrors engineOnly sibling.
+      const resolveTaskAtChrome = (clientX: number, clientY: number, target: EventTarget | null): NormalizedTask | null => {
         const el = target as HTMLElement | null;
         const row = el?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
         const rowId = row?.getAttribute('data-task-id') ?? null;
         let taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
-        // 0.185.29 — elementFromPoint fallback (see engineOnly sibling).
         if (!taskId) {
           const hit = document.elementFromPoint?.(clientX, clientY) as HTMLElement | null;
           const hitRow = hit?.closest?.('[data-task-id]') as HTMLElement | null;
           const hitId = hitRow?.getAttribute('data-task-id');
           if (hitId && !isBucketId(hitId)) taskId = hitId;
         }
-        try { console.log('[NG ctx-resolve]', 'target=', el?.tagName, 'rowId=', rowId, 'last=', lastHoveredTaskId, 'resolved=', taskId); } catch (_e) { /* ok */ }
-        const t = findTaskById(taskId);
+        return findTaskById(taskId);
+      };
+      // Expose on the app handle via closure — the return block below reads
+      // `chromeTaskAt` rather than recomputing the resolver there.
+      chromeTaskAt = (x: number, y: number) => resolveTaskAtChrome(x, y, null);
+      const fireCtxMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
+        if (!options.onTaskContextMenu) return false;
+        const t = resolveTaskAtChrome(clientX, clientY, target);
         if (!t) return false;
         options.onTaskContextMenu(t, { x: clientX, y: clientY });
         return true;
       };
       const onContextMenu = (e: MouseEvent) => {
-        try { console.log('[NG ctx-cm]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireCtxMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       const onPointerDown = (e: PointerEvent) => {
         if (e.button !== 2) return;
-        try { console.log('[NG ctx-pd]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireCtxMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
-      };
-      // 0.185.31 — document-level sibling for LWS/Locker (see engineOnly
-      // path for the full rationale). Filters by coordinate-in-ganttEl-rect.
-      const isInsideGantt = (x: number, y: number): boolean => {
-        const r = ganttEl.getBoundingClientRect();
-        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-      };
-      const onDocContextMenu = (e: MouseEvent) => {
-        if (!isInsideGantt(e.clientX, e.clientY)) return;
-        try { console.log('[NG ctx-cm-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
-        if (fireCtxMenu(e.clientX, e.clientY, null)) e.preventDefault();
-      };
-      const onDocPointerDown = (e: PointerEvent) => {
-        if (e.button !== 2) return;
-        if (!isInsideGantt(e.clientX, e.clientY)) return;
-        try { console.log('[NG ctx-pd-doc]', e.clientX, e.clientY); } catch (_e) { /* ok */ }
-        if (fireCtxMenu(e.clientX, e.clientY, null)) e.preventDefault();
       };
       ganttEl.addEventListener('mouseover', onMouseOver);
       ganttEl.addEventListener('mouseleave', onMouseLeave);
       ganttEl.addEventListener('contextmenu', onContextMenu);
       ganttEl.addEventListener('pointerdown', onPointerDown);
-      document.addEventListener('contextmenu', onDocContextMenu, true);
-      document.addEventListener('pointerdown', onDocPointerDown, true);
       // Attach cleanup — reuse cleanupDrag slot indirectly by stacking:
       const prevCleanupDrag = cleanupDrag;
       cleanupDrag = () => {
@@ -2131,8 +2088,6 @@ export class IIFEApp {
         ganttEl.removeEventListener('mouseleave', onMouseLeave);
         ganttEl.removeEventListener('contextmenu', onContextMenu);
         ganttEl.removeEventListener('pointerdown', onPointerDown);
-        document.removeEventListener('contextmenu', onDocContextMenu, true);
-        document.removeEventListener('pointerdown', onDocPointerDown, true);
         if (prevCleanupDrag) prevCleanupDrag();
       };
 
@@ -2464,6 +2419,13 @@ export class IIFEApp {
         } else {
           rebuildView();
         }
+      },
+      /** 0.185.32 — coordinate-based hit-test for host-driven right-click
+       *  UX in LWS/Locker contexts where NG's internal document listeners
+       *  silently no-op. Host attaches its own document listener, calls
+       *  taskAt(e.clientX, e.clientY) to resolve the task under the cursor. */
+      taskAt(clientX: number, clientY: number): NormalizedTask | null {
+        return chromeTaskAt ? chromeTaskAt(clientX, clientY) : null;
       },
       /** CH-1 (0.183) — toggle chrome visibility at runtime. With no arg,
        *  flips current state; boolean arg sets explicitly. Embedded-mode

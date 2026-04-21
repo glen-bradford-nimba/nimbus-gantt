@@ -489,6 +489,25 @@ export interface AppInstance {
    *  No-op on engineOnly mounts. */
   setTitleBarButtons?(buttons: TitleBarButton[]): void;
 
+  /** 0.185.32 — coordinate-based hit-test. Returns the task at page-
+   *  relative (clientX, clientY), or null if the point isn't over a bar
+   *  or grid row.
+   *
+   *  Motivation: Salesforce Locker/LWS sandboxes the IIFE's `document`
+   *  reference, so listeners attached from inside NG silently no-op
+   *  (0.185.29/30/31 pointerdown + contextmenu probes never fired).
+   *  Hosts wanting a right-click popover attach their own document-
+   *  level listener (which DOES fire under LWS when attached from the
+   *  LWC class), then call `handle.taskAt(e.clientX, e.clientY)` to
+   *  resolve which task — NG does the hit-test; host does the event
+   *  wiring.
+   *
+   *  Resolution strategy (same as the legacy onTaskContextMenu path):
+   *    1. `elementFromPoint(x, y)` + `.closest('[data-task-id]')`
+   *    2. Fallback to the internally-tracked lastHoveredTaskId when
+   *       the element lookup fails (e.g., retargeted shadow host). */
+  taskAt?(clientX: number, clientY: number): NormalizedTask | null;
+
   /** 0.185.1 — scroll the gantt so `date` lands at the LEFT edge of the
    *  viewport. Host doesn't need to know `pxPerDay` for the current zoom —
    *  the library uses its own `timeScale.dateToX` to compute the offset.
