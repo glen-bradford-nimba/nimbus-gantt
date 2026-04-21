@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `f75e643` *(0.185.34 dep type sanitization)* |
-| Commit subject | `fix(0.185.34): sanitize dependency.type before handoff to core` |
+| Commit SHA (source — latest) | `d2ac51a` *(0.185.35 positional reorder payload)* |
+| Commit subject | `feat(0.185.35): positional reorder payload for server-side dense numbering` |
+| 0.185.35 positional reorder | `d2ac51a` |
 | 0.185.34 dep type sanitization | `f75e643` |
 | 0.185.33 React-only DX polish | `24ba6d7` |
 | 0.185.32 handle.taskAt | `16582e3` |
@@ -88,14 +89,86 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **264,391 bytes** (~258 KB)
-- sha256: `cb09aee2580e719af7a7082a73d71a3c624a55f58c82f16d9a65cce0ebe927ed`
+- Size: **266,494 bytes** (~260 KB)
+- sha256: `5e110c18aa600ae20f2e7fe95020f55ca5dc6a3341af6dfc4efc76507331e666`
 
-**0.185.34 — CRITICAL mount-crash fix** (source `f75e643`). DH CC,
+**0.185.35 — positional reorder payload** (source `d2ac51a`). DH CC,
 re-copy this bundle into `staticresources/nimbusganttapp.resource`
-**before your next glen-walk test**. Without it, any dependency with
-a non-enum `type` value (Salesforce picklist strings like
-'Finish-Start') crashes the whole render pass.
+when you're ready to adopt the dense-numbering story.
+
+**Motivation:** Glen observed 2026-04-21 that MF-Prod sortOrder
+shows accumulating negatives (`-481`, `-482`, `-1964`) from the
+fractional-midpoint math. Cosmetic, but confusing. The numeric
+`newIndex` contract doesn't give hosts enough info to do dense
+1..N numbering without reverse-engineering position from the
+value.
+
+**What ships (additive — zero breaking change):**
+
+`onItemReorder` payload gains three optional fields alongside
+the existing `newIndex`:
+
+```ts
+payload: {
+  newIndex: number;                       // existing — fractional
+  newParentId?: string | null;
+  newPriorityGroup?: string;
+  position?: 'above-all' | 'below-all' | 'between';  // NEW
+  beforeTaskId?: string | null;           // NEW
+  afterTaskId?: string | null;            // NEW
+}
+```
+
+Semantics:
+- `position: 'above-all'` — dropped above topmost-in-bucket.
+  `afterTaskId: null`, `beforeTaskId: <topmost id>`.
+- `position: 'below-all'` — dropped below bottommost-in-bucket.
+  `beforeTaskId: null`, `afterTaskId: <bottommost id>`.
+- `position: 'between'` — dropped between two tasks. Both IDs set.
+
+**DH CC — dense-renumber integration pattern:**
+
+```js
+onItemReorder: async (taskId, p) => {
+  if (p.position) {
+    // NEW: dense-renumber path
+    await renumberBucketWithInsert({
+      taskId,
+      position: p.position,
+      beforeTaskId: p.beforeTaskId,
+      afterTaskId: p.afterTaskId,
+      newParentId: p.newParentId,
+      newPriorityGroup: p.newPriorityGroup,
+    });
+    // Apex side: load bucket ordered by sortOrder, splice dragged
+    // at the correct index (before beforeTaskId OR after afterTaskId),
+    // write sortOrder = 1..N contiguously, single DML, single cascade.
+  } else {
+    // Legacy: numeric path (older bundles that didn't ship positional)
+    await updateWorkItemSortOrder({ taskId, sortOrder: p.newIndex, ... });
+  }
+}
+```
+
+Guard the `if (p.position)` — it's always set by 0.185.35+, absent
+from 0.185.34 and earlier. Lets you deploy the DH wiring before
+deploying the NG bundle or vice versa without crashes.
+
+**CN CC — zero required change.** v12's existing `onItemReorder`
+handler reads `newIndex` and ignores the new fields. Works fine.
+Adopt positional only if CN ever wants dense numbering for demos.
+
+**Backward-compat test matrix (verified):**
+- Host reads only `newIndex` → works as before, ignores new fields
+- Host reads `position` but it's undefined (pre-0.185.35 bundle) →
+  guard falls to legacy path
+- Host reads `position` from 0.185.35+ bundle → resolves server-side
+
+**Files touched:** types.ts, dragReparent.ts (InsertionPoint +
+3 return sites + onMouseUp dispatch), IIFEApp.ts (2 interceptor
+sites + batch-buffer delta + commitEdits flush).
+
+Prior entry (0.185.34 `f75e643`) — CRITICAL mount-crash fix:
 
 **Root cause:** core's `DependencyRenderer.getConnectionPoints`
 switch is exhaustive over `'FS' | 'SS' | 'FF' | 'SF'` with no
