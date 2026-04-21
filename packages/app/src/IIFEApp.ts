@@ -765,20 +765,38 @@ export class IIFEApp {
           options.onTaskHover?.(null);
         }
       };
-      const handleContextMenu = (e: MouseEvent) => {
-        if (!options.onTaskContextMenu) return;
-        const target = e.target as HTMLElement | null;
-        const row = target?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
+      // 0.185.28 — shared resolver for contextmenu + pointerdown(button===2).
+      // Salesforce LEX/Locker suppresses the canvas `contextmenu` event
+      // before this listener can see it (probe failed in glen-walk
+      // 2026-04-21 13:05 UTC). `pointerdown` with `button === 2` still
+      // fires inside LEX, so we listen for both and short-circuit to the
+      // same callback. preventDefault on contextmenu belt-and-suspenders
+      // suppresses the browser default menu on platforms where it leaks.
+      // Returns true if a callback fired (caller uses this to decide
+       // whether to preventDefault — we don't suppress the browser menu
+       // unless a host actually consumed the event).
+      const fireContextMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
+        if (!options.onTaskContextMenu) return false;
+        const el = target as HTMLElement | null;
+        const row = el?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
         const rowId = row?.getAttribute('data-task-id') ?? null;
         const taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
         const t = findTaskById(taskId);
-        if (!t) return;
-        e.preventDefault();
-        options.onTaskContextMenu(t, { x: e.clientX, y: e.clientY });
+        if (!t) return false;
+        options.onTaskContextMenu(t, { x: clientX, y: clientY });
+        return true;
+      };
+      const handleContextMenu = (e: MouseEvent) => {
+        if (fireContextMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
+      };
+      const handlePointerDown = (e: PointerEvent) => {
+        if (e.button !== 2) return;
+        if (fireContextMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       ganttEl.addEventListener('mouseover', handleMouseOver);
       ganttEl.addEventListener('mouseleave', handleMouseLeave);
       ganttEl.addEventListener('contextmenu', handleContextMenu);
+      ganttEl.addEventListener('pointerdown', handlePointerDown);
       if (typeof tplConfig.engine?.PriorityGroupingPlugin === 'function') {
         inst.use(tplConfig.engine.PriorityGroupingPlugin({
           buckets: tplConfig.buckets,
@@ -823,6 +841,7 @@ export class IIFEApp {
         ganttEl.removeEventListener('mouseover', handleMouseOver);
         ganttEl.removeEventListener('mouseleave', handleMouseLeave);
         ganttEl.removeEventListener('contextmenu', handleContextMenu);
+        ganttEl.removeEventListener('pointerdown', handlePointerDown);
         try { inst.destroy(); } catch (_e) { /* ok */ }
         container.innerHTML = '';
       };
@@ -2002,26 +2021,38 @@ export class IIFEApp {
           options.onTaskHover?.(null);
         }
       };
-      const onContextMenu = (e: MouseEvent) => {
-        if (!options.onTaskContextMenu) return;
-        const target = e.target as HTMLElement | null;
-        const row = target?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
+      // 0.185.28 — shared resolver + pointerdown fallback (LEX/Locker
+      // suppresses canvas contextmenu; pointerdown survives). See the
+      // engineOnly sibling listener for the full rationale.
+      const fireCtxMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
+        if (!options.onTaskContextMenu) return false;
+        const el = target as HTMLElement | null;
+        const row = el?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
         const rowId = row?.getAttribute('data-task-id') ?? null;
         const taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
         const t = findTaskById(taskId);
-        if (!t) return;
-        e.preventDefault();
-        options.onTaskContextMenu(t, { x: e.clientX, y: e.clientY });
+        if (!t) return false;
+        options.onTaskContextMenu(t, { x: clientX, y: clientY });
+        return true;
+      };
+      const onContextMenu = (e: MouseEvent) => {
+        if (fireCtxMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
+      };
+      const onPointerDown = (e: PointerEvent) => {
+        if (e.button !== 2) return;
+        if (fireCtxMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       ganttEl.addEventListener('mouseover', onMouseOver);
       ganttEl.addEventListener('mouseleave', onMouseLeave);
       ganttEl.addEventListener('contextmenu', onContextMenu);
+      ganttEl.addEventListener('pointerdown', onPointerDown);
       // Attach cleanup — reuse cleanupDrag slot indirectly by stacking:
       const prevCleanupDrag = cleanupDrag;
       cleanupDrag = () => {
         ganttEl.removeEventListener('mouseover', onMouseOver);
         ganttEl.removeEventListener('mouseleave', onMouseLeave);
         ganttEl.removeEventListener('contextmenu', onContextMenu);
+        ganttEl.removeEventListener('pointerdown', onPointerDown);
         if (prevCleanupDrag) prevCleanupDrag();
       };
 
