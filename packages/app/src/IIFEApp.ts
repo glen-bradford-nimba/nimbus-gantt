@@ -82,6 +82,52 @@ interface GanttCol {
   tree?: boolean;
   align?: 'left' | 'right' | 'center';
 }
+/**
+ * 0.185.34 — defensive normalizer for host-supplied dependencies before
+ * handing them off to core's DependencyRenderer.
+ *
+ * Core's `getConnectionPoints` switch is exhaustive over the four enum
+ * values ('FS' | 'SS' | 'FF' | 'SF') with no default branch, so any
+ * non-enum `type` value causes the function to return undefined →
+ * destructuring `{ sourceX, ... }` throws "Cannot destructure ... as
+ * it is undefined" and takes the whole render pass down.
+ *
+ * Salesforce picklists typically ship values like 'Finish-Start' or
+ * 'Finish to Start' rather than the terse 'FS' two-char code NG uses
+ * internally. The DH LWC maps the Apex DTO's `dependencyType` field to
+ * `type` but hosts can still forward a value that doesn't match the
+ * exact enum. Guard here so one bad row doesn't kill the whole chart.
+ *
+ * Also filters out entries missing `source` or `target` — core's
+ * layoutMap guard catches missing task layouts, but an entirely absent
+ * edge is cheaper to drop at the boundary than to let core see it.
+ */
+function normalizeDependencies(input: GanttDependency[] | undefined): GanttDependency[] {
+  if (!input || input.length === 0) return [];
+  const VALID_TYPES: ReadonlySet<GanttDependency['type']> = new Set(['FS', 'SS', 'FF', 'SF']);
+  const ALIAS: Record<string, GanttDependency['type']> = {
+    'FS': 'FS', 'fs': 'FS', 'FINISH-START': 'FS', 'FINISH_START': 'FS', 'FINISH TO START': 'FS', 'FINISHTOSTART': 'FS',
+    'SS': 'SS', 'ss': 'SS', 'START-START':  'SS', 'START_START':  'SS', 'START TO START':  'SS', 'STARTTOSTART':  'SS',
+    'FF': 'FF', 'ff': 'FF', 'FINISH-FINISH':'FF', 'FINISH_FINISH':'FF', 'FINISH TO FINISH':'FF', 'FINISHTOFINISH':'FF',
+    'SF': 'SF', 'sf': 'SF', 'START-FINISH': 'SF', 'START_FINISH': 'SF', 'START TO FINISH': 'SF', 'STARTTOFINISH': 'SF',
+  };
+  const out: GanttDependency[] = [];
+  for (const d of input) {
+    if (!d || !d.source || !d.target) continue;
+    let t: GanttDependency['type'] = 'FS';
+    if (d.type) {
+      if (VALID_TYPES.has(d.type)) {
+        t = d.type;
+      } else {
+        const key = String(d.type).toUpperCase().trim();
+        t = ALIAS[key] || ALIAS[String(d.type)] || 'FS';
+      }
+    }
+    out.push({ id: d.id, source: d.source, target: d.target, type: t, lag: d.lag });
+  }
+  return out;
+}
+
 function buildGanttCols(features: FeatureFlags): GanttCol[] {
   const cols: GanttCol[] = [
     { field: 'title',      header: '',            width: 210, tree: true },
@@ -678,7 +724,7 @@ export class IIFEApp {
       let allTasks: NormalizedTask[] = options.tasks || [];
       // 0.185.27 — dependencies re-exposed. Default [] keeps legacy
       // behavior (no arrows) when host doesn't pass the option.
-      let allDependencies: GanttDependency[] = options.dependencies || [];
+      let allDependencies: GanttDependency[] = normalizeDependencies(options.dependencies);
       const state: AppState = { ...INITIAL_STATE };
       const depthMap = buildDepthMap(allTasks);
       const filtered = applyFilter(allTasks, state.filter as 'active', state.search);
@@ -880,7 +926,7 @@ export class IIFEApp {
          *  — equivalent to `setTasks(tasks)`. */
         setData(tasks: NormalizedTask[], dependencies?: GanttDependency[]) {
           allTasks = tasks;
-          if (dependencies !== undefined) allDependencies = dependencies;
+          if (dependencies !== undefined) allDependencies = normalizeDependencies(dependencies);
           _syncToCanvas();
         },
         /** 0.185.32 — coordinate-based hit-test for host-driven right-click
@@ -945,7 +991,7 @@ export class IIFEApp {
     }
     let allTasks: NormalizedTask[] = options.tasks || [];
     // 0.185.27 — dependencies re-exposed on chrome-aware mount path too.
-    let allDependencies: GanttDependency[] = options.dependencies || [];
+    let allDependencies: GanttDependency[] = normalizeDependencies(options.dependencies);
     const patchLog: PatchLogEntry[] = [];
 
     /* IM-7 (0.183) — Viewport emission helpers.
@@ -2411,7 +2457,7 @@ export class IIFEApp {
        *  same liveDataUpdate-gated refresh path as setTasks. */
       setData(tasks: NormalizedTask[], dependencies?: GanttDependency[]) {
         allTasks = tasks;
-        if (dependencies !== undefined) allDependencies = dependencies;
+        if (dependencies !== undefined) allDependencies = normalizeDependencies(dependencies);
         depthMap = buildDepthMap(allTasks);
         const live = tplConfig.features.liveDataUpdate !== false;
         if (live && ganttInst && state.viewMode === 'gantt') {
