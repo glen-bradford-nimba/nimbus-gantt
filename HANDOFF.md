@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `534321d` *(0.185.26 titleBarButtons slot)* |
-| Commit subject | `feat(0.185.26): titleBarButtons slot + setTitleBarButtons handle` |
+| Commit SHA (source — latest) | `26d2eae` *(0.185.27 dependencies wire-through)* |
+| Commit subject | `feat(0.185.27): re-expose dependencies pipe + handle.setData` |
+| 0.185.27 dependencies wire-through | `26d2eae` |
 | 0.185.26 titleBarButtons slot | `534321d` |
 | 0.185.25 chrome polish + liveDataUpdate | `df51a3b` |
 | 0.185.24 bucket-scoped dragReparent | `5799b53` |
@@ -80,11 +81,65 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **257,039 bytes** (~251 KB)
-- sha256: `9e40a74e0049ec1a6ad71a0019a5f75dd36c783a8993c70167904857ba61c444`
+- Size: **258,650 bytes** (~253 KB)
+- sha256: `4d2ac01fbcbc28a28289f02dd9b6454bddbfd60f627d35858753aa85465f1414`
 
-**0.185.26 — titleBarButtons slot** (source `534321d`). DH CC, re-copy
-this bundle into `staticresources/nimbusganttapp.resource`.
+**0.185.27 — dependencies wire-through** (source `26d2eae`). DH CC,
+re-copy this bundle into `staticresources/nimbusganttapp.resource`.
+
+NG core has always supported dependency rendering (GanttDependency
+type, DependencyRenderer, arrows between bars). The v10/v11 rewrite
+stubbed the pipe shut in the IIFE app layer — both engine-init sites
+hardcoded `dependencies: []`. This release re-opens the pipe.
+
+**Mount option:**
+```ts
+dependencies?: GanttDependency[]; // { id, source, target, type?, lag? }
+```
+
+**Handle method (runtime full replace):**
+```ts
+handle.setData(tasks, dependencies?);
+// setTasks(tasks) still works — leaves existing deps alone.
+```
+
+**DH-side consumption pattern** (spec at
+`docs/dispatch-dh-dependencies-wire.md` — wire-compat note: Apex DTO
+field is `dependencyType`, NG core's `type`. LWC maps before passing):
+```js
+import getGanttDependencies from '@salesforce/apex/DeliveryGanttController.getGanttDependencies';
+
+const [timelineData, rawDeps] = await Promise.all([
+  getProFormaTimelineData({ /* existing args */ }),
+  getGanttDependencies({ showCompleted: true }),
+]);
+
+const dependencies = (rawDeps || []).map((d) => ({
+  id: d.id,
+  source: d.source,
+  target: d.target,
+  type: d.dependencyType || 'FS',
+}));
+
+// Initial mount:
+window.NimbusGanttApp.mount(host, {
+  tasks: normalizedTasks,
+  dependencies,
+  // ... existing options
+});
+
+// On refresh:
+handle.setData(normalizedTasks, dependencies);
+```
+
+Backwards compatible: omit `dependencies` → behavior identical to
+0.185.26 (no arrows rendered). Existing hosts that only call
+`setTasks(tasks)` keep working unchanged.
+
+Out of scope for v0: drag-to-create gesture. Users edit dependencies
+via record pages; Gantt just renders arrows. Bolt-on for later.
+
+Prior entry (0.185.26 `534321d`) — titleBarButtons slot:
 
 Generic host-supplied buttons slot in TitleBar's right cluster,
 immediately before the Full Screen button. Addresses DH CC's
