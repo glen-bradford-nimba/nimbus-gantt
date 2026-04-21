@@ -776,21 +776,38 @@ export class IIFEApp {
        // whether to preventDefault — we don't suppress the browser menu
        // unless a host actually consumed the event).
       const fireContextMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
-        if (!options.onTaskContextMenu) return false;
+        if (!options.onTaskContextMenu) {
+          try { console.log('[NG ctx-resolve] no onTaskContextMenu wired'); } catch (_e) { /* ok */ }
+          return false;
+        }
         const el = target as HTMLElement | null;
         const row = el?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
         const rowId = row?.getAttribute('data-task-id') ?? null;
-        const taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
+        let taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
+        // 0.185.29 — elementFromPoint fallback for canvas-bar right-clicks.
+        // lastHoveredTaskId is populated by the engine's onHover callback on
+        // pointermove, but right-clicks without a prior move (synthetic,
+        // teleport, or race) leave it null. Walk from the exact point in the
+        // document to find any element carrying data-task-id.
+        if (!taskId) {
+          const hit = document.elementFromPoint?.(clientX, clientY) as HTMLElement | null;
+          const hitRow = hit?.closest?.('[data-task-id]') as HTMLElement | null;
+          const hitId = hitRow?.getAttribute('data-task-id');
+          if (hitId && !isBucketId(hitId)) taskId = hitId;
+        }
+        try { console.log('[NG ctx-resolve]', 'target=', el?.tagName, 'rowId=', rowId, 'last=', lastHoveredTaskId, 'resolved=', taskId); } catch (_e) { /* ok */ }
         const t = findTaskById(taskId);
         if (!t) return false;
         options.onTaskContextMenu(t, { x: clientX, y: clientY });
         return true;
       };
       const handleContextMenu = (e: MouseEvent) => {
+        try { console.log('[NG ctx-cm]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireContextMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       const handlePointerDown = (e: PointerEvent) => {
         if (e.button !== 2) return;
+        try { console.log('[NG ctx-pd]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireContextMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       ganttEl.addEventListener('mouseover', handleMouseOver);
@@ -2025,21 +2042,34 @@ export class IIFEApp {
       // suppresses canvas contextmenu; pointerdown survives). See the
       // engineOnly sibling listener for the full rationale.
       const fireCtxMenu = (clientX: number, clientY: number, target: EventTarget | null): boolean => {
-        if (!options.onTaskContextMenu) return false;
+        if (!options.onTaskContextMenu) {
+          try { console.log('[NG ctx-resolve] no onTaskContextMenu wired'); } catch (_e) { /* ok */ }
+          return false;
+        }
         const el = target as HTMLElement | null;
         const row = el?.closest?.('.ng-grid-row[data-task-id]') as HTMLElement | null;
         const rowId = row?.getAttribute('data-task-id') ?? null;
-        const taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
+        let taskId = (rowId && !isBucketId(rowId)) ? rowId : lastHoveredTaskId;
+        // 0.185.29 — elementFromPoint fallback (see engineOnly sibling).
+        if (!taskId) {
+          const hit = document.elementFromPoint?.(clientX, clientY) as HTMLElement | null;
+          const hitRow = hit?.closest?.('[data-task-id]') as HTMLElement | null;
+          const hitId = hitRow?.getAttribute('data-task-id');
+          if (hitId && !isBucketId(hitId)) taskId = hitId;
+        }
+        try { console.log('[NG ctx-resolve]', 'target=', el?.tagName, 'rowId=', rowId, 'last=', lastHoveredTaskId, 'resolved=', taskId); } catch (_e) { /* ok */ }
         const t = findTaskById(taskId);
         if (!t) return false;
         options.onTaskContextMenu(t, { x: clientX, y: clientY });
         return true;
       };
       const onContextMenu = (e: MouseEvent) => {
+        try { console.log('[NG ctx-cm]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireCtxMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       const onPointerDown = (e: PointerEvent) => {
         if (e.button !== 2) return;
+        try { console.log('[NG ctx-pd]', e.clientX, e.clientY, (e.target as HTMLElement)?.tagName); } catch (_e) { /* ok */ }
         if (fireCtxMenu(e.clientX, e.clientY, e.target)) e.preventDefault();
       };
       ganttEl.addEventListener('mouseover', onMouseOver);
