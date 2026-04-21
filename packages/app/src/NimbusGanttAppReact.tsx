@@ -97,6 +97,14 @@ export interface NimbusGanttAppProps {
    *  React-driver hosts) call `handleRef.current.commitEdits()` etc.
    *  See batchMode caveat above for the engineOnly limitation. */
   handleRef?: MutableRefObject<ReturnType<typeof IIFEApp.mount> | null>;
+
+  /** 0.185.33 — callback-style alternative to `handleRef`. Fires once
+   *  after the engine mounts with the same handle, and again with
+   *  `null` on unmount. Idiomatic when the consumer prefers a one-shot
+   *  callback (publishing into a Zustand store, React context, etc.)
+   *  over managing a MutableRefObject. Both mechanisms can coexist —
+   *  if both are provided, both fire. */
+  onReady?: (handle: ReturnType<typeof IIFEApp.mount> | null) => void;
 }
 
 export function NimbusGanttApp(props: NimbusGanttAppProps) {
@@ -226,11 +234,16 @@ export function NimbusGanttApp(props: NimbusGanttAppProps) {
     // toggleChrome/setTasks (existing verbs). Cleared on unmount so a stale
     // ref doesn't outlive the engine.
     if (props.handleRef) props.handleRef.current = ganttInstanceRef.current;
+    // 0.185.33 — callback-style handle delivery. Fires in addition to
+    // (not instead of) handleRef. Idiomatic for React 19 + Zustand /
+    // context-based state stores.
+    if (props.onReady) props.onReady(ganttInstanceRef.current);
 
     return () => {
       IIFEApp.unmount(host);
       ganttInstanceRef.current = null;
       if (props.handleRef) props.handleRef.current = null;
+      if (props.onReady) props.onReady(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
