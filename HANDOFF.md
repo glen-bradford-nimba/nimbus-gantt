@@ -12,9 +12,10 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `fd7d023` *(0.185.31 document-level ctx-menu listeners)* |
-| Commit subject | `feat(0.185.31): document-level ctx-menu listeners for LWS shadow DOM` |
-| 0.185.31 document-level ctx-menu | `fd7d023` |
+| Commit SHA (source — latest) | `16582e3` *(0.185.32 handle.taskAt + strip diag)* |
+| Commit subject | `feat(0.185.32): handle.taskAt(x, y) + strip 0.185.29/30/31 diag logs` |
+| 0.185.32 handle.taskAt | `16582e3` |
+| 0.185.31 document-level ctx-menu (superseded) | `fd7d023` |
 | 0.185.30 dragReparent collision fix | `ac76036` |
 | 0.185.29 ctx-menu diag + fallback | `e0e117d` |
 | 0.185.28 pointerdown ctx-menu | `23ce4bb` |
@@ -85,12 +86,67 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **265,613 bytes** (~260 KB)
-- sha256: `d56849795485092f5bbf4bfae827e310b6350da5e9030f2fa04245cf4219e10d`
+- Size: **263,045 bytes** (~257 KB)
+- sha256: `81bf8cfe071d10718f0491a4badc2804d2cf06a00ce0de77f7bed9c2b7caafbe`
 
-**0.185.31 — document-level ctx-menu listeners for LWS shadow DOM**
-(source `fd7d023`). DH CC, re-copy this bundle into
+**0.185.32 — handle.taskAt(x, y) + strip 0.185.29/30/31 diag logs**
+(source `16582e3`). DH CC, re-copy this bundle into
 `staticresources/nimbusganttapp.resource`.
+
+DH CC's 2026-04-21 14:12 UTC probe confirmed 0.185.31's in-bundle
+`document.addEventListener` never fires under LWS — DH's own
+document listener (attached from the LWC class) fires normally.
+Same API, different call site → LWS sandboxes NG's `document`
+reference. Event-wiring inside the NG bundle is a **dead end**
+for LWC-hosted contexts. Flipping strategy: host does the event
+wiring, NG does the hit-test.
+
+**New handle method:**
+```ts
+handle.taskAt(clientX: number, clientY: number): NormalizedTask | null
+```
+Returns the task at the page-relative point, or null if the point
+isn't over a bar or grid row. Internally uses the same resolver as
+the `onTaskContextMenu` path: `.closest('[data-task-id]')` →
+`lastHoveredTaskId` fallback → `elementFromPoint` + walk.
+
+**DH-side wiring (copy-paste):**
+```js
+// In deliveryProFormaTimeline's connectedCallback / onRender:
+document.addEventListener('contextmenu', (e) => {
+  const rect = this.template.querySelector('.gantt-host').getBoundingClientRect();
+  if (e.clientX < rect.left || e.clientX > rect.right) return;
+  if (e.clientY < rect.top  || e.clientY > rect.bottom) return;
+  const task = this._ngHandle.taskAt(e.clientX, e.clientY);
+  if (!task) return;
+  e.preventDefault();
+  this._openContextMenu(task, e.clientX, e.clientY);
+});
+```
+
+**Strip:** 0.185.29/30/31 diag logs removed (`[NG ctx-pd]`,
+`[NG ctx-cm]`, `[NG ctx-resolve]`, `[NG ctx-pd-doc]`,
+`[NG ctx-cm-doc]`). Served their purpose — LWS-sandbox
+finding is now understood. Keeping them would be permanent noise.
+
+**Existing `onTaskContextMenu` callback + ganttEl-scoped
+listeners stay in place** for non-LWS hosts (CN React, standalone
+localhost). No regression. `taskAt` is purely additive.
+
+**Known-good arc on glen-walk (logged 2026-04-21):**
+- 0.185.30 drag collision fix — confirmed firing. `[NG dragReparent]`
+  lines show `dragSort=` + `collided=` fields + distinct
+  `targetSort` values. Tasks move correctly.
+- 0.185.32 handle.taskAt — shipped, awaiting DH wiring.
+
+**Remaining DH-side follow-up (out of NG scope):** reorder writes
+may not be reflecting in `[DH positions] BEFORE onItemReorder`
+dumps across multiple drags. Could be `refreshApex` cadence,
+stale local `_tasks` snapshot, or Apex write failure. Investigate
+DH-side.
+
+Prior entry (0.185.31 `fd7d023`) — document-level ctx-menu
+listeners for LWS shadow DOM (superseded by 0.185.32 handle method):
 
 DH CC's glen-walk probe 2026-04-21 13:41 UTC confirmed 0.185.29's
 ganttEl-scoped pointerdown/contextmenu listeners never fire under
