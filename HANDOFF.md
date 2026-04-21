@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `ac76036` *(0.185.30 dragReparent collision-with-self fix)* |
-| Commit subject | `feat(0.185.30): dragReparent collision-with-self fix for bucket-edge drops` |
+| Commit SHA (source — latest) | `fd7d023` *(0.185.31 document-level ctx-menu listeners)* |
+| Commit subject | `feat(0.185.31): document-level ctx-menu listeners for LWS shadow DOM` |
+| 0.185.31 document-level ctx-menu | `fd7d023` |
 | 0.185.30 dragReparent collision fix | `ac76036` |
 | 0.185.29 ctx-menu diag + fallback | `e0e117d` |
 | 0.185.28 pointerdown ctx-menu | `23ce4bb` |
@@ -84,11 +85,44 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **263,295 bytes** (~258 KB)
-- sha256: `603c0db0039920c9618ee8e537b779abe5658e72750c16df05c582d0311a63bc`
+- Size: **265,613 bytes** (~260 KB)
+- sha256: `d56849795485092f5bbf4bfae827e310b6350da5e9030f2fa04245cf4219e10d`
 
-**0.185.30 — dragReparent collision-with-self fix** (source `ac76036`).
-DH CC, re-copy this bundle into `staticresources/nimbusganttapp.resource`.
+**0.185.31 — document-level ctx-menu listeners for LWS shadow DOM**
+(source `fd7d023`). DH CC, re-copy this bundle into
+`staticresources/nimbusganttapp.resource`.
+
+DH CC's glen-walk probe 2026-04-21 13:41 UTC confirmed 0.185.29's
+ganttEl-scoped pointerdown/contextmenu listeners never fire under
+LWS/Locker — `[DH doc-pd]` and `[DH doc-cm]` fire at the document
+level, but NG's `ganttEl.addEventListener` silently loses the event.
+Salesforce's synthetic shadow DOM retargets events at the shadow
+boundary before bubbling reaches NG's internal listeners.
+
+**Fix:** attach contextmenu + pointerdown on `document` too,
+capture-phase, filtered by `(clientX,clientY)` inside
+`ganttEl.getBoundingClientRect()`. Passes `null` as the event target
+so the resolver uses `lastHoveredTaskId` (populated by the engine's
+own `onHover` callback — bypasses shadow DOM entirely) +
+`elementFromPoint` fallback. Existing ganttEl-scoped listeners stay
+in place for non-LWS environments.
+
+**New diag log lines:**
+- `[NG ctx-pd-doc] x y`  — document-level pointerdown hit
+- `[NG ctx-cm-doc] x y`  — document-level contextmenu hit
+
+DH CC — deploy this bundle. Glen-walk right-click should now fire
+`[NG ctx-pd-doc]` → `[NG ctx-resolve] resolved=<taskId>` → host's
+`onTaskContextMenu` callback. If `resolved=` is still null, the issue
+is the `lastHoveredTaskId` not being populated (engine `onHover` not
+firing in LWS), not the event reaching us.
+
+**Stacks with 0.185.30 (dragReparent collision fix) + 0.185.29
+(ctx-menu diag + elementFromPoint fallback).** One bundle covers all
+three; no separate deployments needed.
+
+Prior entry (0.185.30 `ac76036`) — dragReparent collision-with-self
+fix for bucket-edge drops:
 
 Glen's glen-walk session 2026-04-21: T-0114 couldn't move within its
 own top-priority bucket. Log trail:
