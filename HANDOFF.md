@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `26d2eae` *(0.185.27 dependencies wire-through)* |
-| Commit subject | `feat(0.185.27): re-expose dependencies pipe + handle.setData` |
+| Commit SHA (source — latest) | `23ce4bb` *(0.185.28 pointerdown ctx-menu fallback)* |
+| Commit subject | `feat(0.185.28): pointerdown+button===2 ctx-menu fallback for LEX/Locker` |
+| 0.185.28 pointerdown ctx-menu | `23ce4bb` |
 | 0.185.27 dependencies wire-through | `26d2eae` |
 | 0.185.26 titleBarButtons slot | `534321d` |
 | 0.185.25 chrome polish + liveDataUpdate | `df51a3b` |
@@ -81,11 +82,42 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **258,650 bytes** (~253 KB)
-- sha256: `4d2ac01fbcbc28a28289f02dd9b6454bddbfd60f627d35858753aa85465f1414`
+- Size: **259,548 bytes** (~254 KB)
+- sha256: `ce65ef69d400f620202f06561b2982c3940d8ee59232d451ff7439cc3aabb053`
 
-**0.185.27 — dependencies wire-through** (source `26d2eae`). DH CC,
-re-copy this bundle into `staticresources/nimbusganttapp.resource`.
+**0.185.28 — pointerdown ctx-menu fallback for LEX/Locker** (source
+`23ce4bb`). DH CC, re-copy this bundle into
+`staticresources/nimbusganttapp.resource`.
+
+DH CC probe on glen-walk 2026-04-21 13:05 UTC confirmed Salesforce
+LEX/Locker suppresses the canvas `contextmenu` event before NG's
+listener sees it. The stale warning comment at IIFEApp.ts:749 was
+correct. This release adds a `pointerdown + event.button === 2`
+fallback alongside the existing `contextmenu` listener on both mount
+paths — right-button pointerdown survives LEX/Locker.
+
+**No API changes.** Existing `onTaskContextMenu(task, pos)` callback
+signature unchanged; listeners just have one more entry point. Hosts
+that have already wired the callback (CN v12 React browser-native
+right-click) see zero behavior change. DH CC's probe starts firing the
+moment this bundle lands — the entire right-click UX is then DH-side
+work (popover LWC + Apex `createWorkItemDependency` /
+`deleteWorkItemDependency`).
+
+**Delete-by-menu workaround (no arrow hit-test needed):** task menu
+renders "Delete predecessor → [list]" + "Delete successor → [list]"
+submenus sourced from `dependencies.filter(d => d.target === task.id)`
+/ `.source === task.id`. No NG 0.185.29 required. Arrow hit-test path
+(right-click the arrow itself) is deferred until Glen asks for it.
+
+Non-obvious design note: `preventDefault()` fires only when the host
+has actually consumed the event (callback wired + task resolved at
+event target). Hosts without a callback, or right-clicks that miss a
+task bar, fall through to the browser's default right-click menu —
+preserves Inspect Element etc. for developers and matches 0.185.27
+behavior exactly.
+
+Prior entry (0.185.27 `26d2eae`) — dependencies wire-through:
 
 NG core has always supported dependency rendering (GanttDependency
 type, DependencyRenderer, arrows between bars). The v10/v11 rewrite
