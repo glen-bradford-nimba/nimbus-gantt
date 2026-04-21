@@ -31,6 +31,16 @@ interface InsertionPoint {
    *  "move to root of this bucket" from "no parent change." Mutually
    *  exclusive with nestIntoRow + insertBeforeRow. */
   deparent: boolean;
+  /** 0.185.35 — positional semantics for hosts that want server-side
+   *  dense numbering. Emitted alongside targetSortOrder so the host can
+   *  choose between numeric (newIndex) and semantic (position + refs)
+   *  contracts. Values mirror the fields on TaskPatch / onItemReorder:
+   *    - 'above-all' → dragged lands above topmost-in-bucket (afterId null)
+   *    - 'below-all' → dragged lands below bottommost-in-bucket (beforeId null)
+   *    - 'between'   → both IDs set, dragged lands between them */
+  position: 'above-all' | 'below-all' | 'between';
+  beforeTaskId: string | null;
+  afterTaskId: string | null;
 }
 
 export function startDragReparent(
@@ -132,6 +142,10 @@ export function startDragReparent(
         insertBeforeRow: null,
         nestIntoRow: null,
         deparent: true,
+        // 0.185.35 — deparent drop lands at the top of the bucket.
+        position: 'above-all',
+        beforeTaskId: null,
+        afterTaskId: null,
       };
     }
 
@@ -192,6 +206,12 @@ export function startDragReparent(
           insertBeforeRow: null,
           nestIntoRow,
           deparent: false,
+          // 0.185.35 — nest drop: dragged becomes last child of targetId.
+          // Not strictly bucket-positional, but closest semantic is
+          // "below all existing children under this parent."
+          position: 'below-all',
+          beforeTaskId: null,
+          afterTaskId: targetId,
         };
       }
       // Fall through: cycle or missing target → treat as sibling reorder.
@@ -370,7 +390,29 @@ export function startDragReparent(
         '→ targetSort=', targetSort);
     } catch (_e) { /* ok */ }
 
-    return { parentId, depth: desiredDepth, targetBucket, targetSortOrder: targetSort, insertBeforeRow: rowBelow, nestIntoRow: null, deparent: false };
+    // 0.185.35 — positional semantics. Derived from the rowAbove/rowBelow
+    // walk we already did. This gives hosts a semantic "drop spot" view
+    // alongside the numeric targetSort, so they can implement dense 1..N
+    // numbering server-side without NG's fractional math leaking negatives.
+    const position: 'above-all' | 'below-all' | 'between' =
+      !rowAbove ? 'above-all' : !rowBelow ? 'below-all' : 'between';
+    const beforeTaskId: string | null = rowBelow
+      ? rowBelow.getAttribute('data-task-id') : null;
+    const afterTaskId: string | null = rowAbove
+      ? rowAbove.getAttribute('data-task-id') : null;
+
+    return {
+      parentId,
+      depth: desiredDepth,
+      targetBucket,
+      targetSortOrder: targetSort,
+      insertBeforeRow: rowBelow,
+      nestIntoRow: null,
+      deparent: false,
+      position,
+      beforeTaskId,
+      afterTaskId,
+    };
   }
 
   function cleanupDrag() {
@@ -578,7 +620,17 @@ export function startDragReparent(
     if (ip.parentId !== currentParent) {
       onPatch({ id: savedId, parentId: ip.parentId || null });
     }
-    onPatch({ id: savedId, sortOrder: ip.targetSortOrder });
+    // 0.185.35 — include positional semantics on the sortOrder patch.
+    // The IIFEApp interceptor coalesces sortOrder/parentId/priorityGroup
+    // into a single onItemReorder call; position+before+after ride along
+    // so hosts can choose numeric (newIndex) OR semantic dispatch.
+    onPatch({
+      id: savedId,
+      sortOrder: ip.targetSortOrder,
+      position: ip.position,
+      beforeTaskId: ip.beforeTaskId,
+      afterTaskId: ip.afterTaskId,
+    });
 
     /* Suppress didDrag side-effect */
     void didDrag;

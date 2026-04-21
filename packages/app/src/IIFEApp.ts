@@ -1492,9 +1492,16 @@ export class IIFEApp {
               newIndex: number;
               newParentId?: string | null;
               newPriorityGroup?: string;
+              position?: 'above-all' | 'below-all' | 'between';
+              beforeTaskId?: string | null;
+              afterTaskId?: string | null;
             } = { newIndex };
             if (patch.parentId !== undefined) reorderPayload.newParentId = patch.parentId;
             if (patch.priorityGroup !== undefined) reorderPayload.newPriorityGroup = patch.priorityGroup;
+            // 0.185.35 — positional semantics (hosts can resolve dense 1..N)
+            if (patch.position !== undefined) reorderPayload.position = patch.position;
+            if (patch.beforeTaskId !== undefined) reorderPayload.beforeTaskId = patch.beforeTaskId;
+            if (patch.afterTaskId !== undefined) reorderPayload.afterTaskId = patch.afterTaskId;
             await options.onItemReorder(taskId, reorderPayload);
           } else {
             rawOnPatch(patch);
@@ -1528,10 +1535,23 @@ export class IIFEApp {
         if (patch.sortOrder !== undefined) partsB.push('reordered');
         patchLog.unshift({ ts: new Date(), desc: titleB + ': ' + partsB.join(', ') + ' (pending)' });
         if (patchLog.length > 50) patchLog.pop();
-        const reorderDelta: { priorityGroup?: string; sortOrder?: number; parentId?: string | null } = {};
+        const reorderDelta: {
+          priorityGroup?: string;
+          sortOrder?: number;
+          parentId?: string | null;
+          position?: 'above-all' | 'below-all' | 'between';
+          beforeTaskId?: string | null;
+          afterTaskId?: string | null;
+        } = {};
         if (patch.priorityGroup !== undefined) reorderDelta.priorityGroup = patch.priorityGroup;
         if (patch.sortOrder !== undefined) reorderDelta.sortOrder = patch.sortOrder;
         if (patch.parentId !== undefined) reorderDelta.parentId = patch.parentId;
+        // 0.185.35 — positional semantics ride along through batch-buffer
+        // too, so commitEdits hands the host the same shape it'd get
+        // from a live (non-batch) reorder.
+        if (patch.position !== undefined) reorderDelta.position = patch.position;
+        if (patch.beforeTaskId !== undefined) reorderDelta.beforeTaskId = patch.beforeTaskId;
+        if (patch.afterTaskId !== undefined) reorderDelta.afterTaskId = patch.afterTaskId;
         bufferEdit(taskId, 'reorder', reorderDelta as Record<string, unknown>, {
           priorityGroup: origTaskB.priorityGroup ?? undefined,
           sortOrder: origTaskB.sortOrder,
@@ -1590,14 +1610,23 @@ export class IIFEApp {
         // and newPriorityGroup are optional — omitted when the drop
         // didn't change those axes. DH's handler ignores fields it
         // doesn't care about.
+        // 0.185.35 — positional semantics also ride along for hosts that
+        // want server-side dense 1..N numbering instead of writing the
+        // fractional newIndex value directly.
         const newIndex = typeof patch.sortOrder === 'number' ? patch.sortOrder : 0;
         const reorderPayload: {
           newIndex: number;
           newParentId?: string | null;
           newPriorityGroup?: string;
+          position?: 'above-all' | 'below-all' | 'between';
+          beforeTaskId?: string | null;
+          afterTaskId?: string | null;
         } = { newIndex };
         if (patch.parentId !== undefined) reorderPayload.newParentId = patch.parentId;
         if (patch.priorityGroup !== undefined) reorderPayload.newPriorityGroup = patch.priorityGroup;
+        if (patch.position !== undefined) reorderPayload.position = patch.position;
+        if (patch.beforeTaskId !== undefined) reorderPayload.beforeTaskId = patch.beforeTaskId;
+        if (patch.afterTaskId !== undefined) reorderPayload.afterTaskId = patch.afterTaskId;
         await options.onItemReorder(taskId, reorderPayload);
         const current = pendingReorders.get(taskId);
         if (!current || current.seq !== seq) return; // stale
@@ -2519,9 +2548,25 @@ export class IIFEApp {
                 const newIndex = typeof p.reorderPayload.sortOrder === 'number'
                   ? p.reorderPayload.sortOrder
                   : 0;
-                const payload: { newIndex: number; newParentId?: string | null; newPriorityGroup?: string } = { newIndex };
+                const payload: {
+                  newIndex: number;
+                  newParentId?: string | null;
+                  newPriorityGroup?: string;
+                  position?: 'above-all' | 'below-all' | 'between';
+                  beforeTaskId?: string | null;
+                  afterTaskId?: string | null;
+                } = { newIndex };
                 if (p.reorderPayload.parentId !== undefined) payload.newParentId = p.reorderPayload.parentId;
                 if (p.reorderPayload.priorityGroup !== undefined) payload.newPriorityGroup = p.reorderPayload.priorityGroup;
+                // 0.185.35 — positional semantics forwarded through batch
+                // commit path too. Cast via unknown because PendingEdit
+                // type is in a sibling file and extending it would churn
+                // more callsites than necessary for this additive pass.
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const rp = p.reorderPayload as any;
+                if (rp.position !== undefined) payload.position = rp.position;
+                if (rp.beforeTaskId !== undefined) payload.beforeTaskId = rp.beforeTaskId;
+                if (rp.afterTaskId !== undefined) payload.afterTaskId = rp.afterTaskId;
                 await options.onItemReorder(p.taskId, payload);
               } else if (options.onPatch) {
                 await Promise.resolve(options.onPatch({

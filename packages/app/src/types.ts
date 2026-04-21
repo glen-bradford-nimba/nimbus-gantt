@@ -76,6 +76,22 @@ export interface TaskPatch {
   /** Dependency edges — full replacement list (not delta). When provided the
    *  consumer replaces the task's `dependencies` array wholesale. */
   dependencies?: string[];
+  /** 0.185.35 — positional semantics emitted alongside sortOrder on drag-
+   *  reorder patches. Hosts that want server-side dense numbering
+   *  (e.g., keep sortOrder 1..N after every drag, no accumulating
+   *  negatives from fractional-midpoint math) resolve position +
+   *  beforeTaskId/afterTaskId to real values in Apex and ignore
+   *  sortOrder. Hosts that want the current numeric contract ignore
+   *  these fields and write sortOrder directly. */
+  position?: 'above-all' | 'below-all' | 'between';
+  /** Task ID the dragged row would land IMMEDIATELY BEFORE in its
+   *  target bucket (null when `position === 'below-all'` — dropped
+   *  below the bottommost row). */
+  beforeTaskId?: string | null;
+  /** Task ID the dragged row would land IMMEDIATELY AFTER in its
+   *  target bucket (null when `position === 'above-all'` — dropped
+   *  above the topmost row). */
+  afterTaskId?: string | null;
 }
 
 /** Screen-space coordinates for right-click / context menu UX. */
@@ -262,6 +278,21 @@ export interface MountOptions {
        *  when the drop crossed a bucket boundary. Optional; omitted when the
        *  drop stayed within the same bucket. */
       newPriorityGroup?: string;
+      /** 0.185.35 — positional semantics. Hosts that want server-side
+       *  dense 1..N numbering (no accumulating negatives from fractional-
+       *  midpoint math) use these three fields and ignore `newIndex`;
+       *  hosts that want the current numeric-sortOrder contract use
+       *  `newIndex` and ignore these.
+       *
+       *  - `position: 'above-all'` + `beforeTaskId: <topmostId>` + `afterTaskId: null`
+       *    → drop above the topmost row in the target bucket
+       *  - `position: 'below-all'` + `beforeTaskId: null` + `afterTaskId: <bottommostId>`
+       *    → drop below the bottommost row in the target bucket
+       *  - `position: 'between'` + both IDs set
+       *    → drop between two real tasks */
+      position?: 'above-all' | 'below-all' | 'between';
+      beforeTaskId?: string | null;
+      afterTaskId?: string | null;
     },
   ) => Promise<void> | void;
 
