@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `d2ac51a` *(0.185.35 positional reorder payload)* |
-| Commit subject | `feat(0.185.35): positional reorder payload for server-side dense numbering` |
+| Commit SHA (source — latest) | `2e0919d` *(0.185.36 per-row style decorators)* |
+| Commit subject | `feat(0.185.36): per-row style decorators (border/fill/badge)` |
+| 0.185.36 row-style decorators | `2e0919d` |
 | 0.185.35 positional reorder | `d2ac51a` |
 | 0.185.34 dep type sanitization | `f75e643` |
 | 0.185.33 React-only DX polish | `24ba6d7` |
@@ -70,9 +71,11 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **269,229 bytes** (~263 KB)
-- sha256: `3c48790efd885cb5f7bbafb3e38b297037c0bbbef750a52c3fcd1bd19461852b`
-- **Must re-copy.** `f24cc24` (0.183.3-diag) adds three `console.log`
+- Size: **274,934 bytes** (~268 KB)
+- sha256: `499ea5b3a8b01813a5a6fbf95a71c0264ef15117584c37296637fb64b23272e4`
+- **Must re-copy.** `2e0919d` (0.185.36) adds per-row style decorators
+  — see "0.185.36 — per-row style decorators" section below.
+- Prior `f24cc24` (0.183.3-diag) adds three `console.log`
   probes inside `DragManager.completeDrag` at the engine emit sites
   (move, resize-left, resize-right). Lets next-session diagnosis see
   whether the engine fires the callback at all on a problematic surface.
@@ -91,6 +94,111 @@ Prior entry (0.183 cut `41ec401`) added:
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
 - Size: **266,494 bytes** (~260 KB)
 - sha256: `5e110c18aa600ae20f2e7fe95020f55ca5dc6a3341af6dfc4efc76507331e666`
+
+**0.185.36 — per-row style decorators** (source `2e0919d`). DH CC,
+re-copy `nimbusgantt.resource` (the *core* bundle, NOT the app
+bundle — `nimbusganttapp.resource` is unchanged at this release)
+when you're ready to render visual cues on a subset of rows.
+
+**Motivation:** consumers (DH, MF, CN portal) want to mark subsets
+of rows with visual cues — recently-completed items with a faded
+dashed bar, at-risk items with a red border, externally-blocked
+items with an inline badge — without inventing a new
+`priorityGroup` for each state. Today the only signal a host can
+pass that affects rendering is `status` (color) and `priorityGroup`
+(bucket). Those are not enough.
+
+**What ships (additive — zero breaking change):**
+
+`GanttTask` gains an optional `style?: GanttRowDecorators` block:
+
+```ts
+interface GanttRowDecorators {
+  borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
+  borderWidth?: 1 | 2 | 3;     // default 2
+  borderColor?: string;        // default: darkened bar fill
+
+  fillStyle?: 'solid' | 'muted' | 'hatched' | 'gradient';
+  fillOpacity?: number;        // 0–1 — wins over fillStyle if both set
+
+  badge?: {
+    text: string;              // e.g. '✓', 'RISK', 'NEW'
+    placement?: 'start' | 'end';   // default 'end'
+    color?: string;            // pill bg; text auto-contrasts
+  };
+
+  styleNote?: string;          // optional tooltip hint
+}
+```
+
+Renderer applies decorators on top of the existing bar fill in this
+order: muted/opacity fill → progress fill (existing) → decorator
+border → label → badge (overlays everything). Selection border still
+wins visually over decorator border.
+
+`fillStyle: 'hatched' | 'gradient'` are RESERVED values — type
+accepts them; renderer falls back to `'solid'` until a follow-up
+ships pattern fills.
+
+**Renderer bail:** decorators are skipped when
+`task.status === 'group-header'` so they don't collide with
+PriorityGroupingPlugin's legacy `groupBg / groupColor / hours /
+hoursLabel / title` fields. Folding those legacy header fields under
+a sibling `group?: {...}` block is a worthwhile follow-up dispatch
+but explicitly out of scope for 0.185.36.
+
+**DH CC — Apex integration pattern:**
+
+```apex
+// In DeliveryGanttController.cls when mapping WorkItem__c → GanttTask
+private static final Set<String> TERMINAL_STAGES = new Set<String>{
+    'Done', 'Deployed to Prod', 'Completed', 'Cancelled', 'Closed'
+};
+
+if (TERMINAL_STAGES.contains(item.delivery__StageNamePk__c)
+    && item.LastModifiedDate >= System.now().addDays(-7)) {
+    task.style = new Map<String, Object>{
+        'borderStyle' => 'dashed',
+        'borderWidth' => 2,
+        'fillStyle'   => 'muted',
+        'badge'       => new Map<String, Object>{
+            'text' => '✓',     // ✓
+            'placement' => 'end'
+        },
+        'styleNote' => 'Recently completed (last 7 days)'
+    };
+}
+```
+
+The `task.style` field on the Apex DTO ships as a Map<String,Object>
+that JSON-serializes to the shape core expects. **Sanitize at the
+adapter boundary** the same way `dependency.type` is normalized
+today — strip unknown enum values, coerce `borderWidth` to 1|2|3,
+clamp `fillOpacity` to [0,1]. The salesforce-adapter is the right
+place; core is enum-strict and won't gracefully degrade malformed
+input.
+
+**CN CC — zero required change.** Demo already wires four decorated
+sample rows for the showcase. Hosts that don't populate `style`
+render exactly as today.
+
+**Backward-compat test matrix (verified):**
+- Host doesn't set `style` → bars render identically to 0.185.35
+- Host sets `style` on a `group-header` row → renderer ignores it
+  (legacy header fields still apply)
+- Host sets only `badge` (no border, no fill change) → just the pill
+- Host sets `fillStyle: 'hatched'` → renders as `'solid'` (TODO)
+
+**Files touched:** `model/types.ts` (new types + field),
+`render/CanvasRenderer.ts` (decorator pass + 3 helpers:
+`resolveFillOpacity`, `renderDecoratorBorder`, `renderDecoratorBadge`),
+`index.ts` barrel (export new types), `model/RowDecorators.test.ts`
+(5 vitest cases), `demo/sample-data.ts` (4 decorated samples).
+Full vitest suite: 101/101 pass.
+
+---
+
+Prior entry (0.185.35 `d2ac51a`):
 
 **0.185.35 — positional reorder payload** (source `d2ac51a`). DH CC,
 re-copy this bundle into `staticresources/nimbusganttapp.resource`
