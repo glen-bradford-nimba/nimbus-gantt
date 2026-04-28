@@ -8,6 +8,8 @@ import type {
   ResolvedTheme,
   ResolvedConfig,
   HeaderCell,
+  GanttRowDecorators,
+  GanttRowDecoratorBadge,
 } from '../model/types';
 
 // ─── TimeScale interface ───────────────────────────────────────────────────
@@ -438,8 +440,25 @@ export class CanvasRenderer {
         continue;
       }
 
+      // ── Per-row style decorators (0.185.36) ───────────────────────────
+      // Decorators are bailed on header rows so the legacy
+      // groupBg/groupColor/hours/title fields stay untouched.
+      const task = state.tasks.get(layout.taskId);
+      const decorators: GanttRowDecorators | null =
+        task && task.status !== 'group-header' && task.style ? task.style : null;
+      const muteOpacity = decorators
+        ? this.resolveFillOpacity(decorators)
+        : 1;
+
       // ── Main bar fill ──────────────────────────────────────────────────
-      this.fillRoundedRect(barX, barY, barW, barH, radius, layout.color);
+      if (muteOpacity < 1) {
+        ctx.save();
+        ctx.globalAlpha = muteOpacity;
+        this.fillRoundedRect(barX, barY, barW, barH, radius, layout.color);
+        ctx.restore();
+      } else {
+        this.fillRoundedRect(barX, barY, barW, barH, radius, layout.color);
+      }
 
       // ── Progress fill ──────────────────────────────────────────────────
       if (config.showProgress && layout.progressWidth > 0) {
@@ -483,9 +502,151 @@ export class CanvasRenderer {
         );
       }
 
+      // ── Decorator border ──────────────────────────────────────────────
+      // Drawn after fill/progress but before selection so an active
+      // selection outline still wins visually.
+      if (decorators && decorators.borderStyle && decorators.borderStyle !== 'none') {
+        this.renderDecoratorBorder(
+          decorators,
+          barX,
+          barY,
+          barW,
+          barH,
+          radius,
+          layout.color,
+        );
+      }
+
       // ── Label text ─────────────────────────────────────────────────────
       this.renderBarLabel(layout, barX, barY, barW, barH, theme);
+
+      // ── Decorator badge (drawn last, overlays everything) ─────────────
+      if (decorators && decorators.badge && decorators.badge.text) {
+        this.renderDecoratorBadge(
+          decorators.badge,
+          barX,
+          barY,
+          barW,
+          barH,
+          layout.color,
+          theme,
+        );
+      }
     }
+  }
+
+  /**
+   * Resolve the effective fill opacity for a decorated bar.
+   * `fillOpacity` wins if explicitly set; otherwise `fillStyle: 'muted'`
+   * defaults to 0.55. `'hatched'` and `'gradient'` are reserved values —
+   * they fall back to `'solid'` (full opacity) until implemented.
+   */
+  private resolveFillOpacity(decorators: GanttRowDecorators): number {
+    if (typeof decorators.fillOpacity === 'number') {
+      return Math.max(0, Math.min(1, decorators.fillOpacity));
+    }
+    if (decorators.fillStyle === 'muted') return 0.55;
+    return 1;
+  }
+
+  /**
+   * Stroke a decorated border around the bar. Supports solid / dashed /
+   * dotted / double. `borderWidth` defaults to 2; `borderColor` defaults
+   * to a darkened shade of the bar fill.
+   */
+  private renderDecoratorBorder(
+    decorators: GanttRowDecorators,
+    barX: number,
+    barY: number,
+    barW: number,
+    barH: number,
+    radius: number,
+    barColor: string,
+  ): void {
+    const { ctx } = this;
+    const width = decorators.borderWidth ?? 2;
+    const color = decorators.borderColor ?? this.darkenColor(barColor, 0.3);
+    const style = decorators.borderStyle ?? 'solid';
+
+    let dash: number[];
+    switch (style) {
+      case 'dashed': dash = [6, 4]; break;
+      case 'dotted': dash = [2, 3]; break;
+      default: dash = []; // solid + double
+    }
+
+    ctx.save();
+    ctx.setLineDash(dash);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    this.roundedRectPath(barX, barY, barW, barH, radius);
+    ctx.stroke();
+
+    if (style === 'double') {
+      const inset = width + 1;
+      const innerRadius = Math.max(0, radius - inset);
+      ctx.lineWidth = width;
+      this.roundedRectPath(
+        barX + inset,
+        barY + inset,
+        Math.max(0, barW - inset * 2),
+        Math.max(0, barH - inset * 2),
+        innerRadius,
+      );
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Render a small pill badge at the start or end of the bar with a
+   * subtle drop shadow so it reads on any background color.
+   */
+  private renderDecoratorBadge(
+    badge: GanttRowDecoratorBadge,
+    barX: number,
+    barY: number,
+    barW: number,
+    barH: number,
+    barColor: string,
+    theme: ResolvedTheme,
+  ): void {
+    const { ctx } = this;
+    const text = badge.text;
+    const placement = badge.placement ?? 'end';
+    const pillHeight = Math.max(14, barH * 0.65);
+    const padX = 6;
+
+    ctx.save();
+    const font = `${Math.round(theme.fontSize * 0.85)}px ${theme.fontFamily}`;
+    ctx.font = font;
+    ctx.textBaseline = 'middle';
+    const textWidth = ctx.measureText(text).width;
+    const pillWidth = textWidth + padX * 2;
+    const pillY = barY + (barH - pillHeight) / 2;
+    const pillX = placement === 'start'
+      ? barX + 2
+      : barX + barW - pillWidth - 2;
+
+    // Drop shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.25)';
+    ctx.shadowBlur = 3;
+    ctx.shadowOffsetY = 1;
+
+    // Pill body
+    const pillBg = badge.color ?? '#ffffff';
+    ctx.fillStyle = pillBg;
+    this.roundedRectPath(pillX, pillY, pillWidth, pillHeight, pillHeight / 2);
+    ctx.fill();
+
+    // Text (no shadow on the text)
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.fillStyle = badge.color ? '#ffffff' : this.darkenColor(barColor, 0.4);
+    ctx.textAlign = 'center';
+    ctx.fillText(text, pillX + pillWidth / 2, pillY + pillHeight / 2);
+    ctx.restore();
   }
 
   /**

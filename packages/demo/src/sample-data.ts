@@ -79,6 +79,14 @@ export const sampleTasks: GanttTask[] = [
     groupId: 'acme',
     groupName: 'Acme Corp',
     sortOrder: nextSort(),
+    // Decorator demo: at-risk archetype — solid red border + RISK badge
+    style: {
+      borderStyle: 'solid',
+      borderWidth: 2,
+      borderColor: '#dc2626',
+      badge: { text: 'RISK', placement: 'start', color: '#dc2626' },
+      styleNote: 'Flagged as at-risk by host workflow',
+    },
   },
   {
     id: 'acme-pm-data',
@@ -221,6 +229,14 @@ export const sampleTasks: GanttTask[] = [
     groupId: 'acme',
     groupName: 'Acme Corp',
     sortOrder: nextSort(),
+    // Decorator demo: recently-completed archetype — dashed + muted + ✓
+    style: {
+      borderStyle: 'dashed',
+      borderWidth: 2,
+      fillStyle: 'muted',
+      badge: { text: '✓', placement: 'end' },
+      styleNote: 'Recently completed (last 7 days)',
+    },
   },
   {
     id: 'acme-devops-monitor',
@@ -444,6 +460,10 @@ export const sampleTasks: GanttTask[] = [
     groupId: 'techstart',
     groupName: 'TechStart Inc',
     sortOrder: nextSort(),
+    // Decorator demo: badge alone (no border / fill change)
+    style: {
+      badge: { text: '✓', placement: 'end' },
+    },
   },
   {
     id: 'ts-portal-self',
@@ -499,6 +519,13 @@ export const sampleTasks: GanttTask[] = [
     groupId: 'global-fin',
     groupName: 'Global Financial',
     sortOrder: nextSort(),
+    // Decorator demo: dotted border + colored NEW badge — third archetype
+    style: {
+      borderStyle: 'dotted',
+      borderWidth: 2,
+      borderColor: '#0ea5e9',
+      badge: { text: 'NEW', placement: 'start', color: '#0ea5e9' },
+    },
   },
   {
     id: 'gf-comp-aml',

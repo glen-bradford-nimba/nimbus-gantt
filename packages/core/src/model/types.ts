@@ -30,6 +30,37 @@ export interface GanttTask {
   hours?: number;              // Total hours rolled up (header rows only)
   hoursLabel?: string;         // Pre-formatted count · hours label
   title?: string;              // Display title override (distinct from `name`)
+  // ── Per-row visual decorators ───────────────────────────────────────
+  // Composable styling overlays driven by host data. Renderer applies
+  // them on top of the existing bar fill. Ignored when status ===
+  // "group-header" (PriorityGroupingPlugin uses its own legacy fields).
+  style?: GanttRowDecorators;
+}
+
+export type DecoratorBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
+export type DecoratorBorderWidth = 1 | 2 | 3;
+export type DecoratorFillStyle = 'solid' | 'muted' | 'hatched' | 'gradient';
+export type DecoratorBadgePlacement = 'start' | 'end';
+
+export interface GanttRowDecoratorBadge {
+  text: string;
+  placement?: DecoratorBadgePlacement;  // Default: 'end'
+  color?: string;                       // CSS color, default: derived from bar fill
+}
+
+export interface GanttRowDecorators {
+  // Bar outline
+  borderStyle?: DecoratorBorderStyle;
+  borderWidth?: DecoratorBorderWidth;
+  borderColor?: string;
+  // Bar interior — 'hatched' and 'gradient' are reserved values; renderer
+  // falls back to 'solid' until those are implemented in a follow-up.
+  fillStyle?: DecoratorFillStyle;
+  fillOpacity?: number;                 // 0–1, default 1
+  // Optional inline label decoration
+  badge?: GanttRowDecoratorBadge;
+  // Tooltip override (host-tooltip plumbing already covers full custom HTML)
+  styleNote?: string;
 }
 
 export interface GanttDependency {

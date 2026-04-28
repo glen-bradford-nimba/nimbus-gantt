@@ -24,6 +24,12 @@ export type {
   Action,
   DragState,
   GanttEventType,
+  GanttRowDecorators,
+  GanttRowDecoratorBadge,
+  DecoratorBorderStyle,
+  DecoratorBorderWidth,
+  DecoratorFillStyle,
+  DecoratorBadgePlacement,
 } from './model/types';
 
 // DAG utilities — consumers that need to walk parentId + additionalParentIds
