@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `2e0919d` *(0.185.36 per-row style decorators)* |
-| Commit subject | `feat(0.185.36): per-row style decorators (border/fill/badge)` |
+| Commit SHA (source — latest) | `4aa73d9` *(0.185.37 remote-events skeleton)* |
+| Commit subject | `feat(0.185.37): remote-events skeleton — host-pumped server→client channel` |
+| 0.185.37 remote-events skeleton | `4aa73d9` |
 | 0.185.36 row-style decorators | `2e0919d` |
 | 0.185.35 positional reorder | `d2ac51a` |
 | 0.185.34 dep type sanitization | `f75e643` |
@@ -71,10 +72,12 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **274,934 bytes** (~268 KB)
-- sha256: `499ea5b3a8b01813a5a6fbf95a71c0264ef15117584c37296637fb64b23272e4`
-- **Must re-copy.** `2e0919d` (0.185.36) adds per-row style decorators
-  — see "0.185.36 — per-row style decorators" section below.
+- Size: **277,061 bytes** (~270 KB)
+- sha256: `25a6295827d9d3cd2f92a2cf0c58fd80757c597ff3340aa3427c846a5a257717`
+- **Must re-copy.** `4aa73d9` (0.185.37) adds the remote-events skeleton
+  — see "0.185.37 — remote-events skeleton" section below.
+- Prior `2e0919d` (0.185.36) adds per-row style decorators — see
+  "0.185.36 — per-row style decorators" section below.
 - Prior `f24cc24` (0.183.3-diag) adds three `console.log`
   probes inside `DragManager.completeDrag` at the engine emit sites
   (move, resize-left, resize-right). Lets next-session diagnosis see
@@ -92,8 +95,157 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **266,494 bytes** (~260 KB)
-- sha256: `5e110c18aa600ae20f2e7fe95020f55ca5dc6a3341af6dfc4efc76507331e666`
+- Size: **270,034 bytes** (~264 KB)
+- sha256: `8ba08464441f4c76db34359b2b92c4b9012bae430d205c75aa3afdc88a7382cb`
+- **Must re-copy.** `4aa73d9` (0.185.37) adds `handle.pushRemoteEvent` +
+  `handle.getLastAppliedTs` on both engineOnly and chrome runtime handle
+  paths.
+
+**0.185.37 — remote-events skeleton** (source `4aa73d9`). DH CC and CN
+CC, both bundles re-copy. Implements the host-pumped server→client
+event channel from `docs/dispatch-ng-remote-events.md` (committed at
+`ae23410`). NG never opens a transport — hosts subscribe to their
+platform-native push channel (Salesforce Platform Events via
+`lightning/empApi`, CN websocket / SSE), translate each message to a
+`RemoteEvent`, and pump it in.
+
+**Motivation:** today, hosts repaint the gantt by re-fetching their
+backend and calling `handle.setData(tasks, deps)`. That works for
+self-initiated writes, but other clients' writes are invisible until
+the user manually refreshes. Live multi-tenant collaboration on the
+gantt requires push.
+
+**What ships (additive — zero breaking change):**
+
+Two new handle methods:
+
+```ts
+handle.pushRemoteEvent(event: RemoteEvent): void;
+handle.getLastAppliedTs(channel?: string): number | null;
+```
+
+`RemoteEvent` discriminated union (skeleton kinds — full set in
+0.185.38–39):
+
+```ts
+type TaskPatch = Partial<GanttTask> & { id: string };
+
+type RemoteEvent =
+  | { kind: 'task.upsert';  version: 1; tasks: TaskPatch[]; ts?: number; channel?: string; source?: string }
+  | { kind: 'task.delete';  version: 1; ids: string[];      ts?: number; channel?: string; source?: string }
+  | { kind: 'bulk.replace'; version: 1; tasks: GanttTask[]; deps?: GanttDependency[]; ts?: number; channel?: string; source?: string };
+```
+
+**Reducer semantics — per-row, not full-array rebuild.** `task.upsert`
+dispatches `UPDATE_TASK` per existing-id patch (merging only the keys
+present, preserving untouched fields) or `ADD_TASK` per new-id patch
+that has the required `{name, startDate, endDate}`. `task.delete`
+dispatches `REMOVE_TASK`. `bulk.replace` is `setData(tasks, deps)`.
+Scroll, selection, expansion, and concurrent in-flight inline edits
+on other clients survive every event.
+
+**Why per-row matters:** drag-reorder fires many `sortOrder` updates
+per second. If the wire format were full-row replace, those bursts
+would clobber a concurrent name-edit a user is typing on another
+client. Hosts MUST send the smallest patch capturing their write.
+
+**Stale-drop is per-id ts.** NG keeps a `Map<taskId, lastTs>`. Events
+with `ts < lastTs[id]` are dropped silently. Per-id (not per-channel)
+because different tasks have independent edit timelines — a stale
+event on task X shouldn't be gated by the freshest event for task Y.
+Events without `ts` always apply (host opt-out). `bulk.replace`
+clears the entire map — host signaled snapshot reload, prior
+checkpoints are no longer authoritative. `getLastAppliedTs()` returns
+the max ts across all tasks, for the host to checkpoint before
+disconnect.
+
+**Diag emitters wired** (writes to `window.__nga_diag` when
+`localStorage.NGA_DIAG === '1'` / `?nga_diag=1` / `window.NGA_DIAG = true`):
+
+```
+remote:received          { kind, source, ts }
+remote:applied           { kind, merged?, added?, removed?, taskCount? }
+remote:dropped-stale     { kind, count }
+remote:dropped-malformed { reason, kind?, version?, count? }
+```
+
+Cowork `nga-verify.js` can assert two-tab convergence by capturing
+`remote:applied` events on both clients and comparing taskIds.
+
+**DH CC — integration sketch (per dispatch):**
+
+```js
+// LWC connectedCallback (Salesforce-side)
+import { subscribe, unsubscribe } from 'lightning/empApi';
+
+connectedCallback() {
+  this._clientNonce = crypto.randomUUID();
+  // ... mount NG ...
+
+  // 0.185.37: subscribe-from-tip. 0.185.38 will add replayId cursor.
+  subscribe('/event/WorkItemChange__e', -1, (msg) => {
+    const event = this._translatePlatformEvent(msg);  // ~30 lines
+    if (event.clientNonce === this._clientNonce) return;  // self-echo
+    this._mountHandle.pushRemoteEvent(event);
+  }).then(sub => { this._subscription = sub; });
+}
+
+disconnectedCallback() {
+  if (this._subscription) unsubscribe(this._subscription);
+}
+```
+
+Apex side stays as scoped in dispatch — `WorkItemChange__e` Platform
+Event published from `DeliveryWorkItemTriggerHandler.afterInsert/Update/
+Delete`, `ClientNonceTxt__c` write-only field on `WorkItem__c`. Naming
+is `WorkItemChange__e` not `Gantt_Update__e` to avoid collision with the
+existing `GanttRemoteEvent__e` phone-remote channel.
+
+**CN CC — integration sketch:**
+
+```ts
+const clientNonce = crypto.randomUUID();
+const handle = NimbusGanttApp.mount(container, { /* ... */ });
+
+const es = new EventSource('/api/gantt/stream');
+es.onmessage = (msg) => {
+  const event = JSON.parse(msg.data);
+  if (event.clientNonce === clientNonce) return;
+  handle.pushRemoteEvent(event);
+};
+
+// On every CN-side mutation
+fetch('/api/gantt/task', {
+  method: 'PATCH',
+  headers: { 'X-Client-Nonce': clientNonce },
+  body: JSON.stringify(patch),
+});
+```
+
+**Backward compat:** fully additive. Hosts that don't call
+`pushRemoteEvent` see zero behavior change. Existing `setData` is
+unchanged and fully equivalent to a `bulk.replace` event.
+
+**Out of scope (0.185.38+ per dispatch):**
+- `sequence` field for monotonic-cursor stale-drop (CometD `replayId`,
+  websocket sequence numbers). Skeleton uses `ts` only.
+- `dep.upsert` / `dep.delete` events.
+- `host.custom` escape hatch for plugin-routed events.
+- `onRemoteEvent` middleware for self-echo filtering / sanitization.
+- Bounded queue + `remote:queue-overflow` diag.
+- `getLastAppliedSequence(channel)` per-channel cursor for replay-from-cursor reconnect.
+
+**Files touched:** `core/model/types.ts` (RemoteEvent + TaskPatch),
+`core/store/GanttStore.ts` (`translateRemoteEvent` pure helper),
+`core/NimbusGantt.ts` (`pushRemoteEvent`, `getLastAppliedTs`,
+`diagEmit`), `core/store/RemoteEvents.test.ts` (16 vitest cases —
+action-shape correctness + per-id stale-drop semantics),
+`app/IIFEApp.ts` (handle wiring on engineOnly + chrome paths). Full
+vitest suite: 117/117 pass.
+
+---
+
+Prior entry (0.185.36 `2e0919d`):
 
 **0.185.36 — per-row style decorators** (source `2e0919d`). DH CC,
 re-copy `nimbusgantt.resource` (the *core* bundle, NOT the app
