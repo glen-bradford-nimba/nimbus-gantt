@@ -13,22 +13,12 @@
       color: #1e293b;
     }
     #app { display: flex; flex-direction: column; height: 100vh; }
-    header {
-      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-      color: #f1f5f9;
-      padding: 14px 22px;
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      flex-shrink: 0;
-    }
-    header h1 { font-size: 17px; font-weight: 600; }
-    header .meta { font-size: 12px; color: #94a3b8; }
     main { flex: 1; display: flex; min-height: 0; }
     #gantt {
       flex: 1;
       min-height: 0;
       background: #fff;
+      position: relative;
     }
     aside {
       width: 360px;
@@ -37,6 +27,7 @@
       padding: 16px;
       overflow-y: auto;
       font-size: 13px;
+      flex-shrink: 0;
     }
     aside h2 {
       font-size: 12px;
@@ -57,7 +48,6 @@
       font-size: 12px;
       cursor: pointer;
       color: #334155;
-      transition: background 0.15s;
     }
     button:hover { background: #e2e8f0; }
     button.primary {
@@ -79,7 +69,7 @@
       padding: 10px;
       border-radius: 6px;
       overflow-x: auto;
-      max-height: 240px;
+      max-height: 200px;
       overflow-y: auto;
     }
     .status {
@@ -110,10 +100,6 @@
 </head>
 <body>
   <div id="app">
-    <header>
-      <h1>Nimbus Gantt — Temporal Canvas</h1>
-      <span class="meta">past concrete · future ghosty · scrubbable history · agent API</span>
-    </header>
     <main>
       <div id="gantt"></div>
       <aside>
@@ -130,13 +116,13 @@
           <button onclick="window.gantt.history.scrubToNow()" class="primary">↦ Now</button>
         </div>
 
-        <h2>Agent API — try it</h2>
-        <div class="hint">All buttons here go through <code>window.gantt.agent.*</code> — same surface an LLM uses.</div>
+        <h2>Agent API</h2>
+        <div class="hint">All buttons go through <code>window.gantt.agent.*</code> — same surface an LLM uses.</div>
         <div class="btn-row">
           <button onclick="addRandomTask()">Add task</button>
-          <button onclick="moveFirstTask()">Move first task +3d</button>
-          <button onclick="completeFirstTask()">Mark first complete</button>
-          <button onclick="removeRandomTask()" class="danger">Remove random</button>
+          <button onclick="moveFirstTask()">Move first +3d</button>
+          <button onclick="completeFirstTask()">Mark complete</button>
+          <button onclick="removeRandomTask()" class="danger">Remove demo</button>
         </div>
 
         <h2>Annotations</h2>
@@ -159,86 +145,131 @@
   </div>
 
   <script type="module">
-    // Enable diag emitter so Cowork / dev-tools can pick up events.
     window.NGA_DIAG = true;
     window.__nga_diag = [];
 
-    import {
-      NimbusGantt,
-      HistoryPlugin,
-      TimeCursorPlugin,
-      HistoryStripPlugin,
-      TemporalAsymmetryPlugin,
-      MilestonePlugin,
-    } from '@nimbus-gantt/core';
+    // Engine bundle — bring in everything that the cloudnimbus template
+    // expects on the engine namespace, plus our temporal plugins.
+    import * as NgCore from '@nimbus-gantt/core';
+    // App-layer mount (cloudnimbus template — same chrome DH/CN use).
+    import { IIFEApp } from '@nimbus-gantt/app';
     import { sampleTasks, sampleDependencies } from './sample-data.ts';
 
-    // Build a gantt against the demo container.
+    // Sample data hardcodes TODAY=2026-04-01. Shift every date so the
+    // dataset is centered on actual current date — otherwise nothing
+    // looks "future" and the asymmetry plugin has nothing to render.
+    const SAMPLE_PINNED_TODAY = new Date(Date.UTC(2026, 3, 1)).getTime();
+    const REAL_TODAY = (() => {
+      const d = new Date();
+      return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    })();
+    const SHIFT_DAYS = Math.round((REAL_TODAY - SAMPLE_PINNED_TODAY) / 86400000);
+    function shiftIso(iso) {
+      const t = new Date(iso + 'T00:00:00Z').getTime() + SHIFT_DAYS * 86400000;
+      return new Date(t).toISOString().slice(0, 10);
+    }
+
+    // IIFEApp expects NormalizedTask shape from the app layer. The fields
+    // overlap with GanttTask but the app's normalizer maps `name → title`,
+    // etc. For the cloudnimbus template's PriorityGrouping buckets we also
+    // need a priorityGroup or groupId mapping. Sample tasks already carry
+    // groupId; cloudnimbus template buckets expect 'NOW'/'NEXT'/'PLANNED'
+    // values, so we map status → bucket as a coarse default.
+    function statusToBucket(status) {
+      if (!status) return 'PLANNED';
+      const s = String(status).toLowerCase();
+      if (s.includes('complete') || s.includes('done')) return 'NOW';
+      if (s.includes('blocked')) return 'HOLD';
+      if (s.includes('dev') || s.includes('test') || s.includes('review')) return 'NOW';
+      if (s.includes('planning')) return 'NEXT';
+      return 'PLANNED';
+    }
+
+    const shiftedTasks = sampleTasks.map((t) => ({
+      // Required fields the app layer expects (NormalizedTask shape)
+      id: t.id,
+      title: t.name,
+      startDate: shiftIso(t.startDate),
+      endDate: shiftIso(t.endDate),
+      // Pass through useful optional fields
+      progress: t.progress,
+      status: t.status,
+      parentId: t.parentId,
+      groupId: statusToBucket(t.status),
+      groupName: t.groupName,
+      isMilestone: t.isMilestone,
+      assignee: t.assignee,
+      sortOrder: t.sortOrder,
+    }));
+
     const container = document.getElementById('gantt');
-    const gantt = new NimbusGantt(container, {
-      tasks: sampleTasks,
+
+    // Mount the app with the cloudnimbus template — same chrome surface
+    // DH and cloudnimbusllc.com /v12 render. Pass the core namespace as
+    // the engine so PriorityGroupingPlugin / TemporalAsymmetryPlugin /
+    // hoursWeightedProgress are reachable from the IIFE app's plugin
+    // installer code paths.
+    const handle = IIFEApp.mount(container, {
+      tasks: shiftedTasks,
       dependencies: sampleDependencies,
-      zoomLevel: 'week',
-      showToday: true,
-      colorMap: {
-        'Planning':    '#94a3b8',
-        'Development': '#3b82f6',
-        'Testing':     '#a78bfa',
-        'Review':      '#f59e0b',
-        'Complete':    '#10b981',
-        'Blocked':     '#ef4444',
+      engine: NgCore,
+      mode: 'fullscreen',
+      onPatch: async (patch) => {
+        // Demo doesn't persist — just log and let the engine render.
+        console.log('[demo] onPatch', patch);
       },
+      // Auto-installed asymmetry plugin (0.186.0). Pass a little heavier
+      // fade for visibility on the demo.
+      temporalAsymmetry: { futureFadeStrength: 0.55 },
     });
 
-    // Install temporal-canvas plugins. Order matters:
-    // 1. HistoryPlugin first — provides the substrate (gantt.history.*)
-    // 2. TimeCursorPlugin + HistoryStripPlugin consume the substrate
-    // 3. TemporalAsymmetryPlugin renders past/future visual split
-    gantt.use(MilestonePlugin());
-    gantt.use(HistoryPlugin({
-      capacity: 2000,
-      defaultActor: 'demo-user',
-      onEntry: (entry) => {
-        // In a real host this writes to durable storage.
-        // Demo just refreshes the side panel.
-        refreshPanel();
-      },
-      onAnnotation: (a) => refreshPanel(),
-    }));
-    gantt.use(TimeCursorPlugin({}));
-    gantt.use(HistoryStripPlugin({}));
-    gantt.use(TemporalAsymmetryPlugin({
-      futureFadeStrength: 0.45,
-    }));
+    // The handle exposes the underlying engine via .gantt (added in
+    // 0.187.0). Install the rest of the temporal-canvas plugins on top.
+    const ng = handle.gantt;
+    if (ng) {
+      ng.use(NgCore.HistoryPlugin({
+        capacity: 2000,
+        defaultActor: 'demo-user',
+        onEntry: () => refreshPanel(),
+        onAnnotation: () => refreshPanel(),
+      }));
+      ng.use(NgCore.TimeCursorPlugin({}));
+      ng.use(NgCore.HistoryStripPlugin({}));
+    }
 
-    // Expose for browser console + agent interaction.
-    window.gantt = gantt;
+    // Convenience for browser-console interaction. window.gantt is the
+    // engine instance with full agent + history APIs; window.handle is
+    // the IIFE app handle (setData / pushRemoteEvent / etc).
+    window.gantt = ng;
+    window.handle = handle;
     window.diag = () => window.__nga_diag;
 
-    // ── Side-panel helpers (call agent API for honesty) ─────────────────
+    // ── Side panel renderer ─────────────────────────────────────────────
     function refreshPanel() {
-      const cursor = gantt.getTimeCursor();
+      if (!ng) return;
+      const cursor = ng.getTimeCursor();
       document.getElementById('cursor-status').innerHTML =
         cursor
           ? `cursor: <span class="scrubbed">${cursor.toISOString().slice(0, 10)}</span>`
           : `cursor: <span class="live">live</span>`;
 
       document.getElementById('capabilities').textContent =
-        JSON.stringify(gantt.capabilities(), null, 2);
+        JSON.stringify(ng.capabilities(), null, 2);
 
-      const snapshot = gantt.agent.getSnapshot();
+      const snapshot = ng.agent.getSnapshot();
       document.getElementById('snapshot').textContent = JSON.stringify({
         cursorDate: snapshot.cursorDate,
         zoom: snapshot.zoomLevel,
         taskCount: snapshot.tasks.length,
         depCount: snapshot.dependencies.length,
-        selected: snapshot.selectedIds,
-        firstTask: snapshot.tasks[0]
-          ? { id: snapshot.tasks[0].id, name: snapshot.tasks[0].name, startDate: snapshot.tasks[0].startDate }
-          : null,
+        firstTask: snapshot.tasks[0] ? {
+          id: snapshot.tasks[0].id,
+          name: snapshot.tasks[0].name,
+          startDate: snapshot.tasks[0].startDate,
+        } : null,
       }, null, 2);
 
-      const h = gantt.agent.history();
+      const h = ng.agent.history();
       if (h) {
         const recent = h.entries.slice(-5).reverse().map(e => ({
           actionType: e.actionType,
@@ -251,20 +282,19 @@
       }
     }
 
-    // Subscribe to store changes so the panel stays fresh during scrubs.
-    const interval = setInterval(refreshPanel, 250);
-    window.addEventListener('beforeunload', () => clearInterval(interval));
+    setInterval(refreshPanel, 250);
     refreshPanel();
 
-    // ── Demo button handlers (all use agent API) ────────────────────────
+    // ── Demo button handlers ───────────────────────────────────────────
     let nextId = 100;
     window.addRandomTask = () => {
+      if (!ng) return;
       const id = `demo-${nextId++}`;
       const start = new Date();
       start.setDate(start.getDate() + Math.floor(Math.random() * 30) - 15);
       const end = new Date(start);
       end.setDate(end.getDate() + 5 + Math.floor(Math.random() * 10));
-      gantt.agent.addTask({
+      ng.agent.addTask({
         id,
         name: `Demo task ${id}`,
         startDate: start.toISOString().slice(0, 10),
@@ -274,54 +304,59 @@
     };
 
     window.moveFirstTask = () => {
-      const snap = gantt.agent.getSnapshot();
+      if (!ng) return;
+      const snap = ng.agent.getSnapshot();
       if (!snap.tasks.length) return;
       const t = snap.tasks[0];
       const start = new Date(t.startDate);
       start.setDate(start.getDate() + 3);
       const end = new Date(t.endDate);
       end.setDate(end.getDate() + 3);
-      gantt.agent.moveTask(t.id, start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+      ng.agent.moveTask(t.id, start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
     };
 
     window.completeFirstTask = () => {
-      const snap = gantt.agent.getSnapshot();
+      if (!ng) return;
+      const snap = ng.agent.getSnapshot();
       if (!snap.tasks.length) return;
-      gantt.agent.updateTask(snap.tasks[0].id, { progress: 1, status: 'Complete' });
+      ng.agent.updateTask(snap.tasks[0].id, { progress: 1, status: 'Complete' });
     };
 
     window.removeRandomTask = () => {
-      const snap = gantt.agent.getSnapshot();
+      if (!ng) return;
+      const snap = ng.agent.getSnapshot();
       const candidates = snap.tasks.filter(t => t.id.startsWith('demo-'));
       if (!candidates.length) return;
       const target = candidates[Math.floor(Math.random() * candidates.length)];
-      gantt.agent.removeTask(target.id);
+      ng.agent.removeTask(target.id);
     };
 
     window.addCommentAnnotation = () => {
-      const snap = gantt.agent.getSnapshot();
+      if (!ng) return;
+      const snap = ng.agent.getSnapshot();
       const t = snap.tasks[Math.floor(Math.random() * snap.tasks.length)];
-      gantt.agent.appendAnnotation('comment', t?.id, {
+      ng.agent.appendAnnotation('comment', t?.id, {
         author: 'demo-user',
         text: `comment on ${t?.name ?? 'unknown'}`,
       });
     };
 
     window.addDecisionAnnotation = () => {
-      gantt.agent.appendAnnotation('decision', undefined, {
+      if (!ng) return;
+      ng.agent.appendAnnotation('decision', undefined, {
         text: 'Decision recorded at ' + new Date().toLocaleTimeString(),
       });
     };
 
     window.addAgentAnnotation = () => {
-      gantt.agent.appendAnnotation('agent-note', undefined, {
+      if (!ng) return;
+      ng.agent.appendAnnotation('agent-note', undefined, {
         suggestion: 'Consider rebalancing capacity in week 3',
       });
     };
 
-    // ── Greeting log so it's obvious the API surface is live ────────────
     console.log(
-      '%c[Temporal Canvas Demo loaded]',
+      '%c[Temporal Canvas Demo loaded — cloudnimbus template]',
       'font-weight: bold; color: #3b82f6;',
       '\n\nTry these in the console:\n' +
         '  window.gantt.agent.getSnapshot()\n' +
@@ -329,6 +364,7 @@
         '  window.gantt.agent.scrubTo(null)\n' +
         '  window.gantt.history.entries()\n' +
         '  window.gantt.capabilities()\n' +
+        '  window.handle.pushRemoteEvent({...})\n' +
         '  window.diag()\n'
     );
   </script>

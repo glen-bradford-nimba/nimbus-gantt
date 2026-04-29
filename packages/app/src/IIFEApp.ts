@@ -930,6 +930,14 @@ export class IIFEApp {
       }
 
       return {
+        /** 0.187.0 — direct access to the underlying NimbusGantt engine
+         *  instance. Hosts that want to install additional plugins
+         *  (HistoryPlugin / TimeCursorPlugin / etc.) after mount, or call
+         *  any core API not exposed on the handle, can do so via this
+         *  accessor. Loosely typed because the public NimbusGanttEngine
+         *  interface is intentionally minimal. */
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        gantt: inst as any,
         setTasks(tasks: NormalizedTask[]) {
           allTasks = tasks;
           _syncToCanvas();
@@ -2525,6 +2533,10 @@ export class IIFEApp {
     registry.push({ container, cleanup });
 
     return {
+      /** 0.187.0 — direct access to the underlying NimbusGantt engine
+       *  instance for additional plugin installs / direct core API calls. */
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      get gantt(): any { return ganttInst; },
       setTasks(tasks: NormalizedTask[]) {
         allTasks = tasks;
         depthMap = buildDepthMap(allTasks);

@@ -6,6 +6,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@nimbus-gantt/core': resolve(__dirname, '../core/src/index.ts'),
+      '@nimbus-gantt/app': resolve(__dirname, '../app/src/IIFEApp.ts'),
     },
   },
   build: {
