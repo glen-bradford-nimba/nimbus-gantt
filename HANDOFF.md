@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `4aa73d9` *(0.185.37 remote-events skeleton)* |
-| Commit subject | `feat(0.185.37): remote-events skeleton — host-pumped server→client channel` |
+| Commit SHA (source — latest) | `b5f3176` *(0.186.0 + 0.187.0 temporal canvas)* |
+| Commit subject | `feat(0.186.0 + 0.187.0): temporal canvas — past concrete, future ghosty + scrubbable history substrate + agent API` |
+| 0.186.0 + 0.187.0 temporal canvas | `b5f3176` |
 | 0.185.37 remote-events skeleton | `4aa73d9` |
 | 0.185.36 row-style decorators | `2e0919d` |
 | 0.185.35 positional reorder | `d2ac51a` |
@@ -72,9 +73,13 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **277,061 bytes** (~270 KB)
-- sha256: `25a6295827d9d3cd2f92a2cf0c58fd80757c597ff3340aa3427c846a5a257717`
-- **Must re-copy.** `4aa73d9` (0.185.37) adds the remote-events skeleton
+- Size: **287,405 bytes** (~280 KB)
+- sha256: `96caedef510bfeeedae5da01acb36ed89f5cb8f150dfadc1d5d4ae098e51913a`
+- **Must re-copy.** `b5f3176` (0.186.0 + 0.187.0) adds three temporal-
+  canvas plugins (TemporalAsymmetryPlugin / HistoryPlugin / TimeCursorPlugin)
+  + agent API + state.timeCursorDate + getDisplayState replay path. See
+  "0.186.0 + 0.187.0 — temporal canvas" section below.
+- Prior `4aa73d9` (0.185.37) adds the remote-events skeleton
   — see "0.185.37 — remote-events skeleton" section below.
 - Prior `2e0919d` (0.185.36) adds per-row style decorators — see
   "0.185.36 — per-row style decorators" section below.
@@ -95,11 +100,229 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **270,034 bytes** (~264 KB)
-- sha256: `8ba08464441f4c76db34359b2b92c4b9012bae430d205c75aa3afdc88a7382cb`
-- **Must re-copy.** `4aa73d9` (0.185.37) adds `handle.pushRemoteEvent` +
-  `handle.getLastAppliedTs` on both engineOnly and chrome runtime handle
-  paths.
+- Size: **270,825 bytes** (~265 KB)
+- sha256: `daccc75a29b99b04696e95bad1b24bc039f35bee60f8ca44da6e55a5811dadaa`
+- **Must re-copy.** `b5f3176` (0.186.0) auto-installs TemporalAsymmetryPlugin
+  on both engineOnly + chrome mount paths so glen-walk + /v12 light up
+  with past/future visual asymmetry without any host-side change. Hosts
+  opt out via `mountConfig.temporalAsymmetry: false`.
+- Prior `4aa73d9` (0.185.37) adds `handle.pushRemoteEvent` +
+  `handle.getLastAppliedTs` on both runtime handle paths.
+
+**0.186.0 + 0.187.0 — temporal canvas** (source `b5f3176`). DH CC and
+CN CC, both bundles re-copy. Implements
+`docs/dispatch-ng-temporal-canvas.md` across three composable plugins on
+top of one substrate. Per Glen's design constraint: additive, opt-in,
+zero-cost when off.
+
+**0.186.0 — TemporalAsymmetryPlugin (auto-installed in IIFE)**
+
+Past bars render concrete (full opacity), future bars render ghosty
+(translucent fade toward theme background + dashed outline). Bars
+spanning today render split — concrete left of today-line, ghosty
+right. Past completed bars (progress >= 1) get a ✓ checkmark.
+
+Auto-installed by IIFEApp on both engineOnly + chrome mount paths.
+**Hosts see the visual change automatically on bundle re-copy** — no
+LWC change required. Opt out via `mountConfig.temporalAsymmetry: false`.
+Customize via `mountConfig.temporalAsymmetry: { ... TemporalAsymmetryOptions ... }`.
+
+```ts
+interface TemporalAsymmetryOptions {
+  futureFadeStrength?: number;        // 0–1, default 0.55
+  futureFadeColor?: string;           // default theme.timelineBg
+  futureDashedBorder?: boolean;       // default true
+  futureDashPattern?: [number, number]; // default [4, 3]
+  futureDashWidth?: number;           // default 1
+  futureDashColor?: string;           // default desaturated bar color
+  pastShowCheckmark?: boolean;        // default true
+  pastCheckmarkColor?: string;        // default auto-contrast vs bar
+  todayProvider?: () => Date;         // default () => new Date()
+}
+```
+
+Bret Victor's "Inventing on Principle" (2012, vimeo 36579366, ~14:00) is
+the conceptual ancestor — direct visual distinction between concrete
+past and uncertain future.
+
+**0.187.0 — HistoryPlugin substrate (opt-in)**
+
+Append-only ring buffer of `(action, inverseAction)` pairs captured via
+store middleware. Replay-to-past = dispatch inverse actions backwards
+through the same pure reducer that handles forward actions. Each
+action's inverse is itself a valid Action, so no special replay reducer
+is needed and zero runtime dependencies are added (CLAUDE.md invariant
+preserved).
+
+```ts
+import { HistoryPlugin } from '@nimbus-gantt/core';
+
+gantt.use(HistoryPlugin({
+  capacity: 5000,                // ring buffer size, default 5000
+  compactAfterIdleMs: 30000,     // compaction trigger, default 30s
+  compactKeep: 500,              // entries kept after compaction
+  hydrate: priorEntries,         // host-supplied historical log on remount
+  hydrateAnnotations: priorAnno, // host-supplied annotations
+  onEntry: (entry) => {          // persist to durable storage (DH/CN)
+    saveToBackingStore(entry);
+  },
+  onAnnotation: (a) => { ... },
+  onSnapshotRequest: async (date) => { ... },  // far-back queries
+  defaultActor: 'glen@nimba',
+  defaultSource: 'local',
+}));
+```
+
+Public API exposed at `gantt.history.*`:
+
+```ts
+interface HistoryAPI {
+  entries(): readonly HistoryEntry[];
+  annotations(): readonly HistoryAnnotation[];
+  snapshotAt(date: Date): GanttState | null;
+  appendAnnotation(annotation): void;
+  lastWallTs(): number | null;
+  scrubTo(date: Date | null): void;
+  scrubToNow(): void;
+}
+```
+
+Records only the 7 persistent action types (`SET_DATA`, `UPDATE_TASK`,
+`ADD_TASK`, `REMOVE_TASK`, `TASK_MOVE`, `TASK_RESIZE`, `ADD_DEPENDENCY`,
+`REMOVE_DEPENDENCY`). View-only actions (scroll, zoom, selection,
+expansion, drag-update, set-time-cursor) are deliberately skipped to
+keep the log size bounded under normal UI use.
+
+Diag emitters wired (writes to `window.__nga_diag` per the standard
+opt-in flag): `history:entry-recorded`, `history:scrub`,
+`history:compaction`, `history:snapshot-miss`,
+`history:annotation-added`, `history:hydrate`, `history:overflow-drop`.
+
+**0.187.0 — TimeCursorPlugin (opt-in)**
+
+DAW-convention vertical playhead at `state.timeCursorDate` + colored
+"NOW" bracket so users always locate the live edge. Keyboard
+shortcuts: `Home` jumps to baseline (oldest log entry), `End` returns
+to live, `Alt/Cmd+Arrow` steps by 1 day. Bails on keyboard scrub when
+an input/textarea/contenteditable is focused.
+
+```ts
+gantt.use(TimeCursorPlugin({
+  cursorColor: '#3b82f6',
+  cursorWidth: 2,
+  showNowBracket: true,
+  nowBracketColor: '#10b981',
+  enableKeyboardShortcuts: true,
+  stepMs: 86_400_000,  // 1 day
+}));
+```
+
+Pointer drag-to-scrub deferred to 0.187.1. Hosts can wire custom drag
+UI today via `gantt.history.scrubTo(date)`.
+
+**0.187.0 — Agent API (`gantt.agent.*`)**
+
+JSON-serializable programmatic surface for LLMs / external controllers
+to drive the gantt without DOM events. Every method routes through the
+same reducer pipeline as user gestures, so HistoryPlugin captures
+agent-driven mutations identically to user-driven ones.
+
+```ts
+interface AgentAPI {
+  getSnapshot(): AgentSnapshot;       // ISO-string dates, JSON-friendly
+  updateTask(taskId, changes): void;
+  addTask(task): void;
+  removeTask(taskId): void;
+  moveTask(taskId, startDate, endDate): void;
+  addDependency(dep): void;
+  removeDependency(depId): void;
+  setSelection(taskIds): void;
+  setZoom(level): void;
+  scrubTo(isoDateOrNull): void;
+  history(): AgentHistoryView | null;
+  appendAnnotation(kind, taskId?, payload?): boolean;
+}
+```
+
+Plus `gantt.capabilities()` for runtime feature detection. Agents
+discover what plugins are loaded and which capabilities are wired
+without out-of-band coordination. Designed for MCP / WebSocket / HTTP
+exposure — every input/output is JSON-serializable.
+
+**0.187.0 — Core wiring**
+
+  * `state.timeCursorDate: Date | null` — view-only, not logged.
+  * `SET_TIME_CURSOR` action + reducer case.
+  * `gantt.getDisplayState()` returns replayed state when cursor is
+    set + a replay provider is registered, else live state.
+    Single-indirection on the render path; zero perf cost when no cursor.
+  * `gantt.registerReplayProvider({snapshotAt})` — HistoryPlugin
+    auto-registers; future plugins can layer on top.
+  * `gantt.setTimeCursor`, `gantt.getTimeCursor`, `gantt.getState`
+    public methods on the NimbusGantt class.
+
+**Cross-client convergence is free** via the 0.185.37 remote-events
+channel — when client A makes an edit, client B receives via
+`pushRemoteEvent` → dispatches the same action through the same
+reducer → middleware captures the matching inverse with the matching
+wallTs → both clients have convergent history logs without any extra
+wire format. The architectural choice that made remote events correct
+(per-row reducer dispatch through existing actions) is what makes
+scrubbable history correct across multi-user surfaces.
+
+**Tests:** 11 new HistoryPlugin tests covering inverse-action
+round-trips, multi-step replay correctness, probe-store isolation
+(replay does not perturb live store), `SET_TIME_CURSOR` reducer
+semantics. Full vitest suite: 128/128 pass (was 117).
+
+**DH CC / CN CC integration sketch:**
+
+```js
+// 0.187.0 — opt in to scrubbable history
+import { HistoryPlugin, TimeCursorPlugin } from '@nimbus-gantt/core';
+
+const handle = NimbusGanttApp.mount(container, { /* ... */ });
+const historicalEntries = await fetchHistoryFromBackingStore();
+
+handle.gantt.use(HistoryPlugin({
+  hydrate: historicalEntries,
+  onEntry: (entry) => persistToBackingStore(entry),
+}));
+handle.gantt.use(TimeCursorPlugin({}));
+
+// Agent (Anthropic SDK / MCP / WebSocket)
+const snapshot = handle.gantt.agent.getSnapshot();
+handle.gantt.agent.scrubTo('2026-04-15T00:00:00Z');
+handle.gantt.agent.appendAnnotation('agent-note', 'wi-42', {
+  text: 'Suggesting move to next sprint based on capacity analysis',
+});
+```
+
+DH CC: schema for `delivery__GanttAuditLog__c` (proposal) — see the
+temporal-canvas dispatch (`docs/dispatch-ng-temporal-canvas.md`) for
+the field layout. Persistence is incremental on the Apex audit infra
+already publishing `DeliveryWorkItemChange__e`.
+
+CN CC: store events in a `gantt_history` table on Postgres / API
+tier. Same `(ts, action_type, action_json, forward_patches_json,
+inverse_patches_json, actor, source)` shape — but for 0.187.0
+patches aren't needed (replay uses inverse actions). Schema:
+`(ts, wall_ts, action_type, action_json, inverse_action_json,
+actor, source)`. Index on `wall_ts`.
+
+**Out of scope (deferred to 0.188.0+):**
+- HistoryStripPlugin (annotation track above timeline) — straightforward
+  add on top of `gantt.history.annotations()`.
+- ForecastPlugin (forward-scrub + hypothesis preview) — layers on
+  AutoSchedulePlugin + agent.appendAnnotation.
+- ReplayNarrationPlugin (agent narrates "what changed during scrub").
+- Pointer drag-to-scrub UI (host can wire today via API).
+- Branching from past (Figma-convention auto-resume to NOW on edit
+  is the v1 model).
+
+---
+
+Prior entry (0.185.37 `4aa73d9`):
 
 **0.185.37 — remote-events skeleton** (source `4aa73d9`). DH CC and CN
 CC, both bundles re-copy. Implements the host-pumped server→client
