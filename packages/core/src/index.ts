@@ -30,6 +30,10 @@ export type {
   DecoratorBorderWidth,
   DecoratorFillStyle,
   DecoratorBadgePlacement,
+  AgentAPI,
+  AgentSnapshot,
+  AgentHistoryView,
+  AgentHistoryEntry,
 } from './model/types';
 
 // DAG utilities — consumers that need to walk parentId + additionalParentIds
@@ -116,3 +120,14 @@ export { WhatIfPlugin } from './plugins/WhatIfPlugin';
 export type { WhatIfScenario, WhatIfChange } from './plugins/WhatIfPlugin';
 export { SonificationPlugin } from './plugins/SonificationPlugin';
 export type { SonificationConfig } from './plugins/SonificationPlugin';
+export { TemporalAsymmetryPlugin } from './plugins/TemporalAsymmetryPlugin';
+export type { TemporalAsymmetryOptions } from './plugins/TemporalAsymmetryPlugin';
+export { HistoryPlugin } from './plugins/HistoryPlugin';
+export type {
+  HistoryEntry,
+  HistoryAnnotation,
+  HistoryAPI,
+  HistoryPluginOptions,
+} from './plugins/HistoryPlugin';
+export { TimeCursorPlugin } from './plugins/TimeCursorPlugin';
+export type { TimeCursorOptions } from './plugins/TimeCursorPlugin';

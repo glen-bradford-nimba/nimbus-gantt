@@ -275,6 +275,11 @@ export interface GanttState {
   dateRange: { start: Date; end: Date };
   dragState: DragState | null;
   config: ResolvedConfig;
+  /** 0.187.0 — temporal-canvas time cursor. null = live (default). When
+   *  set to a Date, `gantt.getDisplayState()` resolves the visible state
+   *  through the installed HistoryPlugin's replay rather than from the
+   *  live store. View-only field; HistoryPlugin owns lifecycle. */
+  timeCursorDate?: Date | null;
 }
 
 export interface DragState {
@@ -362,7 +367,66 @@ export type Action =
   | { type: 'TASK_RESIZE'; taskId: string; startDate: string; endDate: string }
   | { type: 'ADD_DEPENDENCY'; dependency: GanttDependency }
   | { type: 'REMOVE_DEPENDENCY'; dependencyId: string }
-  | { type: 'SET_DATE_RANGE'; start: Date; end: Date };
+  | { type: 'SET_DATE_RANGE'; start: Date; end: Date }
+  | { type: 'SET_TIME_CURSOR'; date: Date | null };
+
+// ─── Agent API (0.187.0) ────────────────────────────────────────────────
+// Programmatic surface for LLMs / external controllers to drive the gantt
+// without DOM events. Every method is JSON-serializable I/O so the API
+// works over MCP / WebSocket / HTTP without custom marshaling.
+
+/** JSON-serializable snapshot of gantt state at the current cursor. */
+export interface AgentSnapshot {
+  /** Current time cursor as ISO date string, or null when live. */
+  cursorDate: string | null;
+  zoomLevel: ZoomLevel;
+  tasks: GanttTask[];
+  dependencies: GanttDependency[];
+  selectedIds: string[];
+  expandedIds: string[];
+  flatVisibleIds: string[];
+}
+
+export interface AgentHistoryEntry {
+  ts: number;
+  wallTs: number;
+  actionType: string;
+  source?: string;
+  actor?: string;
+}
+
+export interface AgentHistoryView {
+  entries: AgentHistoryEntry[];
+  annotations: Array<{
+    ts: number;
+    wallTs: number;
+    kind: string;
+    taskId?: string;
+    payload?: unknown;
+  }>;
+  lastWallTs: number | null;
+}
+
+export interface AgentAPI {
+  getSnapshot(): AgentSnapshot;
+  updateTask(taskId: string, changes: Partial<GanttTask>): void;
+  addTask(task: GanttTask): void;
+  removeTask(taskId: string): void;
+  moveTask(taskId: string, startDate: string, endDate: string): void;
+  addDependency(dep: GanttDependency): void;
+  removeDependency(dependencyId: string): void;
+  setSelection(taskIds: string[]): void;
+  setZoom(level: ZoomLevel): void;
+  /** Scrub the time cursor. Pass an ISO string to scrub to a past
+   *  moment, or null to return to live mode. */
+  scrubTo(date: string | null): void;
+  /** Returns a JSON-friendly view of the history log + annotations,
+   *  or null if HistoryPlugin isn't installed. */
+  history(): AgentHistoryView | null;
+  /** Append an annotation (comment / decision / agent-note). Returns
+   *  false when HistoryPlugin isn't installed. */
+  appendAnnotation(kind: string, taskId?: string, payload?: unknown): boolean;
+}
 
 // ─── Plugin Interface ───────────────────────────────────────────────────────
 

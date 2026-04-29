@@ -175,6 +175,13 @@ export interface NimbusGanttEngine {
   PriorityGroupingPlugin?: (...args: any[]) => any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   hoursWeightedProgress?: (...args: any[]) => any;
+  // 0.186.0 — temporal canvas plugins
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  TemporalAsymmetryPlugin?: (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  HistoryPlugin?: (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  TimeCursorPlugin?: (...args: any[]) => any;
 }
 
 /** Render mode — controls which chrome slots are rendered.
@@ -215,6 +222,12 @@ export interface MountOptions {
    *  Salesforce synthetic shadow DOM). Overrides the template's own
    *  stylesheet.url. Typical use: the LWC passes a static-resource URL. */
   cssUrl?: string;
+  /** 0.186.0 — temporal-asymmetry rendering (past concrete, future ghosty).
+   *  Default ON. Pass `false` to disable, or an options object to customize
+   *  fade strength, dash pattern, checkmark behavior, etc. See
+   *  TemporalAsymmetryOptions in @nimbus-gantt/core. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  temporalAsymmetry?: false | Record<string, any>;
   /** Optional consumer-facing interaction callbacks. Each is forwarded from
    *  the underlying NimbusGantt engine event (plus a container-level
    *  contextmenu listener) so host apps can render tooltips, context menus,

@@ -860,6 +860,21 @@ export class IIFEApp {
           getBucket: (task: { groupId?: string | null }) => task.groupId || null,
         }));
       }
+      // 0.186.0 — temporal asymmetry. Past concrete, future ghosty,
+      // checkmark on completed past bars. Default ON; hosts opt out via
+      // mountConfig.temporalAsymmetry === false.
+      if (
+        options.temporalAsymmetry !== false &&
+        typeof tplConfig.engine?.TemporalAsymmetryPlugin === 'function'
+      ) {
+        try {
+          inst.use(tplConfig.engine.TemporalAsymmetryPlugin(
+            typeof options.temporalAsymmetry === 'object'
+              ? options.temporalAsymmetry
+              : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
       inst.setData(gtasks, allDependencies);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
       // Initial viewport positioning. 0.185.1 priority order matches the
@@ -2217,6 +2232,20 @@ export class IIFEApp {
           getBucket: (task: { groupId?: string | null }) => task.groupId || null,
           getBucketProgress: bucketProgressFn,
         }));
+      }
+
+      // 0.186.0 — temporal asymmetry. See engineOnly path for rationale.
+      if (
+        options.temporalAsymmetry !== false &&
+        typeof tplConfig.engine?.TemporalAsymmetryPlugin === 'function'
+      ) {
+        try {
+          ganttInst.use(tplConfig.engine.TemporalAsymmetryPlugin(
+            typeof options.temporalAsymmetry === 'object'
+              ? options.temporalAsymmetry
+              : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
       }
 
       ganttInst.setData(gtasks, allDependencies);

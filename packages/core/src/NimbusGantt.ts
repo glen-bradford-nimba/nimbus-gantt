@@ -15,6 +15,8 @@ import type {
   PluginHost,
   Action,
   RemoteEvent,
+  AgentAPI,
+  AgentSnapshot,
 } from './model/types';
 import { buildTree, computeDateRange } from './model/TaskTree';
 import { GanttStore, translateRemoteEvent, type Middleware } from './store/GanttStore';
@@ -132,6 +134,13 @@ export class NimbusGantt {
   // 0.185.38 layers per-channel sequence checkpoints on top of this for
   // reconnect cursors.
   private lastAppliedTs = new Map<string, number>();
+
+  // 0.187.0 — temporal-canvas substrate. HistoryPlugin (or any plugin
+  // implementing the snapshot interface) registers itself here on install;
+  // getDisplayState() consults it when timeCursorDate is set. null means
+  // no replay provider — render path always returns live state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private replayProvider: { snapshotAt: (date: Date) => GanttState | null } | null = null;
 
   constructor(container: HTMLElement, config: GanttConfig) {
     this.container = container;
@@ -446,6 +455,157 @@ export class NimbusGantt {
   }
 
   /**
+   * 0.187.0 — returns the state to render. When `state.timeCursorDate` is
+   * set AND a replay provider is registered (HistoryPlugin), returns the
+   * replayed historical state. Otherwise returns the live store state.
+   *
+   * Public so plugins (and the agent API) can query the visible state
+   * regardless of cursor position.
+   */
+  getDisplayState(): GanttState {
+    const live = this.store.getState();
+    const cursor = live.timeCursorDate;
+    if (!cursor || !this.replayProvider) return live;
+    const replayed = this.replayProvider.snapshotAt(cursor);
+    return replayed ?? live;
+  }
+
+  /**
+   * 0.187.0 — register a replay provider (HistoryPlugin). Returns an
+   * unregister function. Only one provider at a time; subsequent
+   * registrations replace the previous.
+   */
+  registerReplayProvider(
+    provider: { snapshotAt: (date: Date) => GanttState | null },
+  ): () => void {
+    this.replayProvider = provider;
+    return () => {
+      if (this.replayProvider === provider) this.replayProvider = null;
+    };
+  }
+
+  /**
+   * 0.187.0 — set or clear the time cursor. `null` returns to live mode
+   * and triggers a re-render of the live state. Convenience wrapper
+   * over `dispatch({ type: 'SET_TIME_CURSOR', date })`.
+   */
+  setTimeCursor(date: Date | null): void {
+    this.store.dispatch({ type: 'SET_TIME_CURSOR', date });
+  }
+
+  /**
+   * 0.187.0 — current time cursor, or null when in live mode.
+   */
+  getTimeCursor(): Date | null {
+    return this.store.getState().timeCursorDate ?? null;
+  }
+
+  /**
+   * 0.187.0 — read-only snapshot of the current live state. Plugins and
+   * agents (LLMs driving the gantt programmatically) consume this.
+   */
+  getState(): GanttState {
+    return this.store.getState();
+  }
+
+  /**
+   * 0.187.0 — programmatic agent API. Lets an LLM (or any external
+   * controller) drive the gantt without simulating DOM events. Every
+   * mutation flows through the existing reducer, so plugins (HistoryPlugin,
+   * AutoSchedulePlugin, etc.) observe agent-driven actions identically
+   * to user-driven ones. JSON-serializable I/O so agents can use this
+   * over MCP / WebSocket / HTTP without custom marshaling.
+   */
+  agent: AgentAPI = {
+    getSnapshot: (): AgentSnapshot => {
+      const state = this.getDisplayState();
+      return {
+        cursorDate: state.timeCursorDate ? state.timeCursorDate.toISOString() : null,
+        zoomLevel: state.zoomLevel,
+        tasks: Array.from(state.tasks.values()),
+        dependencies: Array.from(state.dependencies.values()),
+        selectedIds: Array.from(state.selectedIds),
+        expandedIds: Array.from(state.expandedIds),
+        flatVisibleIds: state.flatVisibleIds.slice(),
+      };
+    },
+    updateTask: (taskId, changes) => {
+      this.store.dispatch({ type: 'UPDATE_TASK', taskId, changes });
+    },
+    addTask: (task) => {
+      this.store.dispatch({ type: 'ADD_TASK', task });
+    },
+    removeTask: (taskId) => {
+      this.store.dispatch({ type: 'REMOVE_TASK', taskId });
+    },
+    moveTask: (taskId, startDate, endDate) => {
+      this.store.dispatch({ type: 'TASK_MOVE', taskId, startDate, endDate });
+    },
+    addDependency: (dep) => {
+      this.store.dispatch({ type: 'ADD_DEPENDENCY', dependency: dep });
+    },
+    removeDependency: (dependencyId) => {
+      this.store.dispatch({ type: 'REMOVE_DEPENDENCY', dependencyId });
+    },
+    setSelection: (taskIds) => {
+      this.store.dispatch({ type: 'DESELECT_ALL' });
+      for (const id of taskIds) {
+        this.store.dispatch({ type: 'SELECT_TASK', taskId: id, multi: true });
+      }
+    },
+    setZoom: (level) => {
+      this.store.dispatch({ type: 'SET_ZOOM', level });
+    },
+    scrubTo: (date) => {
+      this.store.dispatch({
+        type: 'SET_TIME_CURSOR',
+        date: date ? new Date(date) : null,
+      });
+    },
+    history: () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const h = (this as any).history;
+      if (!h) return null;
+      return {
+        entries: h.entries().map((e: { ts: number; wallTs: number; action: Action; source?: string; actor?: string }) => ({
+          ts: e.ts,
+          wallTs: e.wallTs,
+          actionType: e.action.type,
+          source: e.source,
+          actor: e.actor,
+        })),
+        annotations: h.annotations().slice(),
+        lastWallTs: h.lastWallTs(),
+      };
+    },
+    appendAnnotation: (kind, taskId, payload) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const h = (this as any).history;
+      if (!h) return false;
+      h.appendAnnotation({ kind, taskId, payload });
+      return true;
+    },
+  };
+
+  /**
+   * 0.187.0 — runtime capability detection. Returns a JSON-serializable
+   * object describing what plugins are installed and what API surfaces
+   * are available. Lets agents dynamically discover what they can drive.
+   */
+  capabilities(): Record<string, boolean | string> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const self = this as any;
+    return {
+      version: '0.187.0',
+      pushRemoteEvent: typeof this.pushRemoteEvent === 'function',
+      timeCursor: true,
+      history: !!self.history,
+      replayProvider: !!this.replayProvider,
+      pluginsInstalled: this.plugins.map((p) => p.name).join(','),
+    };
+  }
+
+  /**
    * 0.185.37 — last applied wall-clock `ts` across all tasks. Hosts
    * checkpoint this before disconnect so they can replay-from-cursor on
    * reconnect (see three-mode reconnect contract in dispatch).
@@ -568,7 +728,11 @@ export class NimbusGantt {
     if (this.destroyed) return;
     this.renderScheduled = false;
 
-    const state = this.store.getState();
+    // 0.187.0 — temporal-canvas. When a time cursor is set AND a replay
+    // provider is registered (by HistoryPlugin), render the replayed
+    // state instead of the live store. Live state is preserved untouched
+    // for resume-to-now.
+    const state = this.getDisplayState();
 
     // Recreate TimeScale from current state
     const viewportWidth = this.timelinePanel.clientWidth;
@@ -784,7 +948,9 @@ export class NimbusGantt {
   }
 
   private createPluginHost(): PluginHost {
-    return {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const ganttRef = this;
+    const host: PluginHost = {
       getState: () => this.store.getState(),
       dispatch: (action: Action) => this.store.dispatch(action),
       on: (event: string, handler: (...args: unknown[]) => void) =>
@@ -812,6 +978,14 @@ export class NimbusGantt {
         for (const id of flatIds) st.flatVisibleIds.push(id);
       },
     };
+    // 0.187.0 — temporal-canvas substrate. HistoryPlugin (and any plugin
+    // that needs deep API access) reads this to register replay providers,
+    // call setTimeCursor, etc. Loosely typed because PluginHost contract
+    // is intentionally narrow; plugins that consume __gantt know what
+    // they're doing.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (host as any).__gantt = ganttRef;
+    return host;
   }
 
   /**

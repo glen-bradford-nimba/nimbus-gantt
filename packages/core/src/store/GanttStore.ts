@@ -318,6 +318,10 @@ function reduce(state: GanttState, action: Action): GanttState {
         dateRange: { start: action.start, end: action.end },
       };
 
+    // ── Time Cursor (0.187.0 — temporal canvas) ──────────────────────────
+    case 'SET_TIME_CURSOR':
+      return { ...state, timeCursorDate: action.date };
+
     default:
       return state;
   }
