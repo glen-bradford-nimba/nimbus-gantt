@@ -131,3 +131,5 @@ export type {
 } from './plugins/HistoryPlugin';
 export { TimeCursorPlugin } from './plugins/TimeCursorPlugin';
 export type { TimeCursorOptions } from './plugins/TimeCursorPlugin';
+export { HistoryStripPlugin } from './plugins/HistoryStripPlugin';
+export type { HistoryStripOptions } from './plugins/HistoryStripPlugin';

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nimbus Gantt — Temporal Canvas Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+    }
+    #app { display: flex; flex-direction: column; height: 100vh; }
+    header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #f1f5f9;
+      padding: 14px 22px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 17px; font-weight: 600; }
+    header .meta { font-size: 12px; color: #94a3b8; }
+    main { flex: 1; display: flex; min-height: 0; }
+    #gantt {
+      flex: 1;
+      min-height: 0;
+      background: #fff;
+    }
+    aside {
+      width: 360px;
+      background: #fff;
+      border-left: 1px solid #e2e8f0;
+      padding: 16px;
+      overflow-y: auto;
+      font-size: 13px;
+    }
+    aside h2 {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 8px;
+      margin-top: 16px;
+    }
+    aside h2:first-child { margin-top: 0; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    button {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #334155;
+      transition: background 0.15s;
+    }
+    button:hover { background: #e2e8f0; }
+    button.primary {
+      background: #3b82f6;
+      border-color: #2563eb;
+      color: white;
+    }
+    button.primary:hover { background: #2563eb; }
+    button.danger {
+      background: #fee2e2;
+      border-color: #fca5a5;
+      color: #991b1b;
+    }
+    pre {
+      background: #0f172a;
+      color: #f1f5f9;
+      font-family: "SF Mono", Monaco, monospace;
+      font-size: 11px;
+      padding: 10px;
+      border-radius: 6px;
+      overflow-x: auto;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .status {
+      font-size: 11px;
+      color: #64748b;
+      font-family: "SF Mono", Monaco, monospace;
+      margin-bottom: 8px;
+    }
+    .status .live { color: #10b981; font-weight: 600; }
+    .status .scrubbed { color: #f59e0b; font-weight: 600; }
+    .kbd {
+      display: inline-block;
+      font-family: "SF Mono", Monaco, monospace;
+      font-size: 10px;
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 3px;
+      padding: 1px 4px;
+      margin: 0 2px;
+    }
+    .hint {
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Nimbus Gantt — Temporal Canvas</h1>
+      <span class="meta">past concrete · future ghosty · scrubbable history · agent API</span>
+    </header>
+    <main>
+      <div id="gantt"></div>
+      <aside>
+        <h2>Cursor</h2>
+        <div class="status" id="cursor-status">cursor: <span class="live">live</span></div>
+        <div class="hint">
+          <span class="kbd">Home</span> baseline ·
+          <span class="kbd">End</span> live ·
+          <span class="kbd">Alt+←</span>/<span class="kbd">→</span> step day
+        </div>
+        <div class="btn-row">
+          <button onclick="window.gantt.history.scrubTo(new Date(Date.now() - 86400000 * 7))">Scrub −7d</button>
+          <button onclick="window.gantt.history.scrubTo(new Date(Date.now() - 86400000 * 30))">−30d</button>
+          <button onclick="window.gantt.history.scrubToNow()" class="primary">↦ Now</button>
+        </div>
+
+        <h2>Agent API — try it</h2>
+        <div class="hint">All buttons here go through <code>window.gantt.agent.*</code> — same surface an LLM uses.</div>
+        <div class="btn-row">
+          <button onclick="addRandomTask()">Add task</button>
+          <button onclick="moveFirstTask()">Move first task +3d</button>
+          <button onclick="completeFirstTask()">Mark first complete</button>
+          <button onclick="removeRandomTask()" class="danger">Remove random</button>
+        </div>
+
+        <h2>Annotations</h2>
+        <div class="btn-row">
+          <button onclick="addCommentAnnotation()">+ comment</button>
+          <button onclick="addDecisionAnnotation()">+ decision</button>
+          <button onclick="addAgentAnnotation()">+ agent-note</button>
+        </div>
+
+        <h2>Capabilities</h2>
+        <pre id="capabilities"></pre>
+
+        <h2>Snapshot (live)</h2>
+        <pre id="snapshot"></pre>
+
+        <h2>History (newest 5)</h2>
+        <pre id="history"></pre>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module">
+    // Enable diag emitter so Cowork / dev-tools can pick up events.
+    window.NGA_DIAG = true;
+    window.__nga_diag = [];
+
+    import {
+      NimbusGantt,
+      HistoryPlugin,
+      TimeCursorPlugin,
+      HistoryStripPlugin,
+      TemporalAsymmetryPlugin,
+      MilestonePlugin,
+    } from '@nimbus-gantt/core';
+    import { sampleTasks, sampleDependencies } from './sample-data.ts';
+
+    // Build a gantt against the demo container.
+    const container = document.getElementById('gantt');
+    const gantt = new NimbusGantt(container, {
+      tasks: sampleTasks,
+      dependencies: sampleDependencies,
+      zoomLevel: 'week',
+      showToday: true,
+      colorMap: {
+        'Planning':    '#94a3b8',
+        'Development': '#3b82f6',
+        'Testing':     '#a78bfa',
+        'Review':      '#f59e0b',
+        'Complete':    '#10b981',
+        'Blocked':     '#ef4444',
+      },
+    });
+
+    // Install temporal-canvas plugins. Order matters:
+    // 1. HistoryPlugin first — provides the substrate (gantt.history.*)
+    // 2. TimeCursorPlugin + HistoryStripPlugin consume the substrate
+    // 3. TemporalAsymmetryPlugin renders past/future visual split
+    gantt.use(MilestonePlugin());
+    gantt.use(HistoryPlugin({
+      capacity: 2000,
+      defaultActor: 'demo-user',
+      onEntry: (entry) => {
+        // In a real host this writes to durable storage.
+        // Demo just refreshes the side panel.
+        refreshPanel();
+      },
+      onAnnotation: (a) => refreshPanel(),
+    }));
+    gantt.use(TimeCursorPlugin({}));
+    gantt.use(HistoryStripPlugin({}));
+    gantt.use(TemporalAsymmetryPlugin({
+      futureFadeStrength: 0.45,
+    }));
+
+    // Expose for browser console + agent interaction.
+    window.gantt = gantt;
+    window.diag = () => window.__nga_diag;
+
+    // ── Side-panel helpers (call agent API for honesty) ─────────────────
+    function refreshPanel() {
+      const cursor = gantt.getTimeCursor();
+      document.getElementById('cursor-status').innerHTML =
+        cursor
+          ? `cursor: <span class="scrubbed">${cursor.toISOString().slice(0, 10)}</span>`
+          : `cursor: <span class="live">live</span>`;
+
+      document.getElementById('capabilities').textContent =
+        JSON.stringify(gantt.capabilities(), null, 2);
+
+      const snapshot = gantt.agent.getSnapshot();
+      document.getElementById('snapshot').textContent = JSON.stringify({
+        cursorDate: snapshot.cursorDate,
+        zoom: snapshot.zoomLevel,
+        taskCount: snapshot.tasks.length,
+        depCount: snapshot.dependencies.length,
+        selected: snapshot.selectedIds,
+        firstTask: snapshot.tasks[0]
+          ? { id: snapshot.tasks[0].id, name: snapshot.tasks[0].name, startDate: snapshot.tasks[0].startDate }
+          : null,
+      }, null, 2);
+
+      const h = gantt.agent.history();
+      if (h) {
+        const recent = h.entries.slice(-5).reverse().map(e => ({
+          actionType: e.actionType,
+          wallTs: new Date(e.wallTs).toISOString(),
+          source: e.source,
+        }));
+        document.getElementById('history').textContent = JSON.stringify(recent, null, 2);
+      } else {
+        document.getElementById('history').textContent = '(history not installed)';
+      }
+    }
+
+    // Subscribe to store changes so the panel stays fresh during scrubs.
+    const interval = setInterval(refreshPanel, 250);
+    window.addEventListener('beforeunload', () => clearInterval(interval));
+    refreshPanel();
+
+    // ── Demo button handlers (all use agent API) ────────────────────────
+    let nextId = 100;
+    window.addRandomTask = () => {
+      const id = `demo-${nextId++}`;
+      const start = new Date();
+      start.setDate(start.getDate() + Math.floor(Math.random() * 30) - 15);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 5 + Math.floor(Math.random() * 10));
+      gantt.agent.addTask({
+        id,
+        name: `Demo task ${id}`,
+        startDate: start.toISOString().slice(0, 10),
+        endDate: end.toISOString().slice(0, 10),
+        status: 'Development',
+      });
+    };
+
+    window.moveFirstTask = () => {
+      const snap = gantt.agent.getSnapshot();
+      if (!snap.tasks.length) return;
+      const t = snap.tasks[0];
+      const start = new Date(t.startDate);
+      start.setDate(start.getDate() + 3);
+      const end = new Date(t.endDate);
+      end.setDate(end.getDate() + 3);
+      gantt.agent.moveTask(t.id, start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+    };
+
+    window.completeFirstTask = () => {
+      const snap = gantt.agent.getSnapshot();
+      if (!snap.tasks.length) return;
+      gantt.agent.updateTask(snap.tasks[0].id, { progress: 1, status: 'Complete' });
+    };
+
+    window.removeRandomTask = () => {
+      const snap = gantt.agent.getSnapshot();
+      const candidates = snap.tasks.filter(t => t.id.startsWith('demo-'));
+      if (!candidates.length) return;
+      const target = candidates[Math.floor(Math.random() * candidates.length)];
+      gantt.agent.removeTask(target.id);
+    };
+
+    window.addCommentAnnotation = () => {
+      const snap = gantt.agent.getSnapshot();
+      const t = snap.tasks[Math.floor(Math.random() * snap.tasks.length)];
+      gantt.agent.appendAnnotation('comment', t?.id, {
+        author: 'demo-user',
+        text: `comment on ${t?.name ?? 'unknown'}`,
+      });
+    };
+
+    window.addDecisionAnnotation = () => {
+      gantt.agent.appendAnnotation('decision', undefined, {
+        text: 'Decision recorded at ' + new Date().toLocaleTimeString(),
+      });
+    };
+
+    window.addAgentAnnotation = () => {
+      gantt.agent.appendAnnotation('agent-note', undefined, {
+        suggestion: 'Consider rebalancing capacity in week 3',
+      });
+    };
+
+    // ── Greeting log so it's obvious the API surface is live ────────────
+    console.log(
+      '%c[Temporal Canvas Demo loaded]',
+      'font-weight: bold; color: #3b82f6;',
+      '\n\nTry these in the console:\n' +
+        '  window.gantt.agent.getSnapshot()\n' +
+        '  window.gantt.agent.scrubTo("2026-01-01")\n' +
+        '  window.gantt.agent.scrubTo(null)\n' +
+        '  window.gantt.history.entries()\n' +
+        '  window.gantt.capabilities()\n' +
+        '  window.diag()\n'
+    );
+  </script>
+</body>
+</html>
