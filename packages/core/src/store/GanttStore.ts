@@ -9,6 +9,7 @@ import type {
   GanttDependency,
   Action,
   DragState,
+  RemoteEvent,
 } from '../model/types';
 import { buildTree, computeDateRange } from '../model/TaskTree';
 
@@ -319,5 +320,61 @@ function reduce(state: GanttState, action: Action): GanttState {
 
     default:
       return state;
+  }
+}
+
+// ─── Remote-Event Translator (0.185.37) ─────────────────────────────────────
+// Pure helper — translates a `RemoteEvent` into the list of `Action`s that
+// the reducer should dispatch. Stateless; given the same (state, event) it
+// always returns the same actions. Stale-drop and ts bookkeeping live in
+// the caller (NimbusGantt.pushRemoteEvent), not here, so the translator
+// stays trivially testable.
+
+export function translateRemoteEvent(
+  state: GanttState,
+  event: RemoteEvent,
+): Action[] {
+  if (!event || event.version !== 1) return [];
+
+  switch (event.kind) {
+    case 'task.upsert': {
+      const out: Action[] = [];
+      for (const patch of event.tasks) {
+        if (!patch || typeof patch.id !== 'string') continue;
+        if (state.tasks.has(patch.id)) {
+          // Merge present keys only — preserves fields the host didn't
+          // include in this patch (drag-reorder hot path safety).
+          const { id, ...changes } = patch;
+          out.push({ type: 'UPDATE_TASK', taskId: id, changes });
+        } else if (patch.name && patch.startDate && patch.endDate) {
+          // Insert: full row required (id + name + startDate + endDate).
+          out.push({ type: 'ADD_TASK', task: patch as GanttTask });
+        }
+        // else: id missing AND incomplete patch — drop. Host should send
+        // `bulk.replace` for snapshot-style backfills.
+      }
+      return out;
+    }
+
+    case 'task.delete': {
+      const out: Action[] = [];
+      for (const id of event.ids) {
+        if (typeof id === 'string') {
+          out.push({ type: 'REMOVE_TASK', taskId: id });
+        }
+      }
+      return out;
+    }
+
+    case 'bulk.replace': {
+      return [
+        { type: 'SET_DATA', tasks: event.tasks, dependencies: event.deps },
+      ];
+    }
+
+    // Unknown / future kinds (dep.upsert, dep.delete, host.custom) drop
+    // silently in the skeleton. 0.185.38+.
+    default:
+      return [];
   }
 }

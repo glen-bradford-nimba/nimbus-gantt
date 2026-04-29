@@ -14,9 +14,10 @@ import type {
   NimbusGanttPlugin,
   PluginHost,
   Action,
+  RemoteEvent,
 } from './model/types';
 import { buildTree, computeDateRange } from './model/TaskTree';
-import { GanttStore, type Middleware } from './store/GanttStore';
+import { GanttStore, translateRemoteEvent, type Middleware } from './store/GanttStore';
 import { EventBus } from './events/EventBus';
 import { TimeScale } from './layout/TimeScale';
 import { LayoutEngine } from './layout/LayoutEngine';
@@ -27,6 +28,38 @@ import { DragManager } from './interaction/DragManager';
 import { DependencyRenderer } from './render/DependencyRenderer';
 import { TooltipManager } from './render/TooltipManager';
 import { resolveConfig } from './theme/themes';
+
+// ─── Diagnostic emitter (0.185.37 — remote-events) ──────────────────────────
+// Lightweight side-channel emitter for Cowork verification. Writes to
+// `window.__nga_diag` array when the app-layer diag system has initialized
+// it (controlled by `localStorage.NGA_DIAG === '1'`, `window.NGA_DIAG === true`,
+// or `?nga_diag=1` query — see packages/app/src/diag.ts). Core does NOT
+// import from app, so this is a structural side-channel: when diag is off,
+// `__nga_diag` is undefined and we early-return at zero cost.
+
+interface DiagWindow {
+  __nga_diag?: Array<{ t: number; kind: string; [key: string]: unknown }>;
+  NGA_DIAG_VERBOSE?: boolean;
+}
+
+function diagEmit(kind: string, data?: Record<string, unknown>): void {
+  if (typeof window === 'undefined') return;
+  const w = window as unknown as DiagWindow;
+  const arr = w.__nga_diag;
+  if (!Array.isArray(arr)) return;
+  const t =
+    typeof performance !== 'undefined' && typeof performance.now === 'function'
+      ? performance.now()
+      : Date.now();
+  const evt = { t, kind, ...(data ?? {}) };
+  arr.push(evt);
+  if (w.NGA_DIAG_VERBOSE === true) {
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[nga-diag]', kind, data ?? {});
+    } catch { /* console may throw under exotic sandboxes */ }
+  }
+}
 
 // ─── CSS Injection ────────────────────────────────────────────────────────
 
@@ -90,6 +123,15 @@ export class NimbusGantt {
 
   private renderScheduled = false;
   private destroyed = false;
+
+  // 0.185.37 — remote-events channel. Per-task last-applied wall-clock ts
+  // for stale-drop on out-of-order delivery. Per-id (rather than per-channel)
+  // is smarter: different tasks have independent edit timelines, so a stale
+  // event on task X shouldn't depend on the freshest event for task Y.
+  // bulk.replace clears the entire map (host signaled snapshot reload).
+  // 0.185.38 layers per-channel sequence checkpoints on top of this for
+  // reconnect cursors.
+  private lastAppliedTs = new Map<string, number>();
 
   constructor(container: HTMLElement, config: GanttConfig) {
     this.container = container;
@@ -293,6 +335,134 @@ export class NimbusGantt {
 
   setData(tasks: GanttTask[], dependencies?: GanttDependency[]): void {
     this.store.dispatch({ type: 'SET_DATA', tasks, dependencies });
+  }
+
+  /**
+   * 0.185.37 — host-pumped server→client event channel.
+   *
+   * Hosts subscribe to their platform-native push transport (Salesforce
+   * Platform Events via `lightning/empApi`, CN SSE/websocket, etc.),
+   * translate each incoming message to a `RemoteEvent`, and call this
+   * method. NG applies per-row merge semantics through the existing
+   * reducer — no full re-layout, scroll/selection/expansion preserved.
+   *
+   * Skeleton scope (0.185.37):
+   *  - `task.upsert` — `Partial<GanttTask> & {id}` per patch. If id exists,
+   *    merges only the present keys (won't clobber concurrent inline edits
+   *    on other clients). If id missing, treats as insert when the patch
+   *    has the minimum required fields (id + name + startDate + endDate);
+   *    drops silently otherwise.
+   *  - `task.delete` — removes by id, clears selection if needed.
+   *  - `bulk.replace` — equivalent to `setData(tasks, deps)`. Resets the
+   *    channel's stale-drop ts.
+   *
+   * Stale-drop is `ts`-only this version — events with `ts < lastAppliedTs`
+   * for the channel are dropped. Per-channel keying defaults to `'default'`.
+   * Sequence-based stale-drop, dep events, `onRemoteEvent` middleware, and
+   * `host.custom` arrive in 0.185.38–39.
+   *
+   * See docs/dispatch-ng-remote-events.md for the full design.
+   */
+  pushRemoteEvent(event: RemoteEvent): void {
+    if (this.destroyed) return;
+    if (!event || typeof event !== 'object') {
+      diagEmit('remote:dropped-malformed', { reason: 'not-object' });
+      return;
+    }
+    if (event.version !== 1) {
+      diagEmit('remote:dropped-malformed', {
+        reason: 'bad-version',
+        version: (event as { version?: unknown }).version,
+      });
+      return;
+    }
+
+    diagEmit('remote:received', {
+      kind: event.kind,
+      source: event.source,
+      ts: event.ts,
+    });
+
+    // bulk.replace clears the stale-drop map — host signaled a snapshot
+    // reload, prior per-id ts comparisons are no longer authoritative.
+    if (event.kind === 'bulk.replace') {
+      this.lastAppliedTs.clear();
+      const actions = translateRemoteEvent(this.store.getState(), event);
+      for (const action of actions) this.store.dispatch(action);
+      diagEmit('remote:applied', {
+        kind: 'bulk.replace',
+        taskCount: event.tasks.length,
+      });
+      return;
+    }
+
+    // task.upsert / task.delete: per-id stale-drop layered on top of the
+    // pure translator. Translator handles action-shape mapping and the
+    // existing/insert/incomplete distinction; this loop applies stale-drop
+    // and updates the per-id ts map.
+    const actions = translateRemoteEvent(this.store.getState(), event);
+    const ts = event.ts;
+    let merged = 0;
+    let added = 0;
+    let removed = 0;
+    let droppedStale = 0;
+
+    for (const action of actions) {
+      let taskId: string | null = null;
+      if (action.type === 'UPDATE_TASK') taskId = action.taskId;
+      else if (action.type === 'ADD_TASK') taskId = action.task.id;
+      else if (action.type === 'REMOVE_TASK') taskId = action.taskId;
+
+      if (taskId && typeof ts === 'number') {
+        const prev = this.lastAppliedTs.get(taskId);
+        if (prev !== undefined && ts < prev) {
+          droppedStale++;
+          continue;
+        }
+      }
+
+      this.store.dispatch(action);
+
+      if (taskId && typeof ts === 'number') {
+        this.lastAppliedTs.set(taskId, ts);
+      }
+
+      if (action.type === 'UPDATE_TASK') merged++;
+      else if (action.type === 'ADD_TASK') added++;
+      else if (action.type === 'REMOVE_TASK') removed++;
+    }
+
+    if (droppedStale > 0) {
+      diagEmit('remote:dropped-stale', { kind: event.kind, count: droppedStale });
+    }
+    if (merged + added + removed > 0) {
+      diagEmit('remote:applied', {
+        kind: event.kind,
+        ...(merged > 0 ? { merged } : {}),
+        ...(added > 0 ? { added } : {}),
+        ...(removed > 0 ? { removed } : {}),
+      });
+    }
+  }
+
+  /**
+   * 0.185.37 — last applied wall-clock `ts` across all tasks. Hosts
+   * checkpoint this before disconnect so they can replay-from-cursor on
+   * reconnect (see three-mode reconnect contract in dispatch).
+   *
+   * The `channel` parameter is reserved for forward-compat — sequence-
+   * based per-channel checkpoints land in 0.185.38 alongside dep events.
+   * In 0.185.37, returns the maximum ts seen across any task on this
+   * mount, or null if no events with ts have been applied yet.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  getLastAppliedTs(_channel: string = 'default'): number | null {
+    if (this.lastAppliedTs.size === 0) return null;
+    let max = -Infinity;
+    for (const v of this.lastAppliedTs.values()) {
+      if (v > max) max = v;
+    }
+    return Number.isFinite(max) ? max : null;
   }
 
   updateTask(taskId: string, changes: Partial<GanttTask>): void {

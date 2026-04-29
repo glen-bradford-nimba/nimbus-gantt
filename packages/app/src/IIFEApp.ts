@@ -929,6 +929,41 @@ export class IIFEApp {
           if (dependencies !== undefined) allDependencies = normalizeDependencies(dependencies);
           _syncToCanvas();
         },
+        /** 0.185.37 — host-pumped server→client event channel. Hosts pump
+         *  Platform Event / SSE / websocket messages translated to
+         *  `RemoteEvent` shape; engine applies per-row merge with no full
+         *  re-layout, scroll/selection preserved. See
+         *  docs/dispatch-ng-remote-events.md. Skeleton ships task.upsert,
+         *  task.delete, bulk.replace; ts-only stale-drop. Sequence + dep
+         *  events + onRemoteEvent middleware land in 0.185.38–39. */
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        pushRemoteEvent(event: any): void {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const gi = inst as any;
+          if (typeof gi.pushRemoteEvent === 'function') {
+            gi.pushRemoteEvent(event);
+            // bulk.replace replaces the host-side task array too so that
+            // subsequent setTasks/setData/_syncToCanvas calls don't blow
+            // away the pushed snapshot.
+            if (event && event.kind === 'bulk.replace' && Array.isArray(event.tasks)) {
+              allTasks = event.tasks as NormalizedTask[];
+              if (Array.isArray(event.deps)) {
+                allDependencies = normalizeDependencies(event.deps);
+              }
+            }
+          }
+        },
+        /** 0.185.37 — last applied wall-clock ts for a channel. Hosts
+         *  checkpoint this before disconnect so they can replay-from-cursor
+         *  on reconnect. Sequence-based equivalent ships in 0.185.38. */
+        getLastAppliedTs(channel?: string): number | null {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const gi = inst as any;
+          if (typeof gi.getLastAppliedTs === 'function') {
+            return gi.getLastAppliedTs(channel);
+          }
+          return null;
+        },
         /** 0.185.32 — coordinate-based hit-test for host-driven right-click
          *  UX in LWS/Locker contexts where NG's internal document listeners
          *  silently no-op. Host attaches its own document listener, calls
@@ -2494,6 +2529,47 @@ export class IIFEApp {
         } else {
           rebuildView();
         }
+      },
+      /** 0.185.37 — host-pumped server→client event channel. Hosts
+       *  translate Platform Event / SSE / websocket messages to
+       *  `RemoteEvent` shape; engine applies per-row merge with no full
+       *  re-layout, scroll/selection preserved. See
+       *  docs/dispatch-ng-remote-events.md. Skeleton ships task.upsert,
+       *  task.delete, bulk.replace; ts-only stale-drop. Sequence + dep
+       *  events + onRemoteEvent middleware land in 0.185.38–39.
+       *
+       *  bulk.replace also rewrites the host-side allTasks/allDependencies
+       *  arrays so that subsequent rebuildView()/refreshGantt() calls
+       *  don't blow away the pushed snapshot. task.upsert / task.delete
+       *  intentionally do NOT — those flow through the engine's reducer
+       *  only, so hosts that filter or transform tasks before
+       *  rebuildView() (epic grouping, search, etc.) keep working. */
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      pushRemoteEvent(event: any): void {
+        if (!ganttInst) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const gi = ganttInst as any;
+        if (typeof gi.pushRemoteEvent !== 'function') return;
+        gi.pushRemoteEvent(event);
+        if (event && event.kind === 'bulk.replace' && Array.isArray(event.tasks)) {
+          allTasks = event.tasks as NormalizedTask[];
+          if (Array.isArray(event.deps)) {
+            allDependencies = normalizeDependencies(event.deps);
+          }
+          depthMap = buildDepthMap(allTasks);
+        }
+      },
+      /** 0.185.37 — last applied wall-clock ts for a channel. Hosts
+       *  checkpoint this before disconnect so they can replay-from-cursor
+       *  on reconnect. Sequence-based equivalent ships in 0.185.38. */
+      getLastAppliedTs(channel?: string): number | null {
+        if (!ganttInst) return null;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const gi = ganttInst as any;
+        if (typeof gi.getLastAppliedTs === 'function') {
+          return gi.getLastAppliedTs(channel);
+        }
+        return null;
       },
       /** 0.185.32 — coordinate-based hit-test for host-driven right-click
        *  UX in LWS/Locker contexts where NG's internal document listeners

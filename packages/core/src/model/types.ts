@@ -75,6 +75,51 @@ export type DependencyType = 'FS' | 'FF' | 'SS' | 'SF';
 
 export type ZoomLevel = 'day' | 'week' | 'month' | 'quarter';
 
+// ─── Remote Events ──────────────────────────────────────────────────────────
+// Host-pumped server→client event channel (0.185.37+). Hosts subscribe to
+// their platform-native push transport (Salesforce Platform Events via
+// lightning/empApi, CN SSE/websocket, etc.), translate each message into a
+// RemoteEvent, and call handle.pushRemoteEvent(event). NG applies per-row
+// merge semantics — no full re-layout, scroll/selection/expansion preserved.
+//
+// See docs/dispatch-ng-remote-events.md for the full design including
+// sequence-based stale-drop, clientNonce self-echo pattern, three-mode
+// reconnect contract, and the 0.185.38–39 ship arc (deps + middleware).
+//
+// 0.185.37 ships the skeleton: task.upsert (per-field patch), task.delete,
+// bulk.replace. ts-only stale-drop. Per-channel keying. No sequence,
+// no onRemoteEvent middleware, no host.custom, no dep.* yet.
+
+/** Partial task with required `id` for per-field merge on remote upsert. */
+export type TaskPatch = Partial<GanttTask> & { id: string };
+
+export type RemoteEvent =
+  | {
+      kind: 'task.upsert';
+      version: 1;
+      tasks: TaskPatch[];
+      ts?: number;
+      channel?: string;
+      source?: string;
+    }
+  | {
+      kind: 'task.delete';
+      version: 1;
+      ids: string[];
+      ts?: number;
+      channel?: string;
+      source?: string;
+    }
+  | {
+      kind: 'bulk.replace';
+      version: 1;
+      tasks: GanttTask[];
+      deps?: GanttDependency[];
+      ts?: number;
+      channel?: string;
+      source?: string;
+    };
+
 // ─── Column Configuration ───────────────────────────────────────────────────
 
 export interface ColumnConfig {
