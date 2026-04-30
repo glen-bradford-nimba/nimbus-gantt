@@ -182,6 +182,9 @@ export interface NimbusGanttEngine {
   HistoryPlugin?: (...args: any[]) => any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   TimeCursorPlugin?: (...args: any[]) => any;
+  // 0.189.0 — context-menu plugin (zone-aware right-click)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ContextMenuPlugin?: (...args: any[]) => any;
 }
 
 /** Render mode — controls which chrome slots are rendered.
@@ -228,6 +231,13 @@ export interface MountOptions {
    *  TemporalAsymmetryOptions in @nimbus-gantt/core. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   temporalAsymmetry?: false | Record<string, any>;
+  /** 0.189.0 — zone-aware right-click context menu. Default ON. Pass
+   *  `false` to disable, or a ContextMenuOptions object to wire host
+   *  callbacks (onContextMenu / onCreateTask / onTaskAction /
+   *  onDateAction / onAgentRequest). See ContextMenuOptions in
+   *  @nimbus-gantt/core. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  contextMenu?: false | Record<string, any>;
   /** Optional consumer-facing interaction callbacks. Each is forwarded from
    *  the underlying NimbusGantt engine event (plus a container-level
    *  contextmenu listener) so host apps can render tooltips, context menus,

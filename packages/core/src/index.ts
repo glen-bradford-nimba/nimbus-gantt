@@ -34,6 +34,10 @@ export type {
   AgentSnapshot,
   AgentHistoryView,
   AgentHistoryEntry,
+  ZoneHit,
+  ContextMenuItem,
+  ContextMenuPos,
+  AgentMenuRequest,
 } from './model/types';
 
 // DAG utilities — consumers that need to walk parentId + additionalParentIds
@@ -133,3 +137,5 @@ export { TimeCursorPlugin } from './plugins/TimeCursorPlugin';
 export type { TimeCursorOptions } from './plugins/TimeCursorPlugin';
 export { HistoryStripPlugin } from './plugins/HistoryStripPlugin';
 export type { HistoryStripOptions } from './plugins/HistoryStripPlugin';
+export { ContextMenuPlugin } from './plugins/ContextMenuPlugin';
+export type { ContextMenuOptions } from './plugins/ContextMenuPlugin';

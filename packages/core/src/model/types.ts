@@ -428,6 +428,119 @@ export interface AgentAPI {
   appendAnnotation(kind: string, taskId?: string, payload?: unknown): boolean;
 }
 
+// ─── Context Menu Zones (0.189.0) ────────────────────────────────────────────
+// gantt.hitTestAt(clientX, clientY) classifies the pixel into one of these
+// zones. Hosts wire onContextMenu(hit, pos) and either return a MenuItem[]
+// for NG to render, or void to render their own menu.
+//
+// Zones are mutually exclusive — first match wins, in priority order:
+//   bar > row-label > date-header > bucket-header > canvas-empty >
+//   below-rows > gap-between-rows > outside.
+
+export type ZoneHit =
+  | {
+      zone: 'bar';
+      task: GanttTask;
+      rowIndex: number;
+      /** If hit is on the dragable bar interior, edge resize handle, etc. */
+      barType: 'body' | 'left-edge' | 'right-edge' | 'progress-handle';
+    }
+  | {
+      zone: 'row-label';
+      task: GanttTask;
+      rowIndex: number;
+    }
+  | {
+      zone: 'date-header';
+      date: Date;
+      /** Which row of the multi-row header was hit (top row = primary
+       *  zoom level; lower rows = nested smaller intervals). */
+      level: 'day' | 'week' | 'month' | 'quarter' | 'year';
+    }
+  | {
+      zone: 'bucket-header';
+      /** The header task itself (rendered with status='group-header' by
+       *  PriorityGroupingPlugin). */
+      bucketTask: GanttTask;
+      /** Resolved bucket id from the header task's groupId, if available. */
+      bucketId: string | null;
+      rowIndex: number;
+    }
+  | {
+      zone: 'canvas-empty';
+      /** The date corresponding to the pixel x. */
+      date: Date;
+      /** The row index under the cursor (within current scroll), or null if
+       *  below the last row. */
+      rowIndex: number;
+      /** The task in that row, if any. Lets host prefill parentId for
+       *  "create work item here" when dropping below an existing parent. */
+      nearestTask: GanttTask | null;
+      /** Inferred bucket from the row (walks up the tree to the nearest
+       *  group-header ancestor). null when no bucket grouping is active. */
+      bucketId: string | null;
+    }
+  | {
+      zone: 'below-rows';
+      date: Date;
+    }
+  | {
+      zone: 'dependency';
+      depId: string;
+    }
+  | {
+      zone: 'outside';
+    };
+
+/** A single context-menu entry. Host returns an array of these from
+ *  onContextMenu; NG renders them. */
+export interface ContextMenuItem {
+  /** Unique within the menu. Used as React-style key + identifier in
+   *  diag emitters. */
+  id: string;
+  /** Visible label. */
+  label: string;
+  /** Optional submenu — hover/click expands. */
+  children?: ContextMenuItem[];
+  /** Fires when item is clicked (no submenu) or when a leaf submenu
+   *  item is clicked. Closes the menu after firing. */
+  onClick?: () => void | Promise<void>;
+  /** Disable the item — renders muted, doesn't fire onClick. */
+  disabled?: boolean;
+  /** Optional icon — single character or short string rendered before
+   *  the label (e.g. '✓', '✦', '×'). */
+  icon?: string;
+  /** Render a horizontal divider before this item. */
+  divider?: boolean;
+  /** Mark this item as agent-suggested. NG renders with a ✦ glyph and
+   *  routes clicks through onAgentRequest instead of onClick when set. */
+  agentSuggested?: boolean;
+  /** Prompt text passed to onAgentRequest for agent-suggested items. */
+  prompt?: string;
+  /** Optional keyboard shortcut hint (display-only — host wires the
+   *  actual binding). */
+  shortcut?: string;
+}
+
+/** Page-relative position where the menu should anchor. */
+export interface ContextMenuPos {
+  x: number;
+  y: number;
+}
+
+/** Payload for the agent-request callback. The host calls Claude
+ *  (or any LLM) with this context and resolves either by mutating
+ *  state via the agent API, returning a string for a toast/notice,
+ *  or by appending an annotation. */
+export interface AgentMenuRequest {
+  hit: ZoneHit;
+  pos: ContextMenuPos;
+  prompt: string;
+  /** A snapshot of the gantt at request time — same shape as
+   *  AgentAPI.getSnapshot(). Hosts pass this to the LLM as context. */
+  snapshot: AgentSnapshot;
+}
+
 // ─── Plugin Interface ───────────────────────────────────────────────────────
 
 export interface NimbusGanttPlugin {

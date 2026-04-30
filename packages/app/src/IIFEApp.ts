@@ -875,6 +875,22 @@ export class IIFEApp {
           ));
         } catch (_e) { /* engine bundle may be older; safe to skip */ }
       }
+      // 0.189.0 — zone-aware right-click context menu. Default ON.
+      // Hosts opt out via mountConfig.contextMenu === false, or pass
+      // a ContextMenuOptions object to wire onContextMenu /
+      // onCreateTask / onTaskAction / onDateAction / onAgentRequest.
+      if (
+        options.contextMenu !== false &&
+        typeof tplConfig.engine?.ContextMenuPlugin === 'function'
+      ) {
+        try {
+          inst.use(tplConfig.engine.ContextMenuPlugin(
+            typeof options.contextMenu === 'object'
+              ? options.contextMenu
+              : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
       inst.setData(gtasks, allDependencies);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
       // Initial viewport positioning. 0.185.1 priority order matches the
@@ -2251,6 +2267,20 @@ export class IIFEApp {
           ganttInst.use(tplConfig.engine.TemporalAsymmetryPlugin(
             typeof options.temporalAsymmetry === 'object'
               ? options.temporalAsymmetry
+              : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      // 0.189.0 — zone-aware right-click context menu. See engineOnly
+      // path for rationale.
+      if (
+        options.contextMenu !== false &&
+        typeof tplConfig.engine?.ContextMenuPlugin === 'function'
+      ) {
+        try {
+          ganttInst.use(tplConfig.engine.ContextMenuPlugin(
+            typeof options.contextMenu === 'object'
+              ? options.contextMenu
               : {},
           ));
         } catch (_e) { /* engine bundle may be older; safe to skip */ }

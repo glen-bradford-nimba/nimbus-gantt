@@ -17,6 +17,7 @@ import type {
   RemoteEvent,
   AgentAPI,
   AgentSnapshot,
+  ZoneHit,
 } from './model/types';
 import { buildTree, computeDateRange } from './model/TaskTree';
 import { GanttStore, translateRemoteEvent, type Middleware } from './store/GanttStore';
@@ -101,7 +102,9 @@ function injectRootStyles(): void {
 export class NimbusGantt {
   private container: HTMLElement;
   private config: ResolvedConfig;
-  private rootEl: HTMLElement;
+  /** 0.189.0 — exposed as a public property so plugins (ContextMenuPlugin)
+   *  can attach listeners to the gantt root rather than the document. */
+  rootEl: HTMLElement;
   private gridPanel: HTMLElement;
   private timelinePanel: HTMLElement;
 
@@ -506,6 +509,152 @@ export class NimbusGantt {
    */
   getState(): GanttState {
     return this.store.getState();
+  }
+
+  /**
+   * 0.189.0 — pixel→zone classifier for context-menu / hit-test driven
+   * UX. Translates page-relative coordinates (clientX/clientY from a
+   * pointer event) into a `ZoneHit` discriminated union describing what
+   * the user is over: a bar, a row label, the date header, empty
+   * canvas (with the inferred date + row + bucket), a bucket header,
+   * or outside the gantt.
+   *
+   * Used by `ContextMenuPlugin` to drive zone-aware right-click menus,
+   * but exposed publicly so hosts can build their own gestures.
+   */
+  hitTestAt(clientX: number, clientY: number): ZoneHit {
+    const rootRect = this.rootEl.getBoundingClientRect();
+    const inRoot =
+      clientX >= rootRect.left && clientX <= rootRect.right &&
+      clientY >= rootRect.top && clientY <= rootRect.bottom;
+    if (!inRoot) return { zone: 'outside' };
+
+    const state = this.getDisplayState();
+    const { config, scrollX, scrollY, flatVisibleIds, tasks } = state;
+    const { headerHeight, rowHeight } = config;
+
+    const gridRect = this.gridPanel.getBoundingClientRect();
+    const timelineRect = this.timelinePanel.getBoundingClientRect();
+
+    const inGrid =
+      clientX >= gridRect.left && clientX <= gridRect.right &&
+      clientY >= gridRect.top && clientY <= gridRect.bottom &&
+      gridRect.width > 0;
+    const inTimeline =
+      clientX >= timelineRect.left && clientX <= timelineRect.right &&
+      clientY >= timelineRect.top && clientY <= timelineRect.bottom;
+
+    // ── Date header zone (top of timeline panel) ────────────────────────
+    if (inTimeline && (clientY - timelineRect.top) < headerHeight) {
+      const xInPanel = clientX - timelineRect.left + scrollX;
+      let date: Date;
+      try {
+        date = this.timeScale.xToDate(xInPanel);
+      } catch {
+        date = new Date();
+      }
+      const yInHeader = clientY - timelineRect.top;
+      const headerRows = (() => {
+        try { return this.timeScale.getHeaderRows(); }
+        catch { return []; }
+      })();
+      const rowCount = Math.max(1, headerRows.length);
+      const rowH = headerHeight / rowCount;
+      const rowIdx = Math.min(rowCount - 1, Math.max(0, Math.floor(yInHeader / rowH)));
+      const level = inferHeaderLevel(state.zoomLevel, rowCount, rowIdx);
+      return { zone: 'date-header', date, level };
+    }
+
+    // ── Below-header body zones ─────────────────────────────────────────
+    const bodyTop = headerHeight;
+    const yInBody =
+      (inTimeline ? (clientY - timelineRect.top) : (clientY - gridRect.top)) - bodyTop;
+    if (yInBody < 0) {
+      // Above body but outside header (theoretically impossible since
+      // header zone above caught it; keep as defensive fallback).
+      return { zone: 'outside' };
+    }
+
+    const rowIndex = Math.floor((yInBody + scrollY) / rowHeight);
+    const taskAtRow = (i: number): GanttTask | null => {
+      if (i < 0 || i >= flatVisibleIds.length) return null;
+      return tasks.get(flatVisibleIds[i]) ?? null;
+    };
+
+    const task = taskAtRow(rowIndex);
+
+    // ── Bar zone — find layout at the row, check if x is on the bar ───
+    if (inTimeline && task) {
+      // Bucket-header rows are styled differently; surface them as
+      // bucket-header even when the cursor lands on the row.
+      if (task.status === 'group-header') {
+        return {
+          zone: 'bucket-header',
+          bucketTask: task,
+          bucketId: task.groupId ?? null,
+          rowIndex,
+        };
+      }
+      const layout = this.layouts.find((l) => l.taskId === task.id) ?? null;
+      if (layout) {
+        const xInPanel = (clientX - timelineRect.left) + scrollX;
+        const onBar =
+          xInPanel >= layout.x &&
+          xInPanel <= layout.x + layout.width;
+        if (onBar) {
+          const edgePx = 6;
+          const barType: 'body' | 'left-edge' | 'right-edge' | 'progress-handle' =
+            xInPanel <= layout.x + edgePx ? 'left-edge' :
+            xInPanel >= layout.x + layout.width - edgePx ? 'right-edge' :
+            'body';
+          return { zone: 'bar', task, rowIndex, barType };
+        }
+      }
+    }
+
+    // ── Row label (left grid panel) ─────────────────────────────────────
+    if (inGrid && task) {
+      if (task.status === 'group-header') {
+        return {
+          zone: 'bucket-header',
+          bucketTask: task,
+          bucketId: task.groupId ?? null,
+          rowIndex,
+        };
+      }
+      return { zone: 'row-label', task, rowIndex };
+    }
+
+    // ── Below-rows zone (timeline area below the last row) ──────────────
+    if (rowIndex >= flatVisibleIds.length) {
+      let date: Date;
+      try {
+        date = this.timeScale.xToDate((clientX - timelineRect.left) + scrollX);
+      } catch {
+        date = new Date();
+      }
+      return { zone: 'below-rows', date };
+    }
+
+    // ── Canvas-empty zone (timeline body, not on a bar) ─────────────────
+    if (inTimeline) {
+      let date: Date;
+      try {
+        date = this.timeScale.xToDate((clientX - timelineRect.left) + scrollX);
+      } catch {
+        date = new Date();
+      }
+      const bucketId = inferBucketForRow(state, rowIndex);
+      return {
+        zone: 'canvas-empty',
+        date,
+        rowIndex,
+        nearestTask: task,
+        bucketId,
+      };
+    }
+
+    return { zone: 'outside' };
   }
 
   /**
@@ -1003,4 +1152,41 @@ export class NimbusGantt {
       this.scheduleRender();
     });
   }
+}
+
+// ─── Hit-test helpers (0.189.0) ────────────────────────────────────────────
+
+/** Map (zoomLevel, header row index) to a coarse semantic level for the
+ *  date-header zone. Most zoom levels render two header rows: a primary
+ *  larger interval up top + a secondary smaller-interval row below. */
+function inferHeaderLevel(
+  zoom: 'day' | 'week' | 'month' | 'quarter',
+  rowCount: number,
+  rowIdx: number,
+): 'day' | 'week' | 'month' | 'quarter' | 'year' {
+  // 2-row layout: idx 0 = bigger, idx 1 = smaller
+  if (rowCount === 2) {
+    if (zoom === 'day') return rowIdx === 0 ? 'month' : 'day';
+    if (zoom === 'week') return rowIdx === 0 ? 'month' : 'week';
+    if (zoom === 'month') return rowIdx === 0 ? 'year' : 'month';
+    if (zoom === 'quarter') return rowIdx === 0 ? 'year' : 'quarter';
+  }
+  // Single-row fallback or unknown layout: use the zoom level itself.
+  return zoom;
+}
+
+/** Walk the tree from a flat row index up to the nearest group-header
+ *  ancestor. Returns its groupId, or null when no bucket grouping is
+ *  active. */
+function inferBucketForRow(state: GanttState, rowIndex: number): string | null {
+  if (rowIndex < 0 || rowIndex >= state.flatVisibleIds.length) return null;
+  let cursor: GanttTask | undefined = state.tasks.get(state.flatVisibleIds[rowIndex]);
+  while (cursor) {
+    if (cursor.status === 'group-header') return cursor.groupId ?? cursor.id;
+    if (!cursor.parentId) break;
+    cursor = state.tasks.get(cursor.parentId);
+  }
+  // Fall back to the row's own groupId if any.
+  const own = state.tasks.get(state.flatVisibleIds[rowIndex]);
+  return own?.groupId ?? null;
 }
