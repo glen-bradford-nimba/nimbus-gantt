@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `b5f3176` *(0.186.0 + 0.187.0 temporal canvas)* |
-| Commit subject | `feat(0.186.0 + 0.187.0): temporal canvas — past concrete, future ghosty + scrubbable history substrate + agent API` |
+| Commit SHA (source — latest) | `c41af52` *(0.189.0 zone-aware right-click context menu)* |
+| Commit subject | `feat(0.189.0): zone-aware right-click context menu + agent-augmented surface` |
+| 0.189.0 context menu | `c41af52` |
 | 0.186.0 + 0.187.0 temporal canvas | `b5f3176` |
 | 0.185.37 remote-events skeleton | `4aa73d9` |
 | 0.185.36 row-style decorators | `2e0919d` |
@@ -73,10 +74,13 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **287,405 bytes** (~280 KB)
-- sha256: `96caedef510bfeeedae5da01acb36ed89f5cb8f150dfadc1d5d4ae098e51913a`
-- **Must re-copy.** `b5f3176` (0.186.0 + 0.187.0) adds three temporal-
-  canvas plugins (TemporalAsymmetryPlugin / HistoryPlugin / TimeCursorPlugin)
+- Size: **302,263 bytes** (~295 KB)
+- sha256: `35902b4edb7c4d6633aae44996de125a4c7769171773bc65063086237df7027b`
+- **Must re-copy.** `c41af52` (0.189.0) adds zone-aware right-click
+  context menu + `gantt.hitTestAt()` API + ContextMenuPlugin with
+  default menus per zone. See "0.189.0 — zone-aware context menu"
+  section below.
+- Prior `b5f3176` (0.186.0 + 0.187.0) adds three temporal-canvas plugins
   + agent API + state.timeCursorDate + getDisplayState replay path. See
   "0.186.0 + 0.187.0 — temporal canvas" section below.
 - Prior `4aa73d9` (0.185.37) adds the remote-events skeleton
@@ -100,12 +104,20 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **270,825 bytes** (~265 KB)
-- sha256: `daccc75a29b99b04696e95bad1b24bc039f35bee60f8ca44da6e55a5811dadaa`
-- **Must re-copy.** `b5f3176` (0.186.0) auto-installs TemporalAsymmetryPlugin
-  on both engineOnly + chrome mount paths so glen-walk + /v12 light up
-  with past/future visual asymmetry without any host-side change. Hosts
-  opt out via `mountConfig.temporalAsymmetry: false`.
+- Size: **272,364 bytes** (~266 KB)
+- sha256: `207bdc4e48177b5273d6075594429fd3c1326efdac6097beabb6d75a2b62d80c`
+- **Must re-copy.** `c41af52` (0.189.0) auto-installs ContextMenuPlugin
+  on both engineOnly + chrome mount paths. Right-click anywhere on the
+  gantt opens a zone-tailored menu (bar / row-label / date-header /
+  canvas-empty / bucket-header / below-rows). Default items render out
+  of the box; hosts wire callbacks (onCreateTask / onTaskAction /
+  onDateAction / onAgentRequest) to make them do things. Opt out via
+  `mountConfig.contextMenu: false`. See
+  `docs/dispatch-context-menu-integration.md` for full integration guide
+  + recommended wirings for DH and CN.
+- Prior `b5f3176` (0.186.0) auto-installs TemporalAsymmetryPlugin so
+  glen-walk + /v12 light up with past/future visual asymmetry without
+  any host-side change.
 - Prior `4aa73d9` (0.185.37) adds `handle.pushRemoteEvent` +
   `handle.getLastAppliedTs` on both runtime handle paths.
 
