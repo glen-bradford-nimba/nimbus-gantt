@@ -96,6 +96,102 @@ export class DependencyRenderer {
     ctx.restore();
   }
 
+  /**
+   * 0.189.0 — hit-test a content-space coordinate against rendered
+   * dependency arrows. Returns the dependency id whose arrowhead /
+   * approach segment is within `tolerance` pixels of the point, or
+   * null when no arrow is hit.
+   *
+   * Used by gantt.hitTestAt to surface the `dependency` context-menu
+   * zone. The hit-test targets the arrowhead area + the final
+   * horizontal approach segment — the parts users naturally aim for
+   * when right-clicking an arrow. Hitting the long mid-routing
+   * segment isn't as reliable but acceptable for v1.
+   *
+   * `contentX` / `contentY` are post-scroll content-space coords (same
+   * frame the renderer uses internally — `clientX - timelinePanelLeft + scrollX`
+   * for X, `clientY - timelinePanelTop` for Y including the header
+   * offset).
+   */
+  hitTest(
+    contentX: number,
+    contentY: number,
+    state: GanttState,
+    layouts: TaskLayout[],
+    scrollY: number,
+    headerHeight: number,
+    tolerance: number = 8,
+  ): string | null {
+    const { dependencies } = state;
+    if (dependencies.size === 0) return null;
+    if (contentY < headerHeight) return null;
+
+    const layoutMap = new Map<string, TaskLayout>();
+    for (const layout of layouts) layoutMap.set(layout.taskId, layout);
+
+    let best: { depId: string; dist: number } | null = null;
+
+    for (const dep of dependencies.values()) {
+      const sLayout = layoutMap.get(dep.source);
+      const tLayout = layoutMap.get(dep.target);
+      if (!sLayout || !tLayout) continue;
+      const type: DependencyType = dep.type || 'FS';
+      const { sourceX, sourceY, targetX, targetY } = this.getConnectionPoints(
+        type, sLayout, tLayout, scrollY, headerHeight,
+      );
+
+      // Hit zone 1: arrowhead — small radius around (targetX, targetY).
+      const arrowDx = contentX - targetX;
+      const arrowDy = contentY - targetY;
+      const arrowDist = Math.sqrt(arrowDx * arrowDx + arrowDy * arrowDy);
+      if (arrowDist <= tolerance + ARROW_SIZE) {
+        if (!best || arrowDist < best.dist) {
+          best = { depId: dep.id, dist: arrowDist };
+        }
+        continue;
+      }
+
+      // Hit zone 2: final horizontal approach segment from
+      // (targetX - HORIZONTAL_GAP, targetY) → (targetX, targetY).
+      const approachLeftX =
+        type === 'FS' || type === 'SS'
+          ? targetX - HORIZONTAL_GAP
+          : targetX + HORIZONTAL_GAP;
+      const segMinX = Math.min(approachLeftX, targetX);
+      const segMaxX = Math.max(approachLeftX, targetX);
+      if (
+        contentX >= segMinX - tolerance &&
+        contentX <= segMaxX + tolerance &&
+        Math.abs(contentY - targetY) <= tolerance
+      ) {
+        const dist = Math.abs(contentY - targetY);
+        if (!best || dist < best.dist) {
+          best = { depId: dep.id, dist };
+        }
+      }
+
+      // Hit zone 3: source exit segment.
+      const sourceExitX =
+        type === 'FS' || type === 'FF'
+          ? sourceX + HORIZONTAL_GAP
+          : sourceX - HORIZONTAL_GAP;
+      const srcMinX = Math.min(sourceX, sourceExitX);
+      const srcMaxX = Math.max(sourceX, sourceExitX);
+      if (
+        contentX >= srcMinX - tolerance &&
+        contentX <= srcMaxX + tolerance &&
+        Math.abs(contentY - sourceY) <= tolerance
+      ) {
+        const dist = Math.abs(contentY - sourceY);
+        if (!best || dist < best.dist) {
+          best = { depId: dep.id, dist };
+        }
+      }
+    }
+
+    return best?.depId ?? null;
+  }
+
   // ─── Connection Points ─────────────────────────────────────────────────────
 
   /**

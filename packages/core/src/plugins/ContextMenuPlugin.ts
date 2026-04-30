@@ -38,14 +38,18 @@ import type {
 // ─── Public Options ────────────────────────────────────────────────────────
 
 export interface ContextMenuOptions {
-  /** Host hook — fires for every right-click. Return a ContextMenuItem[]
-   *  to render a custom menu, or void/null to use NG defaults. */
+  /** Host hook — fires for every right-click. Return value semantics:
+   *    - non-empty array → NG renders the supplied menu (host override)
+   *    - empty array `[]` → NG suppresses the menu entirely for this zone
+   *    - `null` / `undefined` / `void` → NG falls through to its default
+   *      menu for the zone */
   onContextMenu?: (hit: ZoneHit, pos: ContextMenuPos) => ContextMenuItem[] | void | null;
 
   /** Host hook for agent-suggested items. Fires when user clicks any
    *  MenuItem with agentSuggested:true. Host calls Claude (or any LLM)
    *  with the supplied context, then resolves by mutating state via
-   *  gantt.agent.* or appending an annotation. */
+   *  gantt.agent.* or appending an annotation. Subject to agentRateLimit
+   *  if configured — see that option. */
   onAgentRequest?: (payload: AgentMenuRequest) => void | Promise<void>;
 
   /** Fired when the user picks "Create work item here" from the
@@ -61,12 +65,39 @@ export interface ContextMenuOptions {
   /** Fired when the user picks "Edit name" / "Change parent" / etc on
    *  a row-label or bar. Host opens its own editor; NG just signals.
    *  Actions: 'edit' | 'reparent' | 'change-bucket' | 'mark-complete'
-   *  | 'delete'. */
+   *  | 'delete' | 'collapse' | 'expand'. */
   onTaskAction?: (action: string, task: GanttTask, pos: ContextMenuPos) => void;
 
   /** Fired when the user picks something from the date-header default
-   *  menu. Actions: 'scroll-here' | 'zoom-to' | 'add-milestone' | 'mark-today'. */
+   *  menu. Actions: 'scroll-here' | 'zoom-to' | 'add-milestone'. */
   onDateAction?: (action: string, date: Date, pos: ContextMenuPos) => void;
+
+  /** Fired when the user picks an item from the dependency-arrow menu.
+   *  Actions: 'delete' | 'change-type-fs' | 'change-type-ss' |
+   *  'change-type-ff' | 'change-type-sf'. */
+  onDependencyAction?: (action: string, depId: string, pos: ContextMenuPos) => void;
+
+  /** Confirmation hook for destructive actions (delete task, delete
+   *  dependency). NG calls this BEFORE firing onTaskAction('delete') or
+   *  onDependencyAction('delete'); if it returns false (or rejects),
+   *  the destructive action is suppressed.
+   *
+   *  Default: NG calls window.confirm() with a sensible message. Host
+   *  passes a custom prompt (toast-with-undo, modal, etc.) by overriding
+   *  this. Pass `() => true` to suppress all confirms (e.g. when the
+   *  host's own modal already confirmed). */
+  onConfirmDestructive?: (
+    kind: 'task' | 'dependency',
+    label: string,
+  ) => boolean | Promise<boolean>;
+
+  /** Token-bucket rate limit on agent (✦) item clicks. Without this,
+   *  rapid misclicks could fire many onAgentRequest calls in flight to
+   *  paid LLM endpoints. Default: 1 call per 2 seconds.
+   *
+   *  Pass `{ maxCalls: 10, windowMs: 60000 }` for "10 per minute," etc.
+   *  Pass `false` to disable rate limiting entirely (host's risk). */
+  agentRateLimit?: false | { maxCalls: number; windowMs: number };
 
   /** Disable the LWS pointerdown+button===2 fallback. Default: enabled. */
   disablePointerDownFallback?: boolean;
@@ -81,6 +112,32 @@ export interface ContextMenuOptions {
 const STYLE_ID = 'nimbus-gantt-ctxmenu-styles';
 const ROOT_CLASS = 'ng-ctxmenu';
 
+// ─── Rate limiting (token bucket for agent ✦ calls) ────────────────────────
+
+const DEFAULT_AGENT_RATE_LIMIT = { maxCalls: 1, windowMs: 2000 };
+
+function makeRateLimiter(limit: { maxCalls: number; windowMs: number } | false) {
+  if (limit === false) return () => true;
+  const cfg = limit ?? DEFAULT_AGENT_RATE_LIMIT;
+  const window: number[] = [];
+  return function allow(): boolean {
+    const now = Date.now();
+    const cutoff = now - cfg.windowMs;
+    while (window.length > 0 && window[0] < cutoff) window.shift();
+    if (window.length >= cfg.maxCalls) return false;
+    window.push(now);
+    return true;
+  };
+}
+
+function diagPlugin(kind: string, data?: Record<string, unknown>): void {
+  if (typeof window === 'undefined') return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const arr = (window as any).__nga_diag;
+  if (!Array.isArray(arr)) return;
+  arr.push({ t: Date.now(), kind, ...(data ?? {}) });
+}
+
 export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlugin {
   let host: PluginHost | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,6 +147,28 @@ export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlu
   let ctxHandler: ((e: Event) => void) | null = null;
   let pdHandler: ((e: PointerEvent) => void) | null = null;
   let docDismissHandler: ((e: Event) => void) | null = null;
+
+  const allowAgentCall = makeRateLimiter(
+    opts.agentRateLimit === undefined ? DEFAULT_AGENT_RATE_LIMIT : opts.agentRateLimit,
+  );
+
+  async function confirmDestructive(kind: 'task' | 'dependency', label: string): Promise<boolean> {
+    if (opts.onConfirmDestructive) {
+      try {
+        const r = await opts.onConfirmDestructive(kind, label);
+        return !!r;
+      } catch { return false; }
+    }
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      const msg = kind === 'task'
+        ? `Delete task "${label}"?`
+        : `Delete dependency "${label}"?`;
+      try { return window.confirm(msg); } catch { return false; }
+    }
+    // No confirm UI available → default to destructive-allowed (host's
+    // call to opt out via onConfirmDestructive=()=>false).
+    return true;
+  }
 
   function injectStyles(): void {
     if (typeof document === 'undefined') return;
@@ -274,6 +353,11 @@ export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlu
   function handleItemClick(item: ContextMenuItem, hit: ZoneHit, pos: ContextMenuPos): void {
     dismissMenu();
     if (item.agentSuggested && item.prompt && opts.onAgentRequest && gantt?.agent) {
+      // Rate limit before invoking the host's agent endpoint.
+      if (!allowAgentCall()) {
+        diagPlugin('ctxmenu:agent-rate-limited', { itemId: item.id });
+        return;
+      }
       const payload: AgentMenuRequest = {
         hit,
         pos,
@@ -298,6 +382,19 @@ export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlu
     }
   }
 
+  /** Wraps a destructive action with a confirm gate. */
+  function withConfirm(
+    kind: 'task' | 'dependency',
+    label: string,
+    fire: () => void,
+  ): () => Promise<void> {
+    return async () => {
+      const ok = await confirmDestructive(kind, label);
+      if (ok) fire();
+      else diagPlugin('ctxmenu:destructive-cancelled', { kind, label });
+    };
+  }
+
   // ─── Default menus per zone ─────────────────────────────────────────────
 
   function defaultMenu(hit: ZoneHit, pos: ContextMenuPos): ContextMenuItem[] {
@@ -312,7 +409,10 @@ export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlu
           { id: 'change-bucket', label: 'Change bucket…', icon: '◧', onClick: () => opts.onTaskAction?.('change-bucket', hit.task, pos) },
           { id: 'mark-complete', label: 'Mark complete', icon: '✓', onClick: () => opts.onTaskAction?.('mark-complete', hit.task, pos) },
           { id: 'div1', label: '', divider: true },
-          { id: 'delete', label: 'Delete', icon: '×', onClick: () => opts.onTaskAction?.('delete', hit.task, pos) },
+          {
+            id: 'delete', label: 'Delete', icon: '×',
+            onClick: withConfirm('task', hit.task.name || hit.task.id, () => opts.onTaskAction?.('delete', hit.task, pos)),
+          },
         );
         if (hasAgent) {
           items.push(
@@ -344,7 +444,10 @@ export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlu
           { id: 'change-bucket', label: 'Change bucket…', icon: '◧', onClick: () => opts.onTaskAction?.('change-bucket', hit.task, pos) },
           { id: 'mark-complete', label: 'Mark complete', icon: '✓', onClick: () => opts.onTaskAction?.('mark-complete', hit.task, pos) },
           { id: 'div1', label: '', divider: true },
-          { id: 'delete', label: 'Delete', icon: '×', onClick: () => opts.onTaskAction?.('delete', hit.task, pos) },
+          {
+            id: 'delete', label: 'Delete', icon: '×',
+            onClick: withConfirm('task', hit.task.name || hit.task.id, () => opts.onTaskAction?.('delete', hit.task, pos)),
+          },
         );
         if (hasAgent) {
           items.push(
@@ -462,7 +565,42 @@ export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlu
         return items;
       }
 
-      case 'dependency':
+      case 'dependency': {
+        items.push(
+          {
+            id: 'change-fs', label: 'Change type → Finish-to-Start (FS)', icon: '→',
+            onClick: () => opts.onDependencyAction?.('change-type-fs', hit.depId, pos),
+          },
+          {
+            id: 'change-ss', label: 'Change type → Start-to-Start (SS)', icon: '↦',
+            onClick: () => opts.onDependencyAction?.('change-type-ss', hit.depId, pos),
+          },
+          {
+            id: 'change-ff', label: 'Change type → Finish-to-Finish (FF)', icon: '↤',
+            onClick: () => opts.onDependencyAction?.('change-type-ff', hit.depId, pos),
+          },
+          {
+            id: 'change-sf', label: 'Change type → Start-to-Finish (SF)', icon: '↔',
+            onClick: () => opts.onDependencyAction?.('change-type-sf', hit.depId, pos),
+          },
+          { id: 'div1', label: '', divider: true },
+          {
+            id: 'delete', label: 'Delete dependency', icon: '×',
+            onClick: withConfirm('dependency', hit.depId, () => opts.onDependencyAction?.('delete', hit.depId, pos)),
+          },
+        );
+        if (hasAgent) {
+          items.push(
+            { id: 'div-agent', label: '', divider: true },
+            {
+              id: 'agent-explain-dep', label: 'Ask Claude: is this dependency necessary?',
+              agentSuggested: true,
+              prompt: `Evaluate dependency ${hit.depId}. Is it logically required, or could the predecessor and successor run in parallel? Consider data flow, resource contention, and external constraints.`,
+            },
+          );
+        }
+        return items;
+      }
       case 'outside':
       default:
         return [];

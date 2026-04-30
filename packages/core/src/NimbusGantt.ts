@@ -625,6 +625,20 @@ export class NimbusGantt {
       return { zone: 'row-label', task, rowIndex };
     }
 
+    // ── Dependency arrow (0.189.0) ──────────────────────────────────────
+    // Hit-test BEFORE falling through to canvas-empty so right-clicking
+    // the arrow opens the dep menu instead of the create-task menu.
+    if (inTimeline) {
+      const contentX = (clientX - timelineRect.left) + scrollX;
+      const contentY = (clientY - timelineRect.top);
+      try {
+        const depId = this.dependencyRenderer.hitTest(
+          contentX, contentY, state, this.layouts, scrollY, headerHeight,
+        );
+        if (depId) return { zone: 'dependency', depId };
+      } catch { /* renderer unavailable in tests */ }
+    }
+
     // ── Below-rows zone (timeline area below the last row) ──────────────
     if (rowIndex >= flatVisibleIds.length) {
       let date: Date;

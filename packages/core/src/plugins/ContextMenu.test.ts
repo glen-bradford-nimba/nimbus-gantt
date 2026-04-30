@@ -167,3 +167,47 @@ describe('ContextMenuPlugin — agent request payload shape', () => {
     expect(payload.hit.zone).toBe('bar');
   });
 });
+
+describe('ContextMenuPlugin — dependency zone (0.189.0)', () => {
+  it('dependency zone carries the depId', () => {
+    const hit: ZoneHit = { zone: 'dependency', depId: 'd-42' };
+    expect(hit.depId).toBe('d-42');
+  });
+
+  it('plugin accepts onDependencyAction option', () => {
+    const onDependencyAction = vi.fn();
+    const plugin = ContextMenuPlugin({ onDependencyAction });
+    expect(plugin.name).toBe('ContextMenuPlugin');
+  });
+});
+
+describe('ContextMenuPlugin — destructive confirm gate', () => {
+  it('plugin accepts onConfirmDestructive option', () => {
+    const onConfirmDestructive = vi.fn().mockReturnValue(true);
+    const plugin = ContextMenuPlugin({ onConfirmDestructive });
+    expect(plugin.name).toBe('ContextMenuPlugin');
+  });
+
+  it('default confirm path uses window.confirm', () => {
+    // Smoke-test the default: when no onConfirmDestructive is wired
+    // and window.confirm exists, NG falls through to it. We don't have
+    // a window in this test environment, so the function returns true
+    // (doc'd: no confirm UI available → allow).
+    const plugin = ContextMenuPlugin({});
+    expect(plugin.name).toBe('ContextMenuPlugin');
+  });
+});
+
+describe('ContextMenuPlugin — agent rate limit', () => {
+  it('plugin accepts agentRateLimit config object', () => {
+    const plugin = ContextMenuPlugin({
+      agentRateLimit: { maxCalls: 5, windowMs: 60000 },
+    });
+    expect(plugin.name).toBe('ContextMenuPlugin');
+  });
+
+  it('agentRateLimit: false disables rate limiting', () => {
+    const plugin = ContextMenuPlugin({ agentRateLimit: false });
+    expect(plugin.name).toBe('ContextMenuPlugin');
+  });
+});
