@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `c41af52` *(0.189.0 zone-aware right-click context menu)* |
-| Commit subject | `feat(0.189.0): zone-aware right-click context menu + agent-augmented surface` |
+| Commit SHA (source — latest) | `9d0fb3e` *(0.189.1 dep hit-test + delete confirm + agent rate limit)* |
+| Commit subject | `feat(0.189.1): dependency-arrow hit-test + delete confirm + agent rate limit` |
+| 0.189.1 hardening | `9d0fb3e` |
 | 0.189.0 context menu | `c41af52` |
 | 0.186.0 + 0.187.0 temporal canvas | `b5f3176` |
 | 0.185.37 remote-events skeleton | `4aa73d9` |
@@ -74,12 +75,16 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **302,263 bytes** (~295 KB)
-- sha256: `35902b4edb7c4d6633aae44996de125a4c7769171773bc65063086237df7027b`
-- **Must re-copy.** `c41af52` (0.189.0) adds zone-aware right-click
-  context menu + `gantt.hitTestAt()` API + ContextMenuPlugin with
-  default menus per zone. See "0.189.0 — zone-aware context menu"
-  section below.
+- Size: **305,381 bytes** (~298 KB)
+- sha256: `20f5dae563d96eb6db18a37cd845bb49840f2a49259c233e1f7cbbf8f8abe014`
+- **Must re-copy.** `9d0fb3e` (0.189.1) hardens the context-menu plugin
+  with: dependency-arrow hit-test, destructive-confirm gate on delete
+  actions (default window.confirm; host overrides via
+  onConfirmDestructive), token-bucket rate limit on agent ✦ items
+  (default 1 call per 2s; configurable via agentRateLimit).
+- Prior `c41af52` (0.189.0) adds zone-aware right-click context menu
+  + `gantt.hitTestAt()` API + ContextMenuPlugin with default menus per
+  zone.
 - Prior `b5f3176` (0.186.0 + 0.187.0) adds three temporal-canvas plugins
   + agent API + state.timeCursorDate + getDisplayState replay path. See
   "0.186.0 + 0.187.0 — temporal canvas" section below.
