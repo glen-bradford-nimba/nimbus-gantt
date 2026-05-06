@@ -472,6 +472,16 @@ export interface PendingEdit {
     sortOrder?: number;
     parentId?: string | null;
   };
+  /** 0.190 — alias of `original`. Same object reference; same shape. Hosts
+   *  building "from → to" audit lists tend to reach for `before` first.
+   *  Both populated together so old hosts reading `original` keep working. */
+  before: {
+    startDate?: string;
+    endDate?: string;
+    priorityGroup?: string | null;
+    sortOrder?: number;
+    parentId?: string | null;
+  };
   /** ms-since-epoch of the LAST coalesced edit on this taskId+kind. */
   ts: number;
 }
@@ -536,6 +546,18 @@ export interface AppInstance {
    *  callback — these edits never existed as far as persistence is
    *  concerned. */
   discardEdits?(): void;
+
+  /** 0.190 — visual-only revert for ONE buffered patch. Restores `before`
+   *  on the row (date for kind='edit'; parent/group/sortOrder for
+   *  kind='reorder') and clears that single buffer entry. The host never
+   *  sees a callback — the edit never existed as far as persistence is
+   *  concerned. Returns true when an entry was removed; false when no
+   *  matching entry was buffered (already-committed, never-staged, etc.).
+   *
+   *  Use case: per-row ✗ in the AuditPanel preview modal so the operator
+   *  can cherry-pick which buffered changes to commit vs reject without
+   *  having to discard the whole buffer + redo the keepers. */
+  removePendingPatch?(taskId: string, kind: 'edit' | 'reorder'): boolean;
 
   /** 0.185.26 — runtime update of the host-supplied TitleBar buttons. Pass
    *  the full desired array (not a diff); replacing pressed state on an

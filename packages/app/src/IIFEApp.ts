@@ -1040,6 +1040,7 @@ export class IIFEApp {
         getPendingEdits(): PendingEdit[] { return []; },
         commitEdits(): Promise<CommitEditsResult> { return Promise.resolve({ committed: [] }); },
         discardEdits(): void { /* no-op in engineOnly */ },
+        removePendingPatch(): boolean { return false; },
         /** 0.185.1 — same impl as the chrome-aware path. Snap then scroll. */
         scrollToDate(date: string | Date): void {
           const parsed = parseFocusDate(date);
@@ -1291,12 +1292,17 @@ export class IIFEApp {
     ): void {
       const key = taskId + '::' + kind;
       const existing = pendingBuffer.get(key);
+      // 0.190 — `before` is an alias of `original`, populated by the same
+      // object reference so hosts reading either field see identical values
+      // and discardEdits/removePendingPatch revert against a single source.
+      const snap = existing?.original ?? originalDelta;
       if (kind === 'edit') {
         pendingBuffer.set(key, {
           taskId,
           kind: 'edit',
           changes: { ...(existing?.changes ?? {}), ...(payloadDelta as { startDate?: string; endDate?: string }) },
-          original: existing?.original ?? originalDelta,
+          original: snap,
+          before: snap,
           ts: Date.now(),
         });
       } else {
@@ -1307,10 +1313,32 @@ export class IIFEApp {
             ...(existing?.reorderPayload ?? {}),
             ...(payloadDelta as { priorityGroup?: string; sortOrder?: number; parentId?: string | null }),
           },
-          original: existing?.original ?? originalDelta,
+          original: snap,
+          before: snap,
           ts: Date.now(),
         });
       }
+    }
+
+    /** 0.190 — revert ONE buffered entry's optimistic mutations on
+     *  allTasks. Used by both discardEdits (whole buffer) and
+     *  removePendingPatch (single entry). Does NOT mutate the buffer
+     *  itself — callers own that side of the bookkeeping. No-op when
+     *  the task is no longer in allTasks (filter drift / setTasks
+     *  replacement during the buffered window). */
+    function revertOneBuffered(p: PendingEdit): void {
+      const idx = allTasks.findIndex((t) => t.id === p.taskId);
+      if (idx === -1) return;
+      const u: NormalizedTask = { ...allTasks[idx] };
+      if (p.kind === 'edit') {
+        if (p.original.startDate !== undefined) u.startDate = p.original.startDate;
+        if (p.original.endDate   !== undefined) u.endDate   = p.original.endDate;
+      } else {
+        if (p.original.priorityGroup !== undefined) u.priorityGroup    = p.original.priorityGroup;
+        if (p.original.parentId      !== undefined) u.parentWorkItemId = p.original.parentId;
+        if (p.original.sortOrder     !== undefined) u.sortOrder        = p.original.sortOrder;
+      }
+      allTasks[idx] = u;
     }
 
     /** Translates the internal PendingEdit buffer into AuditPanel's
@@ -1365,6 +1393,30 @@ export class IIFEApp {
       if (!options.batchMode) return;
       tplConfig.pendingChanges = buildPendingChangesFromBuffer();
       renderSlots();
+    }
+
+    /* 0.190 — wire the audit-list ✗ button. AuditPanel renders the affordance
+     * only when this callback is present, so leave it unset on per-patch
+     * mounts (host already owns the reject UX). On batchMode mounts the
+     * closure removes BOTH 'edit' and 'reorder' entries for the taskId so a
+     * single ✗ collapses the row visually. */
+    if (options.batchMode) {
+      tplConfig.onRejectPendingChange = (taskId: string) => {
+        let removed = false;
+        for (const kind of ['edit', 'reorder'] as const) {
+          const key = taskId + '::' + kind;
+          const p = pendingBuffer.get(key);
+          if (!p) continue;
+          revertOneBuffered(p);
+          pendingBuffer.delete(key);
+          removed = true;
+        }
+        if (!removed) return;
+        const stillBuffered = pendingBuffer.has(taskId + '::edit') || pendingBuffer.has(taskId + '::reorder');
+        if (!stillBuffered) dirtyTaskIds.delete(taskId);
+        syncPendingChanges();
+        refreshGantt();
+      };
     }
 
     /** Dim a bar color for the in-flight visual state. Appends a 50%-alpha
@@ -2777,23 +2829,27 @@ export class IIFEApp {
        *  the user clicks Cancel on the audit preview modal. */
       discardEdits(): void {
         for (const p of pendingBuffer.values()) {
-          const idx = allTasks.findIndex((t) => t.id === p.taskId);
-          if (idx === -1) continue;
-          const u: NormalizedTask = { ...allTasks[idx] };
-          if (p.kind === 'edit') {
-            if (p.original.startDate !== undefined) u.startDate = p.original.startDate;
-            if (p.original.endDate   !== undefined) u.endDate   = p.original.endDate;
-          } else {
-            if (p.original.priorityGroup !== undefined) u.priorityGroup    = p.original.priorityGroup;
-            if (p.original.parentId      !== undefined) u.parentWorkItemId = p.original.parentId;
-            if (p.original.sortOrder     !== undefined) u.sortOrder        = p.original.sortOrder;
-          }
-          allTasks[idx] = u;
+          revertOneBuffered(p);
         }
         pendingBuffer.clear();
         dirtyTaskIds.clear();
         syncPendingChanges();
         refreshGantt();
+      },
+      /** 0.190 — visual-only revert for ONE buffered patch. Cherry-pick
+       *  reject from the audit preview modal. Returns true when an entry
+       *  was removed; false on no-op (already committed, never staged). */
+      removePendingPatch(taskId: string, kind: 'edit' | 'reorder'): boolean {
+        const key = taskId + '::' + kind;
+        const p = pendingBuffer.get(key);
+        if (!p) return false;
+        revertOneBuffered(p);
+        pendingBuffer.delete(key);
+        const stillBuffered = pendingBuffer.has(taskId + '::edit') || pendingBuffer.has(taskId + '::reorder');
+        if (!stillBuffered) dirtyTaskIds.delete(taskId);
+        syncPendingChanges();
+        refreshGantt();
+        return true;
       },
       destroy() { IIFEApp.unmount(container); },
     };

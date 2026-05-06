@@ -342,6 +342,16 @@ export interface TemplateConfig {
    *  opens a confirm-before-commit modal listing every change. When empty or
    *  absent, Submit fires onAuditSubmit immediately (legacy behaviour). */
   pendingChanges?: AuditPreviewItem[];
+  /** 0.190 — optional per-row reject handler. When present, the AuditPanel
+   *  preview modal renders an ✗ button next to each row so the operator can
+   *  cherry-pick which buffered changes to commit vs reject before
+   *  confirming. The IIFE chrome path wires this to handle.removePendingPatch
+   *  for both 'edit' and 'reorder' kinds on the taskId, so a single ✗
+   *  reverts every buffered mutation for that row. Hosts driving the audit
+   *  panel manually (without batchMode) can wire it to their own reject
+   *  flow. When absent, rows render without the per-row reject affordance —
+   *  legacy bulk-only flow. */
+  onRejectPendingChange?: (taskId: string) => void;
   /** Optional runtime override for the AuditPanel dirty flag. When present,
    *  this wins over state.pendingPatchCount. Consumers with their own state
    *  store (e.g. useProFormaState) should pipe their isDirty here so the

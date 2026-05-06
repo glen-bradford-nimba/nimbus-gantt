@@ -107,6 +107,7 @@ export function AuditPanel({ state, dispatch, config }: SlotProps) {
       {previewOpen && (
         <AuditPreviewModal
           items={pending}
+          onReject={config.onRejectPendingChange}
           onCancel={() => setPreviewOpen(false)}
           onConfirm={async () => {
             setPreviewOpen(false);
@@ -122,10 +123,15 @@ function AuditPreviewModal({
   items,
   onCancel,
   onConfirm,
+  onReject,
 }: {
   items: AuditPreviewItem[];
   onCancel: () => void;
   onConfirm: () => void | Promise<void>;
+  /** 0.190 — when present, render an ✗ button per row that reverts the
+   *  buffered changes for that taskId. Auto-closes the modal when the
+   *  last row is rejected. */
+  onReject?: (taskId: string) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   useEffect(() => {
@@ -135,6 +141,10 @@ function AuditPreviewModal({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [confirming, onCancel]);
+  // Auto-close when the buffer is fully cleared via per-row ✗.
+  useEffect(() => {
+    if (items.length === 0 && !confirming) onCancel();
+  }, [items.length, confirming, onCancel]);
   const kinds = summarizeKinds(items);
   return (
     <div
@@ -173,18 +183,34 @@ function AuditPreviewModal({
             {items.map((it) => {
               const descs = it.descs && it.descs.length ? it.descs : it.fields.map((f) => `${f} edited`);
               return (
-                <li key={it.id} style={{ padding: '8px 0', borderBottom: '1px solid #f1f5f9' }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                    <code style={{ fontFamily: 'ui-monospace,monospace', background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, fontSize: 11.5, color: '#0f172a' }}>
-                      {it.id}
-                    </code>
-                    {it.title && it.title !== it.id && (
-                      <span style={{ color: '#0f172a', fontWeight: 500 }}>{it.title}</span>
-                    )}
+                <li key={it.id} style={{ padding: '8px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                      <code style={{ fontFamily: 'ui-monospace,monospace', background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, fontSize: 11.5, color: '#0f172a' }}>
+                        {it.id}
+                      </code>
+                      {it.title && it.title !== it.id && (
+                        <span style={{ color: '#0f172a', fontWeight: 500 }}>{it.title}</span>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 3, color: '#475569', fontSize: 12, lineHeight: 1.45 }}>
+                      {descs.join(' · ')}
+                    </div>
                   </div>
-                  <div style={{ marginTop: 3, color: '#475569', fontSize: 12, lineHeight: 1.45 }}>
-                    {descs.join(' · ')}
-                  </div>
+                  {onReject && (
+                    <button
+                      type="button"
+                      data-testid="audit-preview-reject"
+                      data-task-id={it.id}
+                      aria-label={`Reject changes for ${it.title || it.id}`}
+                      title="Reject this change (revert this row, keep the rest)"
+                      disabled={confirming}
+                      onClick={() => onReject(it.id)}
+                      style={{ flex: '0 0 auto', background: 'transparent', border: '1px solid #cbd5e1', borderRadius: 6, padding: '2px 8px', fontSize: 12, color: '#64748b', cursor: 'pointer', lineHeight: 1.2 }}
+                    >
+                      ✗
+                    </button>
+                  )}
                 </li>
               );
             })}

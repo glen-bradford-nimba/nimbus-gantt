@@ -101,9 +101,23 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
       await runSubmit();
       return;
     }
-    openPreviewModal(pending, async () => {
-      await runSubmit();
-    });
+    openPreviewModal(
+      pending,
+      async () => {
+        await runSubmit();
+      },
+      // 0.190 — per-row ✗ rejector. When the host wires
+      // config.onRejectPendingChange, surface it; modal calls back into
+      // the audit-pass module to refresh its row list against the
+      // freshly-shrunk buffer (latestProps.config.pendingChanges is
+      // updated by the IIFEApp's syncPendingChanges → renderSlots cycle).
+      p.config.onRejectPendingChange
+        ? (taskId: string) => {
+            p.config.onRejectPendingChange?.(taskId);
+            return latestProps.config.pendingChanges ?? [];
+          }
+        : undefined,
+    );
   }
 
   async function runSubmit() {
@@ -143,9 +157,15 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
 function openPreviewModal(
   items: { id: string; title?: string; fields: string[]; descs: string[] }[],
   onConfirm: () => void | Promise<void>,
+  /** 0.190 \u2014 per-row \u2717 rejector. Returns the post-reject items list so
+   *  the modal re-renders against the live buffer state. When the
+   *  returned list is empty the modal auto-closes. */
+  onReject?: (taskId: string) => { id: string; title?: string; fields: string[]; descs: string[] }[],
 ): void {
   const existing = document.getElementById('ng-audit-preview-modal');
   if (existing) existing.remove();
+
+  let currentItems = items.slice();
 
   const backdrop = document.createElement('div');
   backdrop.id = 'ng-audit-preview-modal';
@@ -161,8 +181,6 @@ function openPreviewModal(
   header.style.cssText = 'padding:14px 18px;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between';
   const title = document.createElement('div');
   title.style.cssText = 'font-size:14px;font-weight:600;color:#0f172a';
-  const kinds = summarizeKinds(items);
-  title.textContent = 'Review ' + items.length + ' change' + (items.length === 1 ? '' : 's') + ' - ' + kinds;
   const close = document.createElement('button');
   close.type = 'button';
   close.textContent = '\u2715';
@@ -177,31 +195,60 @@ function openPreviewModal(
   body.style.cssText = 'padding:8px 18px 12px;overflow-y:auto;flex:1';
   const list = document.createElement('ul');
   list.style.cssText = 'margin:0;padding:0;list-style:none;font-size:12.5px;color:#334155';
-  for (const it of items) {
-    const li = document.createElement('li');
-    li.style.cssText = 'padding:8px 0;border-bottom:1px solid #f1f5f9';
-    const head = document.createElement('div');
-    head.style.cssText = 'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap';
-    const idEl = document.createElement('code');
-    idEl.style.cssText = 'font-family:ui-monospace,monospace;background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:11.5px;color:#0f172a';
-    idEl.textContent = it.id;
-    head.appendChild(idEl);
-    if (it.title && it.title !== it.id) {
-      const titleEl = document.createElement('span');
-      titleEl.style.cssText = 'color:#0f172a;font-weight:500';
-      titleEl.textContent = it.title;
-      head.appendChild(titleEl);
-    }
-    li.appendChild(head);
-    const descs = it.descs && it.descs.length ? it.descs : it.fields.map((f) => f + ' edited');
-    const descList = document.createElement('div');
-    descList.style.cssText = 'margin-top:3px;color:#475569;font-size:12px;line-height:1.45';
-    descList.textContent = descs.join(' \u00b7 ');
-    li.appendChild(descList);
-    list.appendChild(li);
-  }
   body.appendChild(list);
   panel.appendChild(body);
+
+  function renderRows() {
+    title.textContent = 'Review ' + currentItems.length + ' change' + (currentItems.length === 1 ? '' : 's') + ' - ' + summarizeKinds(currentItems);
+    while (list.firstChild) list.removeChild(list.firstChild);
+    for (const it of currentItems) {
+      const li = document.createElement('li');
+      li.style.cssText = 'padding:8px 0;border-bottom:1px solid #f1f5f9;display:flex;gap:8px;align-items:flex-start';
+
+      const main = document.createElement('div');
+      main.style.cssText = 'flex:1;min-width:0';
+      const head = document.createElement('div');
+      head.style.cssText = 'display:flex;align-items:baseline;gap:8px;flex-wrap:wrap';
+      const idEl = document.createElement('code');
+      idEl.style.cssText = 'font-family:ui-monospace,monospace;background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:11.5px;color:#0f172a';
+      idEl.textContent = it.id;
+      head.appendChild(idEl);
+      if (it.title && it.title !== it.id) {
+        const titleEl = document.createElement('span');
+        titleEl.style.cssText = 'color:#0f172a;font-weight:500';
+        titleEl.textContent = it.title;
+        head.appendChild(titleEl);
+      }
+      main.appendChild(head);
+      const descs = it.descs && it.descs.length ? it.descs : it.fields.map((f) => f + ' edited');
+      const descList = document.createElement('div');
+      descList.style.cssText = 'margin-top:3px;color:#475569;font-size:12px;line-height:1.45';
+      descList.textContent = descs.join(' \u00b7 ');
+      main.appendChild(descList);
+      li.appendChild(main);
+
+      if (onReject) {
+        const rejectBtn = document.createElement('button');
+        rejectBtn.type = 'button';
+        rejectBtn.textContent = '\u2717';
+        rejectBtn.setAttribute('data-testid', 'audit-preview-reject');
+        rejectBtn.setAttribute('data-task-id', it.id);
+        rejectBtn.setAttribute('aria-label', 'Reject changes for ' + (it.title || it.id));
+        rejectBtn.title = 'Reject this change (revert this row, keep the rest)';
+        rejectBtn.style.cssText = 'flex:0 0 auto;background:transparent;border:1px solid #cbd5e1;border-radius:6px;padding:2px 8px;font-size:12px;color:#64748b;cursor:pointer;line-height:1.2';
+        rejectBtn.addEventListener('click', () => {
+          const next = onReject(it.id);
+          currentItems = next;
+          if (currentItems.length === 0) { cleanup(); return; }
+          renderRows();
+        });
+        li.appendChild(rejectBtn);
+      }
+
+      list.appendChild(li);
+    }
+  }
+  renderRows();
 
   const footer = document.createElement('div');
   footer.style.cssText = 'padding:12px 18px;border-top:1px solid #e2e8f0;display:flex;align-items:center;justify-content:flex-end;gap:8px';

@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `9d0fb3e` *(0.189.1 dep hit-test + delete confirm + agent rate limit)* |
-| Commit subject | `feat(0.189.1): dependency-arrow hit-test + delete confirm + agent rate limit` |
+| Commit SHA (source — latest) | *(0.190.0 audit-pass extension — pending commit)* |
+| Commit subject | `feat(0.190.0): audit-pass — before alias, removePendingPatch, per-row reject` |
+| 0.190.0 audit-pass extension | *(pending)* |
 | 0.189.1 hardening | `9d0fb3e` |
 | 0.189.0 context menu | `c41af52` |
 | 0.186.0 + 0.187.0 temporal canvas | `b5f3176` |
@@ -76,8 +77,12 @@ deploy step.
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
 - Size: **305,381 bytes** (~298 KB)
-- sha256: `20f5dae563d96eb6db18a37cd845bb49840f2a49259c233e1f7cbbf8f8abe014`
-- **Must re-copy.** `9d0fb3e` (0.189.1) hardens the context-menu plugin
+- md5: `8bccbd2d06cbdff932772429220d273d`
+- **0.190.0 — bytes unchanged from 0.189.1.** The audit-pass extension
+  is app-layer only (per-record `before` alias, `removePendingPatch`,
+  per-row reject). DH/CN consumers do NOT need to re-copy
+  `nimbusgantt.resource` for 0.190.0 — only `nimbusganttapp.resource`.
+  Prior `9d0fb3e` (0.189.1) hardens the context-menu plugin
   with: dependency-arrow hit-test, destructive-confirm gate on delete
   actions (default window.confirm; host overrides via
   onConfirmDestructive), token-bucket rate limit on agent ✦ items
@@ -109,9 +114,12 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **272,364 bytes** (~266 KB)
-- sha256: `207bdc4e48177b5273d6075594429fd3c1326efdac6097beabb6d75a2b62d80c`
-- **Must re-copy.** `c41af52` (0.189.0) auto-installs ContextMenuPlugin
+- Size: **275,920 bytes** (~270 KB)
+- md5: `d1a75ec0bbc24f44fbc1819db9c00b72`
+- **Must re-copy for 0.190.0.** Audit-pass extension shipped — see
+  "0.190.0 — audit-pass extension" section below for the three new
+  surfaces hosts can wire (DH-Claude requested, batch-mode mounts only).
+- Prior `c41af52` (0.189.0) auto-installs ContextMenuPlugin
   on both engineOnly + chrome mount paths. Right-click anywhere on the
   gantt opens a zone-tailored menu (bar / row-label / date-header /
   canvas-empty / bucket-header / below-rows). Default items render out
@@ -125,6 +133,78 @@ Prior entry (0.183 cut `41ec401`) added:
   any host-side change.
 - Prior `4aa73d9` (0.185.37) adds `handle.pushRemoteEvent` +
   `handle.getLastAppliedTs` on both runtime handle paths.
+
+**0.190.0 — audit-pass extension** *(source pending; app bundle only)*.
+DH CC requested via dispatch from C:\Projects\Delivery-Hub. Three
+additive surfaces extending the existing 0.185 batchMode +
+`getPendingEdits()` / `commitEdits()` / `discardEdits()` flow so DH can
+build a "review changes before DML" audit list with FROM → TO display
+and per-row cherry-pick. **All three are additive** — hosts that ignore
+the new fields/methods/callbacks see no behavior change.
+
+**Ask 1 — `before` alias on `PendingEdit`** (`packages/app/src/types.ts`,
+`PendingEdit.before`). Every entry returned by `handle.getPendingEdits()`
+now carries both `original` (legacy name; unchanged) and `before` (new
+alias; same object reference, identical shape:
+`{ startDate?, endDate?, priorityGroup?, sortOrder?, parentId? }`). Hosts
+building "from → to" audit displays can read either name. Both fields
+populated together at every buffer write, so they never diverge.
+
+**Ask 2 — `handle.removePendingPatch(taskId, kind)`**
+(`packages/app/src/types.ts`, `AppInstance.removePendingPatch`;
+`packages/app/src/IIFEApp.ts`). Visual-only revert for one buffered
+entry. `kind` is `'edit'` (date change) or `'reorder'` (parent /
+priorityGroup / sortOrder). Restores the row's `before` snapshot on the
+canvas, deletes the entry from `pendingBuffer`, syncs
+`tplConfig.pendingChanges`, and re-renders the gantt. Returns `true`
+when a matching buffered entry was removed; `false` on no-op
+(already-committed, never-staged, divergence). The host never sees a
+callback — the patch never existed as far as persistence is concerned.
+EngineOnly mounts (`React` driver path) return `false` unconditionally;
+batch-buffering on the React driver remains queued for a follow-up cut.
+
+**Ask 3 — per-row ✗ in the AuditPanel preview modal**
+(`packages/app/src/templates/types.ts`, `TemplateConfig.onRejectPendingChange`;
+both `AuditPanel.tsx` + `AuditPanel.vanilla.ts`). When the host wires
+`config.onRejectPendingChange = (taskId) => void`, every row in the
+preview modal's pending-changes list renders an ✗ button (data-testid
+`audit-preview-reject`, data-task-id attribute carries the id) that
+calls the callback for that taskId. The IIFE chrome-aware mount path
+auto-wires this for `batchMode` mounts: clicking ✗ removes BOTH `'edit'`
+AND `'reorder'` entries for the taskId so a single click collapses the
+row visually. The modal auto-closes when the last row is rejected.
+Hosts on per-patch mounts (legacy CN v10) can wire their own reject
+flow; when the field is left unset, the modal renders without the ✗
+column (legacy bulk-only behavior preserved).
+
+**Wiring sketch for DH (PR #1 — already in flight on C:\Projects\Delivery-Hub):**
+
+```js
+// 1. Mount with batchMode true (drag stages instead of DMLing).
+const handle = NimbusGanttApp.mount(host, {
+  batchMode: true,
+  tasks, dependencies, /* ... */
+});
+
+// 2. The audit-pass UX is then driven entirely by the bundle:
+//    - Drag a bar → enters pendingBuffer (visual: dim row + before snapshot kept)
+//    - Click "📤 Submit + commit" in AuditPanel
+//    - Confirm modal lists every change with FROM → TO descs
+//    - Per-row ✗ reverts that single change (handle.removePendingPatch internally)
+//    - Confirm + commit fires commitEdits() → host's onItemEdit / onItemReorder
+//      land in DH's @AuraEnabled commitGanttPatches(...) Apex method.
+
+// 3. Optional: wire a "Reset all" outside the modal:
+document.querySelector('[data-testid="audit-reset-btn"]')
+  .addEventListener('click', () => handle.discardEdits());
+```
+
+**Test surfaces** for hero stories / Cowork verification:
+- `data-testid="audit-submit-btn"` — opens preview modal
+- `data-testid="audit-preview-confirm"` — fires commitEdits
+- `data-testid="audit-preview-reject"` — per-row ✗ (only when
+  `onRejectPendingChange` is wired)
+- `data-task-id` attribute on each ✗ button — taskId of the row
 
 **0.186.0 + 0.187.0 — temporal canvas** (source `b5f3176`). DH CC and
 CN CC, both bundles re-copy. Implements
