@@ -12,9 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | *(0.190.0 audit-pass extension — pending commit)* |
+| Commit SHA (source — latest) | `05a8aff` *(0.190.0 audit-pass extension)* |
 | Commit subject | `feat(0.190.0): audit-pass — before alias, removePendingPatch, per-row reject` |
-| 0.190.0 audit-pass extension | *(pending)* |
+| 0.190.0 audit-pass extension | `05a8aff` |
 | 0.189.1 hardening | `9d0fb3e` |
 | 0.189.0 context menu | `c41af52` |
 | 0.186.0 + 0.187.0 temporal canvas | `b5f3176` |
@@ -134,7 +134,7 @@ Prior entry (0.183 cut `41ec401`) added:
 - Prior `4aa73d9` (0.185.37) adds `handle.pushRemoteEvent` +
   `handle.getLastAppliedTs` on both runtime handle paths.
 
-**0.190.0 — audit-pass extension** *(source pending; app bundle only)*.
+**0.190.0 — audit-pass extension** *(source `05a8aff`; app bundle only)*.
 DH CC requested via dispatch from C:\Projects\Delivery-Hub. Three
 additive surfaces extending the existing 0.185 batchMode +
 `getPendingEdits()` / `commitEdits()` / `discardEdits()` flow so DH can
