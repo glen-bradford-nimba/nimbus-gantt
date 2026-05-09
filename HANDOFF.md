@@ -12,9 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | *(set on commit — 0.190.1 ctxmenu click-fire fix)* |
+| Commit SHA (source — latest) | `3c5e0e4` *(0.190.1 ctxmenu click-fire fix)* |
 | Commit subject | `fix(0.190.1): ContextMenuPlugin — items now fire on click (capture-phase dismiss guard)` |
-| 0.190.1 ctxmenu click-fire fix | *(set on commit)* |
+| 0.190.1 ctxmenu click-fire fix | `3c5e0e4` |
 | 0.190.0 audit-pass extension | `05a8aff` |
 | 0.189.1 hardening | `9d0fb3e` |
 | 0.189.0 context menu | `c41af52` |
