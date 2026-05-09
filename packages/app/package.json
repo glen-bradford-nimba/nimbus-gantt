@@ -1,6 +1,6 @@
 {
   "name": "@nimbus-gantt/app",
-  "version": "0.190.0",
+  "version": "0.190.1",
   "description": "Batteries-included NimbusGantt application shell",
   "main": "src/index.ts",
   "module": "src/index.ts",

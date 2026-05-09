@@ -301,8 +301,17 @@ export function ContextMenuPlugin(opts: ContextMenuOptions = {}): NimbusGanttPlu
     menuEl = root;
 
     // Auto-dismiss on outside pointerdown or Escape.
+    // CRITICAL: this listener is registered on document in capture phase, so
+    // it fires BEFORE the item's bubble-phase click handler. If we dismiss
+    // unconditionally, the menu detaches from DOM during pointerdown and the
+    // pointerup → click sequence on the item never reaches its listener.
+    // Bail out when the pointerdown target is inside the menu (root or any
+    // submenu — both share ROOT_CLASS at their top element).
     docDismissHandler = (e: Event) => {
       if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
+      if (e.type === 'pointerdown' && e.target instanceof Element) {
+        if (e.target.closest(`.${ROOT_CLASS}`)) return;
+      }
       dismissMenu();
     };
     document.addEventListener('pointerdown', docDismissHandler, true);

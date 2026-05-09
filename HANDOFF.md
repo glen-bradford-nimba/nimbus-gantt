@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `05a8aff` *(0.190.0 audit-pass extension)* |
-| Commit subject | `feat(0.190.0): audit-pass — before alias, removePendingPatch, per-row reject` |
+| Commit SHA (source — latest) | *(set on commit — 0.190.1 ctxmenu click-fire fix)* |
+| Commit subject | `fix(0.190.1): ContextMenuPlugin — items now fire on click (capture-phase dismiss guard)` |
+| 0.190.1 ctxmenu click-fire fix | *(set on commit)* |
 | 0.190.0 audit-pass extension | `05a8aff` |
 | 0.189.1 hardening | `9d0fb3e` |
 | 0.189.0 context menu | `c41af52` |
@@ -76,8 +77,19 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **305,381 bytes** (~298 KB)
-- md5: `8bccbd2d06cbdff932772429220d273d`
+- Size: **305,462 bytes** (~298 KB)
+- md5: `0c4f42511f9041490e60cf5bb45a313a`
+- sha256: `f00b8b9fa7d8b389ddbad52656469d9acd366378415c8403045276966fb3b811`
+- **Must re-copy for 0.190.1.** ContextMenuPlugin click-fire fix. DH
+  reported 2026-05-09: right-click menu items render but `onClick` never
+  fires (custom items + default items both affected). Root cause: the
+  `pointerdown` auto-dismiss listener registers on `document` in capture
+  phase, so it fires BEFORE the item's bubble-phase click handler.
+  `dismissMenu()` detached the menu mid-pointerdown, so `pointerup` →
+  `click` never reached the item's listener. Fix: in the dismiss
+  handler, bail when `e.target.closest('.ng-ctxmenu')` is truthy
+  (covers both root menu and any submenu via shared `ROOT_CLASS`).
+  Two-line change in `packages/core/src/plugins/ContextMenuPlugin.ts:304`.
 - **0.190.0 — bytes unchanged from 0.189.1.** The audit-pass extension
   is app-layer only (per-record `before` alias, `removePendingPatch`,
   per-row reject). DH/CN consumers do NOT need to re-copy
@@ -114,8 +126,12 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **275,920 bytes** (~270 KB)
+- Size: **275,917 bytes** (~270 KB)
 - md5: `d1a75ec0bbc24f44fbc1819db9c00b72`
+- sha256: `37a4f657122ca365bc4898fadaad0b7a9e971c1219d5ed8039d47e0d7d726f71`
+- **0.190.1 — bytes unchanged from 0.190.0.** The ContextMenuPlugin
+  click-fire fix is core-only; app bundle does not embed core plugins.
+  DH/CN consumers re-copy `nimbusgantt.resource` only for 0.190.1.
 - **Must re-copy for 0.190.0.** Audit-pass extension shipped — see
   "0.190.0 — audit-pass extension" section below for the three new
   surfaces hosts can wire (DH-Claude requested, batch-mode mounts only).
