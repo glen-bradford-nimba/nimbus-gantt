@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `3c5e0e4` *(0.190.1 ctxmenu click-fire fix)* |
-| Commit subject | `fix(0.190.1): ContextMenuPlugin — items now fire on click (capture-phase dismiss guard)` |
+| Commit SHA (source — latest) | *(set on commit — 0.190.2 AutoSchedulePlugin export)* |
+| Commit subject | `feat(0.190.2): export AutoSchedulePlugin + computeSchedule helpers from core public API` |
+| 0.190.2 AutoSchedulePlugin export | *(set on commit)* |
 | 0.190.1 ctxmenu click-fire fix | `3c5e0e4` |
 | 0.190.0 audit-pass extension | `05a8aff` |
 | 0.189.1 hardening | `9d0fb3e` |
@@ -77,10 +78,19 @@ deploy step.
 ### `nimbusgantt.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\core\dist\nimbus-gantt.iife.js`
-- Size: **305,462 bytes** (~298 KB)
-- md5: `0c4f42511f9041490e60cf5bb45a313a`
-- sha256: `f00b8b9fa7d8b389ddbad52656469d9acd366378415c8403045276966fb3b811`
-- **Must re-copy for 0.190.1.** ContextMenuPlugin click-fire fix. DH
+- Size: **311,537 bytes** (~304 KB)
+- md5: `24273d44818413a2b55ac91803de5f82`
+- sha256: `4cc091da9a211e9e4491dcf8d8057d6f7257644700a8626d1f5f941e02e64388`
+- **Must re-copy for 0.190.2.** AutoSchedulePlugin + helpers now exported
+  from the core public API. The plugin (739 LOC: full CPM forward +
+  backward pass, all 4 dep types FS/SS/FF/SF, all 8 MS-Project constraint
+  types, working-day calendar, middleware-level integration) existed
+  since `c41af52`-era work but was never exported from
+  `packages/core/src/index.ts`. ResourceLevelingPlugin was. The 1-line
+  gap blocked DH from wiring auto-schedule. Now surfaced:
+  `import { AutoSchedulePlugin, computeSchedule, buildDependencyGraph }
+   from '@nimbus-gantt/core'`. Bundle grew +6 KB.
+- Prior `3c5e0e4` (0.190.1) — ContextMenuPlugin click-fire fix. DH
   reported 2026-05-09: right-click menu items render but `onClick` never
   fires (custom items + default items both affected). Root cause: the
   `pointerdown` auto-dismiss listener registers on `document` in capture
@@ -129,6 +139,7 @@ Prior entry (0.183 cut `41ec401`) added:
 - Size: **275,917 bytes** (~270 KB)
 - md5: `d1a75ec0bbc24f44fbc1819db9c00b72`
 - sha256: `37a4f657122ca365bc4898fadaad0b7a9e971c1219d5ed8039d47e0d7d726f71`
+- **0.190.2 — bytes unchanged.** AutoSchedulePlugin export is core-only.
 - **0.190.1 — bytes unchanged from 0.190.0.** The ContextMenuPlugin
   click-fire fix is core-only; app bundle does not embed core plugins.
   DH/CN consumers re-copy `nimbusgantt.resource` only for 0.190.1.

@@ -96,6 +96,20 @@ export type {
   ResourceConflict,
   ResourceUtilization,
 } from './plugins/ResourceLevelingPlugin';
+export {
+  AutoSchedulePlugin,
+  computeSchedule,
+  buildDependencyGraph,
+} from './plugins/AutoSchedulePlugin';
+export type {
+  AutoScheduleOptions,
+  ScheduleConstraint,
+  ScheduleResult,
+  ScheduleViolation,
+  CalendarBridge,
+  DependencyEdge,
+  DependencyGraph,
+} from './plugins/AutoSchedulePlugin';
 export { RiskAnalysisPlugin } from './plugins/RiskAnalysisPlugin';
 export type {
   RiskAssessment,
