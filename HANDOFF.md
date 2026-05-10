@@ -12,9 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | *(set on commit — 0.190.2 AutoSchedulePlugin export)* |
+| Commit SHA (source — latest) | `7158dd8` *(0.190.2 AutoSchedulePlugin export)* |
 | Commit subject | `feat(0.190.2): export AutoSchedulePlugin + computeSchedule helpers from core public API` |
-| 0.190.2 AutoSchedulePlugin export | *(set on commit)* |
+| 0.190.2 AutoSchedulePlugin export | `7158dd8` |
 | 0.190.1 ctxmenu click-fire fix | `3c5e0e4` |
 | 0.190.0 audit-pass extension | `05a8aff` |
 | 0.189.1 hardening | `9d0fb3e` |
