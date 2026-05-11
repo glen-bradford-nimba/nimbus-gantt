@@ -12,9 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | *(set on commit — 0.191.0 temporal-canvas auto-install + Baseline opt-in + AutoSchedule tests + plugin docs)* |
+| Commit SHA (source — latest) | `3990764` *(0.191.0 visibility sweep)* |
 | Commit subject | `feat(0.191.0): auto-install History/TimeCursor/HistoryStrip + Baseline opt-in + AutoSchedule tests + plugin docs section` |
-| 0.191.0 visibility sweep | *(set on commit)* |
+| 0.191.0 visibility sweep | `3990764` |
 | 0.190.2 AutoSchedulePlugin export | `7158dd8` |
 | 0.190.1 ctxmenu click-fire fix | `3c5e0e4` |
 | 0.190.0 audit-pass extension | `05a8aff` |
