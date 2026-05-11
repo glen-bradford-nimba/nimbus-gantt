@@ -12,8 +12,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `7158dd8` *(0.190.2 AutoSchedulePlugin export)* |
-| Commit subject | `feat(0.190.2): export AutoSchedulePlugin + computeSchedule helpers from core public API` |
+| Commit SHA (source — latest) | *(set on commit — 0.191.0 temporal-canvas auto-install + Baseline opt-in + AutoSchedule tests + plugin docs)* |
+| Commit subject | `feat(0.191.0): auto-install History/TimeCursor/HistoryStrip + Baseline opt-in + AutoSchedule tests + plugin docs section` |
+| 0.191.0 visibility sweep | *(set on commit)* |
 | 0.190.2 AutoSchedulePlugin export | `7158dd8` |
 | 0.190.1 ctxmenu click-fire fix | `3c5e0e4` |
 | 0.190.0 audit-pass extension | `05a8aff` |
@@ -81,7 +82,10 @@ deploy step.
 - Size: **311,537 bytes** (~304 KB)
 - md5: `24273d44818413a2b55ac91803de5f82`
 - sha256: `4cc091da9a211e9e4491dcf8d8057d6f7257644700a8626d1f5f941e02e64388`
-- **Must re-copy for 0.190.2.** AutoSchedulePlugin + helpers now exported
+- **0.191.0 — bytes unchanged from 0.190.2.** The visibility sweep is
+  all app-side: IIFE auto-install wiring + Baseline opt-in surface +
+  AutoSchedule test coverage + HANDOFF docs. Core source unchanged.
+- **Prior 0.190.2** — AutoSchedulePlugin + helpers now exported
   from the core public API. The plugin (739 LOC: full CPM forward +
   backward pass, all 4 dep types FS/SS/FF/SF, all 8 MS-Project constraint
   types, working-day calendar, middleware-level integration) existed
@@ -136,11 +140,21 @@ Prior entry (0.183 cut `41ec401`) added:
 ### `nimbusganttapp.resource` source
 
 - Path: `C:\Projects\nimbus-gantt\packages\app\dist\nimbus-gantt-app.iife.js`
-- Size: **275,917 bytes** (~270 KB)
-- md5: `d1a75ec0bbc24f44fbc1819db9c00b72`
-- sha256: `37a4f657122ca365bc4898fadaad0b7a9e971c1219d5ed8039d47e0d7d726f71`
-- **0.190.2 — bytes unchanged.** AutoSchedulePlugin export is core-only.
-- **0.190.1 — bytes unchanged from 0.190.0.** The ContextMenuPlugin
+- Size: **278,874 bytes** (~272 KB)
+- md5: `6abd154031a292dba077304baa74c3d9`
+- sha256: `c2cf0660febde28282b1ade6d621d7226352b967df8d4213a24be61c5711487f`
+- **Must re-copy for 0.191.0.** Auto-installs HistoryPlugin +
+  TimeCursorPlugin + HistoryStripPlugin on every IIFE mount (both
+  engineOnly + chrome-aware paths). All three default ON; opt out via
+  `mountConfig.history === false` / `timeCursor === false` /
+  `historyStrip === false`. New opt-in surface for BaselinePlugin:
+  `mountConfig.baseline = [{ id, startDate, endDate }, ...]` (or a
+  full `BaselinePluginOptions` object). See "0.191.0 — visibility
+  sweep" section below and the new "Available plugins" reference for
+  the 12 plugins that ship in the core bundle but were never wired
+  into the IIFE app shell.
+- Prior `0.190.2` — bytes unchanged. AutoSchedulePlugin export is core-only.
+- Prior `0.190.1` — bytes unchanged from 0.190.0. The ContextMenuPlugin
   click-fire fix is core-only; app bundle does not embed core plugins.
   DH/CN consumers re-copy `nimbusgantt.resource` only for 0.190.1.
 - **Must re-copy for 0.190.0.** Audit-pass extension shipped — see
@@ -160,6 +174,92 @@ Prior entry (0.183 cut `41ec401`) added:
   any host-side change.
 - Prior `4aa73d9` (0.185.37) adds `handle.pushRemoteEvent` +
   `handle.getLastAppliedTs` on both runtime handle paths.
+
+**0.191.0 — visibility sweep + temporal-canvas auto-install** *(app bundle only)*.
+Closes the long-standing gap where 12 of NG's plugins were exported
+from `@nimbus-gantt/core` but never wired into the IIFE app shell — so
+DH and CN consumers reading HANDOFF.md or `gantt.use(...)` had no idea
+they existed. Three concrete changes:
+
+**(1) HistoryPlugin + TimeCursorPlugin + HistoryStripPlugin auto-install
+on every IIFE mount.** Both `engineOnly` and `chrome-aware` paths get
+the same three blocks immediately after the existing
+TemporalAsymmetryPlugin / ContextMenuPlugin auto-installs. Mirror the
+established pattern: default ON, opt out via `mountConfig.history ===
+false` / `timeCursor === false` / `historyStrip === false`, or pass an
+options object to tune. HistoryStripPlugin bails entirely when the
+history log has zero annotations (verified at
+`HistoryStripPlugin.ts:102`), so the strip costs nothing visually
+until a host or plugin calls `gantt.history.annotate(...)`. Hosts get
+the scrubbable-history substrate + DAW-style playhead + annotation-
+marker strip immediately on bundle re-copy. The dispatch in
+`docs/dispatch-ng-temporal-canvas.md` explicitly targeted these for
+0.187/0.188 auto-install; that step was skipped at the time. 0.191.0
+finishes it.
+
+**(2) BaselinePlugin opt-in with data.**
+`mountConfig.baseline = Array<{ id, startDate, endDate }>` or a full
+`BaselinePluginOptions` object. Zero-cost when omitted. Hosts that
+have a "planned schedule" stored separately (e.g. DH's
+`OriginalSchedule__c` field) can now render translucent ghost bars
+showing variance without writing any plugin-installation code.
+
+**(3) AutoSchedule test coverage** (`packages/core/src/plugins/AutoSchedule.test.ts`).
+10 tests exercising the plugin factory, `buildDependencyGraph` topology
++ cycle detection, and `computeSchedule` for empty / single-task / FS
+cascade with lag / MSO constraint override / circular violation
+reporting. Brings the just-exposed 739 LOC plugin into the same Mahipal-
+review-grade test posture as `CriticalPath.test.ts`.
+
+## Available plugins (opt-in unless noted as auto-installed)
+
+Quick reference for plugins exported from `@nimbus-gantt/core` that
+hosts can install via `gantt.use(...)` after the IIFE has booted.
+Auto-installed plugins are wired in `IIFEApp.ts` and need no host
+action; opt-in plugins require an explicit `gantt.use()` call.
+
+| Plugin | Status in IIFE | One-line purpose |
+|---|---|---|
+| `PriorityGroupingPlugin` | auto-install | Swimlane bucket grouping by `groupId` |
+| `TemporalAsymmetryPlugin` | auto-install (opt-out via `temporalAsymmetry: false`) | Past concrete, future ghosty |
+| `ContextMenuPlugin` | auto-install (opt-out via `contextMenu: false`) | Zone-aware right-click menu |
+| `HistoryPlugin` | auto-install (opt-out via `history: false`) | Append-only action log for scrubbable replay |
+| `TimeCursorPlugin` | auto-install (opt-out via `timeCursor: false`) | DAW-style playhead + NOW bracket |
+| `HistoryStripPlugin` | auto-install (opt-out via `historyStrip: false`) | Annotation marker strip above timeline |
+| `BaselinePlugin` | opt-in with data via `mountConfig.baseline` | Ghost-bar overlay for planned-vs-actual variance |
+| `AutoSchedulePlugin` | opt-in via `gantt.use(AutoSchedulePlugin(opts))` | CPM forward/backward + 4 dep types + 8 MS-Project constraint types |
+| `CriticalPathPlugin` | opt-in | CPM analysis; highlights critical path bars/dependencies |
+| `ResourceLevelingPlugin` | opt-in | Resolve over-allocation conflicts; level by priority |
+| `MonteCarloPlugin` | opt-in | Probabilistic schedule simulation |
+| `RiskAnalysisPlugin` | opt-in | Risk factor + project health + recommendations |
+| `NetworkGraphPlugin` | opt-in | PERT-style network diagram view |
+| `MSProjectPlugin` | opt-in + `importMSProjectXML` / `exportMSProjectXML` helpers | MS Project XML import/export |
+| `WorkCalendarPlugin` | opt-in | Non-working days, holidays, custom work hours |
+| `VirtualScrollPlugin` | opt-in | Virtual rendering for 1000+ tasks |
+| `KeyboardPlugin` | opt-in | Arrow nav, zoom, Home/End/Delete shortcuts |
+| `UndoRedoPlugin` | opt-in | Ctrl+Z / Ctrl+Y action history |
+| `MilestonePlugin` | opt-in | Zero-duration diamond markers |
+| `GroupingPlugin` | opt-in | Generic grouping (alt to PriorityGrouping) |
+| `DarkThemePlugin` | opt-in | One-call dark theme toggle |
+| `ExportPlugin` | opt-in | Export gantt to PNG/SVG |
+| `MotionControlPlugin` | opt-in | Phone accelerometer/gyroscope navigation |
+| `TelemetryPlugin` | opt-in | Batched usage analytics |
+| `SplitTaskPlugin` | opt-in | Split a task into multiple segments |
+| `MiniMapPlugin` | opt-in | Thumbnail overview viewport |
+| `HeatmapViewPlugin` | opt-in | Density heatmap over timeline |
+| `TimelineNotesPlugin` | opt-in | Time-anchored note overlays |
+| `TimeTravelPlugin` | opt-in | Replay-style time-travel UI |
+| `NarrativePlugin` | opt-in | Generate text narration of schedule changes |
+| `WhatIfPlugin` | opt-in | Sandbox what-if branches without committing |
+| `SonificationPlugin` | opt-in | Audio rendering of schedule events |
+| `ConfigPanelPlugin` | opt-in | In-canvas config editor for theme + features |
+
+Most "opt-in" plugins are documented in their own source files at
+`packages/core/src/plugins/*.ts`. Test coverage exists for `CriticalPath`,
+`ContextMenu`, `History`, `RowDecorators`, `RemoteEvents`, and
+(new in 0.191.0) `AutoSchedule`. The other 28 are exported but un-
+tested in this repo — production-burning surfaces should be Mahipal-
+reviewed before relying on them at scale.
 
 **0.190.0 — audit-pass extension** *(source `05a8aff`; app bundle only)*.
 DH CC requested via dispatch from C:\Projects\Delivery-Hub. Three

@@ -891,6 +891,56 @@ export class IIFEApp {
           ));
         } catch (_e) { /* engine bundle may be older; safe to skip */ }
       }
+      // 0.191.0 — temporal-canvas triad. HistoryPlugin is the substrate
+      // (bounded action log + annotations); TimeCursorPlugin renders the
+      // playhead + NOW bracket; HistoryStripPlugin renders annotation
+      // markers above the timeline (bails when annotations is empty).
+      // Install order matters: history first, then cursor + strip.
+      if (
+        options.history !== false &&
+        typeof tplConfig.engine?.HistoryPlugin === 'function'
+      ) {
+        try {
+          inst.use(tplConfig.engine.HistoryPlugin(
+            typeof options.history === 'object' ? options.history : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      if (
+        options.timeCursor !== false &&
+        typeof tplConfig.engine?.TimeCursorPlugin === 'function'
+      ) {
+        try {
+          inst.use(tplConfig.engine.TimeCursorPlugin(
+            typeof options.timeCursor === 'object' ? options.timeCursor : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      if (
+        options.historyStrip !== false &&
+        typeof tplConfig.engine?.HistoryStripPlugin === 'function'
+      ) {
+        try {
+          inst.use(tplConfig.engine.HistoryStripPlugin(
+            typeof options.historyStrip === 'object' ? options.historyStrip : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      // 0.191.0 — BaselinePlugin. Opt-in with data: pass an array of
+      // { id, startDate, endDate } entries OR a full BaselinePluginOptions
+      // object via mountConfig.baseline. Zero-cost when omitted.
+      if (
+        options.baseline &&
+        options.baseline !== false &&
+        typeof tplConfig.engine?.BaselinePlugin === 'function'
+      ) {
+        try {
+          const blOpts = Array.isArray(options.baseline)
+            ? { baselineTasks: options.baseline }
+            : options.baseline;
+          inst.use(tplConfig.engine.BaselinePlugin(blOpts));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
       inst.setData(gtasks, allDependencies);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
       // Initial viewport positioning. 0.185.1 priority order matches the
@@ -2335,6 +2385,51 @@ export class IIFEApp {
               ? options.contextMenu
               : {},
           ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      // 0.191.0 — temporal-canvas triad. See engineOnly path for rationale.
+      // Install order: history substrate first, then cursor + strip.
+      if (
+        options.history !== false &&
+        typeof tplConfig.engine?.HistoryPlugin === 'function'
+      ) {
+        try {
+          ganttInst.use(tplConfig.engine.HistoryPlugin(
+            typeof options.history === 'object' ? options.history : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      if (
+        options.timeCursor !== false &&
+        typeof tplConfig.engine?.TimeCursorPlugin === 'function'
+      ) {
+        try {
+          ganttInst.use(tplConfig.engine.TimeCursorPlugin(
+            typeof options.timeCursor === 'object' ? options.timeCursor : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      if (
+        options.historyStrip !== false &&
+        typeof tplConfig.engine?.HistoryStripPlugin === 'function'
+      ) {
+        try {
+          ganttInst.use(tplConfig.engine.HistoryStripPlugin(
+            typeof options.historyStrip === 'object' ? options.historyStrip : {},
+          ));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
+      // 0.191.0 — BaselinePlugin opt-in with data. See engineOnly rationale.
+      if (
+        options.baseline &&
+        options.baseline !== false &&
+        typeof tplConfig.engine?.BaselinePlugin === 'function'
+      ) {
+        try {
+          const blOpts = Array.isArray(options.baseline)
+            ? { baselineTasks: options.baseline }
+            : options.baseline;
+          ganttInst.use(tplConfig.engine.BaselinePlugin(blOpts));
         } catch (_e) { /* engine bundle may be older; safe to skip */ }
       }
 

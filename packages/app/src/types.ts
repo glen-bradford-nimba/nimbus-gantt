@@ -238,6 +238,39 @@ export interface MountOptions {
    *  @nimbus-gantt/core. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   contextMenu?: false | Record<string, any>;
+  /** 0.191.0 — append-only history substrate enabling scrubbable replay
+   *  + cross-client convergence. Default ON. Pass `false` to disable,
+   *  or a HistoryOptions object to tune the ring-buffer size /
+   *  compaction interval. Substrate for TimeCursorPlugin +
+   *  HistoryStripPlugin. See HistoryOptions in @nimbus-gantt/core. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  history?: false | Record<string, any>;
+  /** 0.191.0 — DAW-style playhead at state.timeCursorDate plus a "NOW"
+   *  bracket marker. Default ON. Pass `false` to disable, or a
+   *  TimeCursorOptions object to tune cursor color / NOW bracket /
+   *  keyboard shortcuts (Home/End/arrows). Requires history. See
+   *  TimeCursorOptions in @nimbus-gantt/core. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  timeCursor?: false | Record<string, any>;
+  /** 0.191.0 — annotation-marker strip above the timeline header.
+   *  Default ON; bails entirely when history has zero annotations
+   *  (zero visual cost when no host or plugin has called
+   *  gantt.history.annotate). Pass `false` to disable, or a
+   *  HistoryStripOptions object to tune position / marker colors /
+   *  strip height. Requires history. See HistoryStripOptions in
+   *  @nimbus-gantt/core. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  historyStrip?: false | Record<string, any>;
+  /** 0.191.0 — translucent baseline ghost-bar overlay for planned-vs-
+   *  actual schedule comparison. Default OFF (opt-in with data). Pass
+   *  an array of `{ id, startDate, endDate }` entries, a full
+   *  BaselinePluginOptions object, or omit / `false` to skip. See
+   *  BaselinePluginOptions in @nimbus-gantt/core. */
+  baseline?:
+    | false
+    | Array<{ id: string; startDate: string; endDate: string }>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    | Record<string, any>;
   /** Optional consumer-facing interaction callbacks. Each is forwarded from
    *  the underlying NimbusGantt engine event (plus a container-level
    *  contextmenu listener) so host apps can render tooltips, context menus,
