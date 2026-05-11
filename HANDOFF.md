@@ -1,5 +1,18 @@
 # nimbus-gantt — HANDOFF
 
+**📣 Latest cut: 0.191.0 visibility sweep (2026-05-11).** Auto-installs
+HistoryPlugin + TimeCursorPlugin + HistoryStripPlugin on every IIFE
+mount; opens BaselinePlugin to data-driven opt-in via
+`mountConfig.baseline`; documents the 32 plugins exported from
+`@nimbus-gantt/core` in a new Available Plugins reference. Bundle:
+**`nimbusganttapp.resource` MUST re-copy** (md5 `6abd1540…`).
+`nimbusgantt.resource` unchanged. DH/CN action items: see
+**`docs/dispatch-consumers-0191-cascade.md`** for the host-only wireup
+work that follows (dep-gesture wireup via ContextMenuPlugin,
+AutoSchedule install + hours-bridge, v12 BUNDLE_VERSION bump + live
+auto-schedule walkthrough demo). No further NG release required to
+unblock either consumer.
+
 **0.183 — interaction model cut.** IM-1/2/3 drag-to-edit dates + IM-4 drag-to-
 reprioritize + IM-5 onItemClick + IM-6 pan-on-deadspace + IM-7 viewport state +
 DM-3 hours/budget columns + DM-4 item-row over-budget warning + DM-5 header-row
