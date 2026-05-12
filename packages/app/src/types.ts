@@ -185,6 +185,14 @@ export interface NimbusGanttEngine {
   // 0.189.0 — context-menu plugin (zone-aware right-click)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ContextMenuPlugin?: (...args: any[]) => any;
+  // 0.191.0 — annotation strip + baseline ghost-bars
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  HistoryStripPlugin?: (...args: any[]) => any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  BaselinePlugin?: (...args: any[]) => any;
+  // 0.192.0 — constraint-based scheduler (auto-installed dormant)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  AutoSchedulePlugin?: (...args: any[]) => any;
 }
 
 /** Render mode — controls which chrome slots are rendered.
@@ -271,6 +279,28 @@ export interface MountOptions {
     | Array<{ id: string; startDate: string; endDate: string }>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     | Record<string, any>;
+  /** 0.192.0 — constraint-based scheduler (forward/backward pass over
+   *  the dependency DAG, all 8 MS Project constraint types). Default
+   *  ON but DORMANT (`autoRun: false`) — installs the plugin so hosts
+   *  can fire `gantt.events.emit('autoSchedule:run', cb)` from a
+   *  button, but the middleware does NOT silently mutate dates on
+   *  every ADD_DEPENDENCY / REMOVE_DEPENDENCY. Pass `false` to skip
+   *  install entirely. Pass an `AutoScheduleOptions` object to
+   *  override (e.g. `{ respectWorkCalendar: true }`); the auto-
+   *  install always sets `autoRun: false` unless the override
+   *  explicitly sets it true. See AutoScheduleOptions in
+   *  @nimbus-gantt/core. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  autoSchedule?: false | true | Record<string, any>;
+  /** 0.192.0 — hours→duration bridge. When set, NG derives each
+   *  task's `endDate` from `startDate + ceil(estimatedHours /
+   *  hoursPerDay)` working calendar days at the IIFE app boundary.
+   *  Applies to tasks where both `startDate` and `estimatedHours`
+   *  are present; leaves all other tasks untouched. Pulls the
+   *  hours→duration math out of host Apex / adapters and into NG.
+   *  Default: undefined (no derivation; consumers' supplied
+   *  endDates win as before). Sensible value: 8. */
+  hoursPerDay?: number;
   /** Optional consumer-facing interaction callbacks. Each is forwarded from
    *  the underlying NimbusGantt engine event (plus a container-level
    *  contextmenu listener) so host apps can render tooltips, context menus,

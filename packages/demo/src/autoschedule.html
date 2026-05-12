@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nimbus Gantt — AutoSchedule Walkthrough</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #f8fafc;
+      color: #1e293b;
+    }
+    #app { display: flex; flex-direction: column; height: 100vh; }
+    header {
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      color: #f1f5f9;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 18px; font-weight: 700; }
+    header .tagline { font-size: 12px; color: #94a3b8; }
+    main { flex: 1; display: flex; min-height: 0; }
+    #gantt {
+      flex: 1;
+      min-height: 0;
+      background: #fff;
+      position: relative;
+    }
+    aside {
+      width: 360px;
+      background: #fff;
+      border-left: 1px solid #e2e8f0;
+      padding: 16px;
+      overflow-y: auto;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+    aside h2 {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin: 16px 0 8px;
+    }
+    aside h2:first-child { margin-top: 0; }
+    aside p { color: #475569; margin-bottom: 10px; line-height: 1.5; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+    button {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      color: #334155;
+    }
+    button:hover { background: #e2e8f0; }
+    button.primary {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #fff;
+    }
+    button.primary:hover { background: #2563eb; }
+    #result {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: #334155;
+      white-space: pre-wrap;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    #result.empty { color: #94a3b8; font-style: italic; }
+    .violation { color: #b91c1c; }
+    .moved { color: #15803d; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Nimbus Gantt — AutoSchedule Walkthrough</h1>
+      <span class="tagline">Constraint-based scheduler over a small dependency graph</span>
+    </header>
+    <main>
+      <div id="gantt"></div>
+      <aside>
+        <h2>Walkthrough</h2>
+        <p>Six tasks with finish-to-start dependencies. The first task has a
+        14-day duration; downstream tasks were laid out with deliberate slack
+        so the cascade is visible after a reschedule.</p>
+
+        <h2>Try it</h2>
+        <p>Click <b>Slip task A by 7 days</b> to push the head of the chain
+        late. Then click <b>Reschedule</b> to let the plugin propagate the
+        delay through every successor.</p>
+
+        <div class="btn-row">
+          <button id="slip">Slip task A by 7 days</button>
+          <button id="reschedule" class="primary">Reschedule</button>
+          <button id="reset">Reset</button>
+        </div>
+
+        <h2>Schedule result</h2>
+        <div id="result" class="empty">Click "Reschedule" to run the plugin.</div>
+      </aside>
+    </main>
+  </div>
+  <script type="module" src="./autoschedule.ts"></script>
+</body>
+</html>

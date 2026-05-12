@@ -139,6 +139,26 @@ export function buildDepthMap(tasks: NormalizedTask[]): Record<string, number> {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   HOURS BRIDGE  (0.192.0)
+   Pure transform: derive endDate from estimatedHours + hoursPerDay so hosts
+   can ship hours-as-source-of-truth and let NG own the duration math. Tasks
+   without `estimatedHours` or `startDate` pass through unchanged. Tasks
+   with both get a fresh endDate overriding any host-supplied value.
+══════════════════════════════════════════════════════════════════════════ */
+export function applyHoursBridge(
+  tasks: NormalizedTask[],
+  hoursPerDay: number | undefined,
+): NormalizedTask[] {
+  if (!hoursPerDay || hoursPerDay <= 0) return tasks;
+  return tasks.map(t => {
+    if (!t.startDate || !t.estimatedHours || t.estimatedHours <= 0) return t;
+    const durationDays = Math.max(1, Math.ceil(t.estimatedHours / hoursPerDay));
+    const derivedEnd = addDays(t.startDate, durationDays - 1);
+    return { ...t, endDate: derivedEnd };
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    TASK PIPELINE  (mirrors v5 nimbusGanttTasks memo chain)
 ══════════════════════════════════════════════════════════════════════════ */
 export function buildTasks(tasks: NormalizedTask[]): MappedTask[] {

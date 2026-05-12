@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   AutoSchedulePlugin,
   computeSchedule,
@@ -9,7 +9,7 @@ import type {
   ScheduleConstraint,
   CalendarBridge,
 } from './AutoSchedulePlugin';
-import type { GanttTask, GanttDependency } from '../model/types';
+import type { GanttTask, GanttDependency, PluginHost, Action } from '../model/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -183,5 +183,75 @@ describe('computeSchedule', () => {
     const b = result.scheduledTasks.get('B');
     expect(b).toBeDefined();
     expect(b!.startDate).toBe('2026-06-10');
+  });
+});
+
+// ─── autoRun gate (0.192.0) ───────────────────────────────────────────────
+// When `autoRun: false`, the middleware should pass actions through but NOT
+// trigger an automatic scheduleAll() on dependency changes. Explicit
+// `autoSchedule:run` event handling stays available so hosts that auto-install
+// the plugin dormantly (e.g. the IIFE app shell) don't get silent date
+// mutation on every ADD_DEPENDENCY / REMOVE_DEPENDENCY.
+
+describe('AutoSchedulePlugin — autoRun gate', () => {
+  function makeFakeHost(
+    tasks: GanttTask[],
+    deps: GanttDependency[],
+  ): { host: PluginHost; dispatched: Action[] } {
+    const dispatched: Action[] = [];
+    const host = {
+      getState: () => ({
+        tasks: taskMap(tasks),
+        dependencies: depMap(deps),
+      }),
+      dispatch: (action: Action) => { dispatched.push(action); },
+      on: () => () => { /* no-op unsub */ },
+      getLayouts: () => [],
+      getTimeScale: () => ({} as never),
+      rebuildTree: () => { /* no-op */ },
+    } as unknown as PluginHost;
+    return { host, dispatched };
+  }
+
+  it('skips auto-reschedule on ADD_DEPENDENCY when autoRun is false', () => {
+    const tasks: GanttTask[] = [
+      makeTask('A', '2026-05-01', '2026-05-05'),
+      makeTask('B', '2026-06-01', '2026-06-05'), // intentionally late
+    ];
+    const plugin = AutoSchedulePlugin({ autoRun: false });
+    const { host, dispatched } = makeFakeHost(tasks, []);
+    plugin.install!(host);
+    const addDep: Action = {
+      type: 'ADD_DEPENDENCY',
+      dependency: { id: 'd1', source: 'A', target: 'B', type: 'FS', lag: 0 },
+    } as Action;
+    const next = vi.fn();
+    plugin.middleware!(addDep, next);
+    expect(next).toHaveBeenCalledOnce();
+    // No TASK_MOVE dispatched — B's date stays as the host had it
+    expect(dispatched.find(a => a.type === 'TASK_MOVE')).toBeUndefined();
+  });
+
+  it('does auto-reschedule on ADD_DEPENDENCY when autoRun defaults to true', () => {
+    const tasks: GanttTask[] = [
+      makeTask('A', '2026-05-01', '2026-05-05'),
+      makeTask('B', '2026-06-01', '2026-06-05'),
+    ];
+    const plugin = AutoSchedulePlugin(); // default autoRun: true
+    // Pre-populate dependencies so the cascade has somewhere to land.
+    const { host, dispatched } = makeFakeHost(tasks, [
+      { id: 'd1', source: 'A', target: 'B', type: 'FS', lag: 0 },
+    ]);
+    plugin.install!(host);
+    const addDep: Action = {
+      type: 'ADD_DEPENDENCY',
+      dependency: { id: 'd1', source: 'A', target: 'B', type: 'FS', lag: 0 },
+    } as Action;
+    const next = vi.fn();
+    plugin.middleware!(addDep, next);
+    expect(next).toHaveBeenCalledOnce();
+    // A move was dispatched for B (cascaded forward to start after A.end)
+    const move = dispatched.find(a => a.type === 'TASK_MOVE');
+    expect(move).toBeDefined();
   });
 });

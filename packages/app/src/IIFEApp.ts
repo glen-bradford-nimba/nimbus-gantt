@@ -23,7 +23,7 @@ import type {
   VanillaSlotInstance, FeatureFlags, AuditPreviewItem,
 } from './templates/types';
 import {
-  buildDepthMap, buildTasks, buildTasksEpic, applyFilter, computeStats,
+  buildDepthMap, buildTasks, buildTasksEpic, applyFilter, computeStats, applyHoursBridge,
   DONE_STAGES, STAGE_COLORS, STAGE_TO_CATEGORY_COLOR, isBucketId,
 } from './pipeline';
 import { startDepthShading } from './depthShading';
@@ -721,7 +721,11 @@ export class IIFEApp {
       }
 
       injectLegacyNgCss();
-      let allTasks: NormalizedTask[] = options.tasks || [];
+      // 0.192.0 — hours-bridge intake. When mountConfig.hoursPerDay is set,
+      // derive endDate from startDate + ceil(estimatedHours / hoursPerDay)
+      // for every task with both fields present. Tasks without estimatedHours
+      // pass through untouched. See dispatch-consumers-0192-autoschedule.md.
+      let allTasks: NormalizedTask[] = applyHoursBridge(options.tasks || [], options.hoursPerDay);
       // 0.185.27 — dependencies re-exposed. Default [] keeps legacy
       // behavior (no arrows) when host doesn't pass the option.
       let allDependencies: GanttDependency[] = normalizeDependencies(options.dependencies);
@@ -941,6 +945,23 @@ export class IIFEApp {
           inst.use(tplConfig.engine.BaselinePlugin(blOpts));
         } catch (_e) { /* engine bundle may be older; safe to skip */ }
       }
+      // 0.192.0 — AutoSchedulePlugin auto-install (dormant). On by
+      // default with `autoRun: false` so the middleware does NOT
+      // silently mutate dates on dep edits. Hosts trigger explicitly
+      // via the `autoSchedule:run` event (see dispatch-consumers-0192).
+      // Opt out: `mountConfig.autoSchedule: false`. Override options:
+      // `mountConfig.autoSchedule: { respectWorkCalendar: true, ... }`.
+      if (
+        options.autoSchedule !== false &&
+        typeof tplConfig.engine?.AutoSchedulePlugin === 'function'
+      ) {
+        try {
+          const asOpts = typeof options.autoSchedule === 'object'
+            ? { autoRun: false, ...options.autoSchedule }
+            : { autoRun: false };
+          inst.use(tplConfig.engine.AutoSchedulePlugin(asOpts));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
       inst.setData(gtasks, allDependencies);
       try { inst.expandAll(); } catch (_e) { /* ok */ }
       // Initial viewport positioning. 0.185.1 priority order matches the
@@ -1005,7 +1026,7 @@ export class IIFEApp {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         gantt: inst as any,
         setTasks(tasks: NormalizedTask[]) {
-          allTasks = tasks;
+          allTasks = applyHoursBridge(tasks, options.hoursPerDay);
           _syncToCanvas();
         },
         /** 0.185.27 — full replace of tasks AND dependencies. Pass the
@@ -1014,7 +1035,7 @@ export class IIFEApp {
          *  parallel). Passing `undefined` leaves the existing deps alone
          *  — equivalent to `setTasks(tasks)`. */
         setData(tasks: NormalizedTask[], dependencies?: GanttDependency[]) {
-          allTasks = tasks;
+          allTasks = applyHoursBridge(tasks, options.hoursPerDay);
           if (dependencies !== undefined) allDependencies = normalizeDependencies(dependencies);
           _syncToCanvas();
         },
@@ -1035,7 +1056,7 @@ export class IIFEApp {
             // subsequent setTasks/setData/_syncToCanvas calls don't blow
             // away the pushed snapshot.
             if (event && event.kind === 'bulk.replace' && Array.isArray(event.tasks)) {
-              allTasks = event.tasks as NormalizedTask[];
+              allTasks = applyHoursBridge(event.tasks as NormalizedTask[], options.hoursPerDay);
               if (Array.isArray(event.deps)) {
                 allDependencies = normalizeDependencies(event.deps);
               }
@@ -1114,7 +1135,9 @@ export class IIFEApp {
     if (options.initialViewport?.zoom) {
       state = { ...state, zoom: options.initialViewport.zoom as AppState['zoom'] };
     }
-    let allTasks: NormalizedTask[] = options.tasks || [];
+    // 0.192.0 — hours-bridge intake on chrome-aware mount path. See engineOnly
+    // path for rationale.
+    let allTasks: NormalizedTask[] = applyHoursBridge(options.tasks || [], options.hoursPerDay);
     // 0.185.27 — dependencies re-exposed on chrome-aware mount path too.
     let allDependencies: GanttDependency[] = normalizeDependencies(options.dependencies);
     const patchLog: PatchLogEntry[] = [];
@@ -2432,6 +2455,19 @@ export class IIFEApp {
           ganttInst.use(tplConfig.engine.BaselinePlugin(blOpts));
         } catch (_e) { /* engine bundle may be older; safe to skip */ }
       }
+      // 0.192.0 — AutoSchedulePlugin auto-install (dormant). See
+      // engineOnly path for rationale + opt-out shape.
+      if (
+        options.autoSchedule !== false &&
+        typeof tplConfig.engine?.AutoSchedulePlugin === 'function'
+      ) {
+        try {
+          const asOpts = typeof options.autoSchedule === 'object'
+            ? { autoRun: false, ...options.autoSchedule }
+            : { autoRun: false };
+          ganttInst.use(tplConfig.engine.AutoSchedulePlugin(asOpts));
+        } catch (_e) { /* engine bundle may be older; safe to skip */ }
+      }
 
       ganttInst.setData(gtasks, allDependencies);
       try { ganttInst.expandAll(); } catch (_e) { /* ok */ void 0; }
@@ -2715,7 +2751,7 @@ export class IIFEApp {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       get gantt(): any { return ganttInst; },
       setTasks(tasks: NormalizedTask[]) {
-        allTasks = tasks;
+        allTasks = applyHoursBridge(tasks, options.hoursPerDay);
         depthMap = buildDepthMap(allTasks);
         // 0.185.25 — when liveDataUpdate is on (default), route through the
         // light-touch refreshGantt() path so scroll position, canvas, and
@@ -2738,7 +2774,7 @@ export class IIFEApp {
        *  equivalent to calling `setTasks(tasks)` alone. Routes through the
        *  same liveDataUpdate-gated refresh path as setTasks. */
       setData(tasks: NormalizedTask[], dependencies?: GanttDependency[]) {
-        allTasks = tasks;
+        allTasks = applyHoursBridge(tasks, options.hoursPerDay);
         if (dependencies !== undefined) allDependencies = normalizeDependencies(dependencies);
         depthMap = buildDepthMap(allTasks);
         const live = tplConfig.features.liveDataUpdate !== false;
@@ -2770,7 +2806,7 @@ export class IIFEApp {
         if (typeof gi.pushRemoteEvent !== 'function') return;
         gi.pushRemoteEvent(event);
         if (event && event.kind === 'bulk.replace' && Array.isArray(event.tasks)) {
-          allTasks = event.tasks as NormalizedTask[];
+          allTasks = applyHoursBridge(event.tasks as NormalizedTask[], options.hoursPerDay);
           if (Array.isArray(event.deps)) {
             allDependencies = normalizeDependencies(event.deps);
           }

@@ -1,17 +1,25 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.191.0 visibility sweep (2026-05-11).** Auto-installs
-HistoryPlugin + TimeCursorPlugin + HistoryStripPlugin on every IIFE
-mount; opens BaselinePlugin to data-driven opt-in via
-`mountConfig.baseline`; documents the 32 plugins exported from
-`@nimbus-gantt/core` in a new Available Plugins reference. Bundle:
-**`nimbusganttapp.resource` MUST re-copy** (md5 `6abd1540…`).
-`nimbusgantt.resource` unchanged. DH/CN action items: see
-**`docs/dispatch-consumers-0191-cascade.md`** for the host-only wireup
-work that follows (dep-gesture wireup via ContextMenuPlugin,
-AutoSchedule install + hours-bridge, v12 BUNDLE_VERSION bump + live
-auto-schedule walkthrough demo). No further NG release required to
-unblock either consumer.
+**📣 Latest cut: 0.192.0 AutoSchedule auto-install + hours-bridge
+(2026-05-11).** Auto-installs `AutoSchedulePlugin` dormantly (default
+`autoRun: false`) on every IIFE mount so hosts can fire
+`gantt.events.emit('autoSchedule:run', cb)` from a button without
+needing to install the plugin themselves. Adds a `mountConfig.hoursPerDay`
+hours→duration bridge that pulls the
+`endDate = startDate + ceil(estimatedHours / hoursPerDay)` math out of
+host Apex / adapters and into NG. Both bundles MUST re-copy this cut
+(md5 `9795d5cc…` core, `44fe7279…` app). DH/CN action items: see
+**`docs/dispatch-consumers-0192-autoschedule.md`** for the one-flag
+wireup path that collapses DH's Phase 4B+C into a button click.
+
+**0.191.0 visibility sweep (2026-05-11).** Auto-installs HistoryPlugin
++ TimeCursorPlugin + HistoryStripPlugin on every IIFE mount; opens
+BaselinePlugin to data-driven opt-in via `mountConfig.baseline`;
+documents the 32 plugins exported from `@nimbus-gantt/core` in a new
+Available Plugins reference. See
+`docs/dispatch-consumers-0191-cascade.md` for the prior wave of
+host-only wireup (dep-gestures via ContextMenuPlugin, v12
+BUNDLE_VERSION bump).
 
 **0.183 — interaction model cut.** IM-1/2/3 drag-to-edit dates + IM-4 drag-to-
 reprioritize + IM-5 onItemClick + IM-6 pan-on-deadspace + IM-7 viewport state +
@@ -25,8 +33,9 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 | Field | Value |
 |---|---|
 | Branch | `master` |
-| Commit SHA (source — latest) | `3990764` *(0.191.0 visibility sweep)* |
-| Commit subject | `feat(0.191.0): auto-install History/TimeCursor/HistoryStrip + Baseline opt-in + AutoSchedule tests + plugin docs section` |
+| Commit SHA (source — latest) | `PENDING-0192` *(0.192.0 AutoSchedule auto-install + hours-bridge — bump after commit)* |
+| Commit subject | `feat(0.192.0): auto-install AutoSchedule (dormant) + mountConfig.hoursPerDay hours-bridge` |
+| 0.192.0 AutoSchedule + hours-bridge | `PENDING` |
 | 0.191.0 visibility sweep | `3990764` |
 | 0.190.2 AutoSchedulePlugin export | `7158dd8` |
 | 0.190.1 ctxmenu click-fire fix | `3c5e0e4` |
@@ -240,7 +249,7 @@ action; opt-in plugins require an explicit `gantt.use()` call.
 | `TimeCursorPlugin` | auto-install (opt-out via `timeCursor: false`) | DAW-style playhead + NOW bracket |
 | `HistoryStripPlugin` | auto-install (opt-out via `historyStrip: false`) | Annotation marker strip above timeline |
 | `BaselinePlugin` | opt-in with data via `mountConfig.baseline` | Ghost-bar overlay for planned-vs-actual variance |
-| `AutoSchedulePlugin` | opt-in via `gantt.use(AutoSchedulePlugin(opts))` | CPM forward/backward + 4 dep types + 8 MS-Project constraint types |
+| `AutoSchedulePlugin` | auto-install **dormant** (opt-out via `autoSchedule: false`; override via `autoSchedule: AutoScheduleOptions`) | CPM forward/backward + 4 dep types + 8 MS-Project constraint types. Default `autoRun: false` — fire `gantt.events.emit('autoSchedule:run', cb)` to trigger. 0.192.0 |
 | `CriticalPathPlugin` | opt-in | CPM analysis; highlights critical path bars/dependencies |
 | `ResourceLevelingPlugin` | opt-in | Resolve over-allocation conflicts; level by priority |
 | `MonteCarloPlugin` | opt-in | Probabilistic schedule simulation |

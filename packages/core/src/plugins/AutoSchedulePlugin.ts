@@ -52,6 +52,14 @@ export interface AutoScheduleOptions {
   direction?: 'forward' | 'backward';  // Schedule from start or from deadline
   constraints?: Map<string, ScheduleConstraint>;
   respectWorkCalendar?: boolean;   // Skip weekends/holidays if WorkCalendarPlugin installed
+  /**
+   * 0.192.0 — when `false`, the middleware skips its automatic reschedule
+   * on ADD_DEPENDENCY / REMOVE_DEPENDENCY actions. The plugin still
+   * responds to the explicit `autoSchedule:run` event. Use this for
+   * dormant installs where the host wants the scheduler available but
+   * doesn't want silent date mutation on every dep edit. Default: true.
+   */
+  autoRun?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -573,6 +581,7 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
   const opts: AutoScheduleOptions = {
     direction: 'forward',
     respectWorkCalendar: false,
+    autoRun: true,
     ...options,
   };
 
@@ -663,7 +672,11 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
     // Pass action through first
     next(action);
 
-    // Auto-reschedule when dependencies change
+    // Auto-reschedule when dependencies change.
+    // 0.192.0 — gated on autoRun so dormant installs (e.g. the IIFE
+    // app's auto-install) don't silently mutate dates on every dep
+    // edit. Hosts trigger explicitly via the `autoSchedule:run` event.
+    if (opts.autoRun === false) return;
     if (action.type === 'ADD_DEPENDENCY' || action.type === 'REMOVE_DEPENDENCY') {
       scheduleAll();
     }
