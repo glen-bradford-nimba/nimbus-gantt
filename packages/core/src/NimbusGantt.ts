@@ -268,7 +268,9 @@ export class NimbusGantt {
           },
           onHover: (task: GanttTask | null, x: number, y: number, color: string) => {
             if (task) {
-              this.tooltipManager.show(task, x, y, color);
+              this.tooltipManager.show(task, x, y, color, {
+                depSummary: this.computeDepSummary(task.id),
+              });
             } else {
               this.tooltipManager.hide();
             }
@@ -509,6 +511,24 @@ export class NimbusGantt {
    */
   getState(): GanttState {
     return this.store.getState();
+  }
+
+  /**
+   * 0.194.0 — count graph edges touching a task for the hover tooltip.
+   * `blockedBy` = dependencies where this task is the successor (target),
+   * i.e. it waits on predecessors; `blocks` = where it is the predecessor
+   * (source), i.e. downstream tasks wait on it. Cheap O(deps) scan run on
+   * hover only.
+   */
+  private computeDepSummary(taskId: string): { blocks: number; blockedBy: number } {
+    let blocks = 0;
+    let blockedBy = 0;
+    const deps = this.store.getState().dependencies;
+    deps.forEach((dep) => {
+      if (dep.source === taskId) blocks++;
+      else if (dep.target === taskId) blockedBy++;
+    });
+    return { blocks, blockedBy };
   }
 
   /**

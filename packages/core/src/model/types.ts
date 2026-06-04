@@ -35,6 +35,20 @@ export interface GanttTask {
   // them on top of the existing bar fill. Ignored when status ===
   // "group-header" (PriorityGroupingPlugin uses its own legacy fields).
   style?: GanttRowDecorators;
+  // ── Host-supplied tooltip rows (0.194.0) ────────────────────────────
+  // Additive rows appended to the default hover tooltip in their own block,
+  // so hosts surface domain fields (request #, budget line, forecast, etc.)
+  // WITHOUT forking the tooltip renderer. Ignored by custom tooltipRenderer
+  // (that path already owns full markup). See [[feedback]] on substrate-first.
+  tooltipRows?: GanttTooltipRow[];
+}
+
+export interface GanttTooltipRow {
+  label: string;
+  value: string;
+  /** Render the value in the emphasis (red) style — e.g. an over-budget or
+   *  at-risk signal. Default false. */
+  emphasis?: boolean;
 }
 
 export type DecoratorBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
