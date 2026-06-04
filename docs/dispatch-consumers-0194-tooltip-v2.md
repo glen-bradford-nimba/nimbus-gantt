@@ -1,0 +1,66 @@
+# Dispatch → DH + CN: 0.194.0 — Tooltip v2 (host rows + dependency + baseline)
+
+**Cut:** 0.194.0 (branch `feat/0.194.0-tooltip-v2` → merged `master`)
+**Builds on:** 0.193.0 (`docs/dispatch-consumers-0193-tooltip-hittest.md`).
+**Origin:** Glen — *"a lot more we can do on the mouseover to make it
+actually useful."* Three additive pieces, all at the NG substrate so DH/CN
+inherit on a core-bundle re-copy.
+
+## What shipped (NG core)
+
+### 1. `GanttTask.tooltipRows?: {label, value, emphasis?}[]` — the fork-preventer
+Hosts append domain rows to the default tooltip (request #, budget line,
+forecast, owner) **without forking the renderer**. Rendered in their own
+block; `emphasis: true` renders the value red. This is the clean answer to
+"we need custom tooltip content" — the exact itch that produced the DH and
+CN tooltip forks. One uniform renderer, host-configurable content.
+
+### 2. Dependency summary — `Blocked by N · Blocks N`
+Engine counts graph edges on hover (`computeDepSummary`): `blockedBy` =
+predecessors (this task waits), `blocks` = successors (wait on this task).
+Renders only when non-zero. Free for every consumer — no data to feed.
+
+### 3. Baseline variance — `Start vs plan +3d · Finish vs plan −2d`
+Reads host-supplied `metadata.baselineStart` / `metadata.baselineEnd` (ISO);
+shows signed day drift vs. `startDate`/`endDate`, late = red. Hides when no
+baseline metadata. Decoupled from `BaselinePlugin` (which keys baseline by
+ID internally) — to light this up, drop the same baseline dates onto the
+task's `metadata`.
+
+**Contract unchanged:** `onHover` and custom `tooltipRenderer` signatures are
+untouched; a custom renderer still owns its full markup (and should read
+`task.tooltipRows` itself if it wants parity).
+
+## Consumer adoption
+- **Re-copy CORE bundle only** — `nimbus-gantt.iife.js`, md5
+  **`ecf538f90b5618bc00606d6825477d56`**. App bundle still doesn't embed core
+  (unchanged). Verify hash after copy.
+- **`tooltipRows`** — opt-in; populate it on the task DTO where you want extra
+  rows.
+- **Dependency summary** — automatic once deps are passed to NG (DH/CN already
+  do).
+- **Baseline** — optional; feed `metadata.baselineStart/End` when available.
+
+## ⚠️ Carried-over findings from the 0.193.0 Cowork live test (act on these)
+The Cowork pass found 0.193.0's engine work correct but the **rollout
+half-applied** — these block the tooltip from being *visible*, and 0.194.0
+inherits the same gap:
+1. **CN never feeds hours.** The sizing/actuals block (and now baseline/host
+   rows) render only when the data exists. CN's seed/adapter must map hours →
+   `metadata.estimatedHours` / `metadata.loggedHours` (DH already does this in
+   `_mapTasksForNg`). Until then the block is shipped-but-dark on CN.
+2. **CN has a stale vendored core.** `/gantt-demo` imports
+   `src/lib/nimbus-gantt/core.js` (April 16, pre-0.193) instead of the swapped
+   `public/nimbus-gantt.iife.js`. Refresh the vendored copy or repoint the demo
+   at the iife, or it shows none of 0.193/0.194.
+3. **Tooltip ownership** — decide per surface: inherit NG's native tooltip
+   (drop the local React/LWC overlay) vs. keep a custom `tooltipRenderer`.
+   `tooltipRows` (#1 above) exists specifically so you can inherit and still
+   add domain rows — prefer that over a fork.
+
+## Verification
+- `npx vite build` clean (all formats); `npx vitest run` 155/155.
+- Bundle-verify: new markers present in core iife (`tooltipRows`,
+  `blockedBy`/`computeDepSummary`, `Start vs plan`).
+- Live (rendered) verification of the new blocks is a Cowork/visual job — the
+  Node test env has no DOM.

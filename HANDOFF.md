@@ -1,6 +1,18 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.193.0 richer mouseover tooltip + right-click hit-test
+**📣 Latest cut: 0.194.0 Tooltip v2 (2026-06-04).** Three additive tooltip
+upgrades on the 0.193.0 base: (1) **`GanttTask.tooltipRows[]`** — hosts append
+domain rows (request #, budget, forecast) without forking the renderer (the
+fork-preventer); (2) **dependency summary** — `Blocked by N · Blocks N`,
+engine-counted on hover, free for all consumers; (3) **baseline variance** —
+`Start/Finish vs plan ±Nd` from host `metadata.baselineStart/End`, late = red.
+Host contract unchanged. **CORE bundle re-copy only**, md5
+**`ecf538f90b5618bc00606d6825477d56`**. See
+**`docs/dispatch-consumers-0194-tooltip-v2.md`** — which also carries the
+0.193.0 Cowork findings DH/CN must still act on (CN: feed hours +
+refresh the stale vendored `src/lib/nimbus-gantt/core.js`).
+
+**0.193.0 richer mouseover tooltip + right-click hit-test
 parity (2026-06-04).** Default hover tooltip now surfaces the **work-item
 ID** (copyable) plus a **sizing & actuals block** (Estimate / Logged /
 Used % with `Nh left`·`Nh over`) and Dates-with-duration — reads
@@ -52,10 +64,11 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 
 | Field | Value |
 |---|---|
-| Branch | `feat/0.193.0-tooltip-hittest` (pending merge to `master`) |
-| Commit SHA (source — latest) | `14f669b` *(0.193.0 richer tooltip + right-click hit-test parity)* |
-| Commit subject | `feat(0.193.0): richer mouseover tooltip + right-click hit-test parity` |
-| 0.193.0 tooltip + hit-test parity | `14f669b` |
+| Branch | `feat/0.194.0-tooltip-v2` (pending merge to `master`) |
+| Commit SHA (source — latest) | `f79121b` *(0.194.0 Tooltip v2 — host rows + deps + baseline)* |
+| Commit subject | `feat(0.194.0): Tooltip v2 — host rows + dependency summary + baseline variance` |
+| 0.194.0 Tooltip v2 (core md5 `ecf538f9…`) | `f79121b` |
+| 0.193.0 tooltip + hit-test parity (core md5 `a0e38a04…`) | `14f669b` |
 | 0.192.0 AutoSchedule + hours-bridge | `58bde0d` |
 | 0.191.0 visibility sweep | `3990764` |
 | 0.190.2 AutoSchedulePlugin export | `7158dd8` |

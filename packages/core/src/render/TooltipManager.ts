@@ -1,5 +1,11 @@
 import type { GanttTask } from '../model/types';
 
+/** Engine-computed enrichment passed into show() — context the task object
+ *  alone doesn't carry (dependency counts live in the dep graph). */
+export interface TooltipExtra {
+  depSummary?: { blocks: number; blockedBy: number };
+}
+
 const TOOLTIP_OFFSET = 12;
 const HIDE_DELAY_MS = 100;
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -121,7 +127,30 @@ function durationDays(startISO: string, endISO: string): number | null {
   return Math.max(1, Math.round((b - a) / 86_400_000) + 1);
 }
 
-function buildDefaultContent(task: GanttTask, color: string): string {
+/** Read an ISO date string from task.metadata under several key aliases. */
+function readMetaStr(task: GanttTask, ...keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = task.metadata?.[k];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+/** Signed day delta between two ISO dates (b − a), or null if unparseable. */
+function dayDelta(aISO: string, bISO: string): number | null {
+  const a = Date.parse(aISO);
+  const b = Date.parse(bISO);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.round((b - a) / 86_400_000);
+}
+
+/** Format a signed day count as "+3d" / "−2d" / "on time". */
+function formatDelta(days: number): string {
+  if (days === 0) return 'on time';
+  return days > 0 ? `+${days}d` : `−${Math.abs(days)}d`;
+}
+
+function buildDefaultContent(task: GanttTask, color: string, extra?: TooltipExtra): string {
   const progress = Math.round((task.progress ?? 0) * 100);
   const estimate = readNum(task, 'estimatedHours', 'estimateHours', 'hours');
   const logged = readNum(task, 'loggedHours', 'actualHours');
@@ -152,12 +181,44 @@ function buildDefaultContent(task: GanttTask, color: string): string {
     sizingRows += buildRow('Used', detail, over ? 'ng-tooltip-over' : undefined);
   }
 
+  // ── Dependencies block: how this task sits in the graph ──────────────
+  const dep = extra?.depSummary;
+  if (dep && (dep.blocks > 0 || dep.blockedBy > 0)) {
+    if (dep.blockedBy > 0) {
+      bodyRows += buildRow('Blocked by', `${dep.blockedBy} task${dep.blockedBy === 1 ? '' : 's'}`);
+    }
+    if (dep.blocks > 0) {
+      bodyRows += buildRow('Blocks', `${dep.blocks} task${dep.blocks === 1 ? '' : 's'}`);
+    }
+  }
+
+  // ── Baseline variance block: drift vs. the planned schedule ──────────
+  let baselineRows = '';
+  const baselineStart = readMetaStr(task, 'baselineStart', 'baselineStartDate');
+  const baselineEnd = readMetaStr(task, 'baselineEnd', 'baselineEndDate');
+  if (baselineStart) {
+    const d = dayDelta(baselineStart, task.startDate);
+    if (d != null) baselineRows += buildRow('Start vs plan', formatDelta(d), d > 0 ? 'ng-tooltip-over' : undefined);
+  }
+  if (baselineEnd) {
+    const d = dayDelta(baselineEnd, task.endDate);
+    if (d != null) baselineRows += buildRow('Finish vs plan', formatDelta(d), d > 0 ? 'ng-tooltip-over' : undefined);
+  }
+
+  // ── Host-supplied rows: domain fields without forking the renderer ───
+  let hostRows = '';
+  if (Array.isArray(task.tooltipRows)) {
+    for (const row of task.tooltipRows) {
+      if (!row || typeof row.label !== 'string' || typeof row.value !== 'string') continue;
+      hostRows += buildRow(row.label, row.value, row.emphasis ? 'ng-tooltip-over' : undefined);
+    }
+  }
+
   const idHtml = `<div class="ng-tooltip-id" title="Work item ID">${escapeHtml(task.id)}</div>`;
   const header = `<div class="ng-tooltip-header" style="border-left: 3px solid ${escapeHtml(color)}"><span class="ng-tooltip-name">${escapeHtml(task.name)}</span>${idHtml}</div>`;
-  const sizingBlock = sizingRows
-    ? `<div class="ng-tooltip-divider"></div><div class="ng-tooltip-body">${sizingRows}</div>`
-    : '';
-  return `${header}<div class="ng-tooltip-body">${bodyRows}</div>${sizingBlock}`;
+  const block = (rows: string): string =>
+    rows ? `<div class="ng-tooltip-divider"></div><div class="ng-tooltip-body">${rows}</div>` : '';
+  return `${header}<div class="ng-tooltip-body">${bodyRows}</div>${block(sizingRows)}${block(baselineRows)}${block(hostRows)}`;
 }
 
 export class TooltipManager {
@@ -187,7 +248,7 @@ export class TooltipManager {
     this.container.appendChild(this.tooltipEl);
   }
 
-  show(task: GanttTask, x: number, y: number, color: string): void {
+  show(task: GanttTask, x: number, y: number, color: string, extra?: TooltipExtra): void {
     // Clear any pending hide
     if (this.hideTimeout !== null) {
       clearTimeout(this.hideTimeout);
@@ -204,7 +265,7 @@ export class TooltipManager {
         this.tooltipEl.appendChild(result);
       }
     } else {
-      this.tooltipEl.innerHTML = buildDefaultContent(task, color);
+      this.tooltipEl.innerHTML = buildDefaultContent(task, color, extra);
     }
 
     // Make visible for measurement (but not yet animated in)
