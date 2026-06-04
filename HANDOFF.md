@@ -45,9 +45,10 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 
 | Field | Value |
 |---|---|
-| Branch | `master` |
-| Commit SHA (source — latest) | `58bde0d` *(0.192.0 AutoSchedule auto-install + hours-bridge)* |
-| Commit subject | `feat(0.192.0): auto-install AutoSchedule (dormant) + hoursPerDay bridge` |
+| Branch | `feat/0.193.0-tooltip-hittest` (pending merge to `master`) |
+| Commit SHA (source — latest) | `14f669b` *(0.193.0 richer tooltip + right-click hit-test parity)* |
+| Commit subject | `feat(0.193.0): richer mouseover tooltip + right-click hit-test parity` |
+| 0.193.0 tooltip + hit-test parity | `14f669b` |
 | 0.192.0 AutoSchedule + hours-bridge | `58bde0d` |
 | 0.191.0 visibility sweep | `3990764` |
 | 0.190.2 AutoSchedulePlugin export | `7158dd8` |
