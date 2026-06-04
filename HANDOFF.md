@@ -1,6 +1,19 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.192.0 AutoSchedule auto-install + hours-bridge
+**📣 Latest cut: 0.193.0 richer mouseover tooltip + right-click hit-test
+parity (2026-06-04).** Default hover tooltip now surfaces the **work-item
+ID** (copyable) plus a **sizing & actuals block** (Estimate / Logged /
+Used % with `Nh left`·`Nh over`) and Dates-with-duration — reads
+`estimatedHours`/`loggedHours`/`hours` from top-level or `metadata`, hides
+when absent. `hitTestAt()` now mirrors the hover HitTest tolerance
+(milestone diamond + 6px bar x-slop) so right-click stops falling through
+to the "Create work item" menu on short bars/milestones. Both apply on a
+bundle re-copy — `ContextMenuPlugin` (auto-installed) drives the hit-test;
+DH/CN map estimate/logged onto the task to light up the sizing block. See
+**`docs/dispatch-consumers-0193-tooltip-hittest.md`**. Unblocks the
+MF-prod "sizing on mouseover" timeline ask.
+
+**0.192.0 AutoSchedule auto-install + hours-bridge
 (2026-05-11).** Auto-installs `AutoSchedulePlugin` dormantly (default
 `autoRun: false`) on every IIFE mount so hosts can fire
 `gantt.events.emit('autoSchedule:run', cb)` from a button without
@@ -32,9 +45,10 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 
 | Field | Value |
 |---|---|
-| Branch | `master` |
-| Commit SHA (source — latest) | `58bde0d` *(0.192.0 AutoSchedule auto-install + hours-bridge)* |
-| Commit subject | `feat(0.192.0): auto-install AutoSchedule (dormant) + hoursPerDay bridge` |
+| Branch | `feat/0.193.0-tooltip-hittest` (pending merge to `master`) |
+| Commit SHA (source — latest) | `14f669b` *(0.193.0 richer tooltip + right-click hit-test parity)* |
+| Commit subject | `feat(0.193.0): richer mouseover tooltip + right-click hit-test parity` |
+| 0.193.0 tooltip + hit-test parity | `14f669b` |
 | 0.192.0 AutoSchedule + hours-bridge | `58bde0d` |
 | 0.191.0 visibility sweep | `3990764` |
 | 0.190.2 AutoSchedulePlugin export | `7158dd8` |
