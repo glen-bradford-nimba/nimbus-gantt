@@ -101,9 +101,23 @@ Surfaced for the DH/CN backlog so we can pick the next slice deliberately:
   any file (pre-existing, unrelated to this cut); `tsc`/dts in the build is
   the effective typecheck and passes.
 
+## Bundle to re-copy — CORE ONLY
+All 0.193.0 changes live in the **core** bundle. The **app** bundle never
+embeds core (it consumes `window.NimbusGantt` at runtime — two independent
+deploy artifacts), so it is byte-identical to 0.192.0 and must **not** be
+re-deployed.
+
+| Artifact | SF static resource | md5 | Action |
+|---|---|---|---|
+| `nimbus-gantt.iife.js` (core) | `nimbusgantt.resource` | `a0e38a04ac163839dd7cb2416e75e59c` | **re-copy** |
+| `nimbus-gantt-app.iife.js` (app) | `nimbusganttapp.resource` | `44fe727920c7547b7bafe8a46dc1c274` (unchanged) | leave as-is |
+
+Merged to `master` at `ca7af90` (PR #23). Build with `cd packages/core && npx vite build`.
+
 ## Adoption checklist
-- [ ] DH + CN re-copy the 0.193.0 IIFE bundle (tooltip + hit-test apply
-      automatically).
+- [ ] DH + CN re-copy **only** the core 0.193.0 IIFE bundle (md5
+      `a0e38a04…`); verify the hash after copy. Tooltip + hit-test then apply
+      automatically.
 - [ ] DH adapter maps `estimatedHours` / `loggedHours` (or `hours`) onto the
       `GanttTask` so the sizing/actuals tooltip block renders.
 - [ ] Confirm right-click on short bars / milestones now opens the bar menu

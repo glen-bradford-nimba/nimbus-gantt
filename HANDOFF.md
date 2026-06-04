@@ -13,6 +13,13 @@ DH/CN map estimate/logged onto the task to light up the sizing block. See
 **`docs/dispatch-consumers-0193-tooltip-hittest.md`**. Unblocks the
 MF-prod "sizing on mouseover" timeline ask.
 
+> **Bundle to re-copy: CORE ONLY** (`nimbus-gantt.iife.js` →
+> `nimbusgantt.resource`), md5 **`a0e38a04ac163839dd7cb2416e75e59c`**. The
+> APP bundle is **unchanged** (`44fe7279…`, same as 0.192.0) and must NOT
+> be re-deployed — the app never embeds core; it consumes `window.NimbusGantt`
+> at runtime, so all 0.193.0 changes live in the core bundle. Merged to
+> `master` at `ca7af90` (PR #23).
+
 **0.192.0 AutoSchedule auto-install + hours-bridge
 (2026-05-11).** Auto-installs `AutoSchedulePlugin` dormantly (default
 `autoRun: false`) on every IIFE mount so hosts can fire
