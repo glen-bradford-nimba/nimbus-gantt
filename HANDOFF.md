@@ -64,10 +64,11 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 
 | Field | Value |
 |---|---|
-| Branch | `feat/0.193.0-tooltip-hittest` (pending merge to `master`) |
-| Commit SHA (source — latest) | `14f669b` *(0.193.0 richer tooltip + right-click hit-test parity)* |
-| Commit subject | `feat(0.193.0): richer mouseover tooltip + right-click hit-test parity` |
-| 0.193.0 tooltip + hit-test parity | `14f669b` |
+| Branch | `feat/0.194.0-tooltip-v2` (pending merge to `master`) |
+| Commit SHA (source — latest) | `f79121b` *(0.194.0 Tooltip v2 — host rows + deps + baseline)* |
+| Commit subject | `feat(0.194.0): Tooltip v2 — host rows + dependency summary + baseline variance` |
+| 0.194.0 Tooltip v2 (core md5 `ecf538f9…`) | `f79121b` |
+| 0.193.0 tooltip + hit-test parity (core md5 `a0e38a04…`) | `14f669b` |
 | 0.192.0 AutoSchedule + hours-bridge | `58bde0d` |
 | 0.191.0 visibility sweep | `3990764` |
 | 0.190.2 AutoSchedulePlugin export | `7158dd8` |
