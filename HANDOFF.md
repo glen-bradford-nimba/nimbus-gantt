@@ -1,6 +1,19 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.192.0 AutoSchedule auto-install + hours-bridge
+**📣 Latest cut: 0.193.0 richer mouseover tooltip + right-click hit-test
+parity (2026-06-04).** Default hover tooltip now surfaces the **work-item
+ID** (copyable) plus a **sizing & actuals block** (Estimate / Logged /
+Used % with `Nh left`·`Nh over`) and Dates-with-duration — reads
+`estimatedHours`/`loggedHours`/`hours` from top-level or `metadata`, hides
+when absent. `hitTestAt()` now mirrors the hover HitTest tolerance
+(milestone diamond + 6px bar x-slop) so right-click stops falling through
+to the "Create work item" menu on short bars/milestones. Both apply on a
+bundle re-copy — `ContextMenuPlugin` (auto-installed) drives the hit-test;
+DH/CN map estimate/logged onto the task to light up the sizing block. See
+**`docs/dispatch-consumers-0193-tooltip-hittest.md`**. Unblocks the
+MF-prod "sizing on mouseover" timeline ask.
+
+**0.192.0 AutoSchedule auto-install + hours-bridge
 (2026-05-11).** Auto-installs `AutoSchedulePlugin` dormantly (default
 `autoRun: false`) on every IIFE mount so hosts can fire
 `gantt.events.emit('autoSchedule:run', cb)` from a button without

@@ -598,16 +598,31 @@ export class NimbusGantt {
       const layout = this.layouts.find((l) => l.taskId === task.id) ?? null;
       if (layout) {
         const xInPanel = (clientX - timelineRect.left) + scrollX;
-        const onBar =
-          xInPanel >= layout.x &&
-          xInPanel <= layout.x + layout.width;
-        if (onBar) {
-          const edgePx = 6;
-          const barType: 'body' | 'left-edge' | 'right-edge' | 'progress-handle' =
-            xInPanel <= layout.x + edgePx ? 'left-edge' :
-            xInPanel >= layout.x + layout.width - edgePx ? 'right-edge' :
-            'body';
-          return { zone: 'bar', task, rowIndex, barType };
+        // Hit-slop keeps short bars and milestones right-clickable: the
+        // hover HitTest (interaction/HitTest.ts) uses edge thresholds and a
+        // centered diamond area, so without matching tolerance here the
+        // cursor would say "bar" while right-click fell through to the
+        // canvas-empty "create" menu. Milestones get a centered diamond
+        // hit area (half the bar height each side of the center); regular
+        // bars get a small x-slop so 1-day/zero-width bars stay hittable.
+        const HIT_SLOP = 6;
+        if (layout.isMilestone) {
+          const half = layout.barHeight / 2;
+          if (Math.abs(xInPanel - layout.x) <= half) {
+            return { zone: 'bar', task, rowIndex, barType: 'body' };
+          }
+        } else {
+          const onBar =
+            xInPanel >= layout.x - HIT_SLOP &&
+            xInPanel <= layout.x + layout.width + HIT_SLOP;
+          if (onBar) {
+            const edgePx = 6;
+            const barType: 'body' | 'left-edge' | 'right-edge' | 'progress-handle' =
+              xInPanel <= layout.x + edgePx ? 'left-edge' :
+              xInPanel >= layout.x + layout.width - edgePx ? 'right-edge' :
+              'body';
+            return { zone: 'bar', task, rowIndex, barType };
+          }
         }
       }
     }

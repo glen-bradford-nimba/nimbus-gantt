@@ -33,12 +33,25 @@ const TOOLTIP_STYLES = `
   font-weight: 600;
   color: #111827;
 }
+.ng-tooltip-id {
+  margin-top: 2px;
+  font-weight: 400;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  color: #9ca3af;
+  user-select: all;
+  word-break: break-all;
+}
 .ng-tooltip-body {
   padding: 6px 10px;
+}
+.ng-tooltip-divider {
+  border-top: 1px solid #f3f4f6;
 }
 .ng-tooltip-row {
   display: flex;
   justify-content: space-between;
+  gap: 16px;
   padding: 2px 0;
 }
 .ng-tooltip-label {
@@ -47,6 +60,9 @@ const TOOLTIP_STYLES = `
 .ng-tooltip-value {
   color: #111827;
   font-weight: 500;
+}
+.ng-tooltip-value.ng-tooltip-over {
+  color: #dc2626;
 }
 `;
 
@@ -70,29 +86,78 @@ function formatDate(iso: string): string {
   return `${MONTH_NAMES[month]} ${day}`;
 }
 
-function buildRow(label: string, value: string): string {
-  return `<div class="ng-tooltip-row"><span class="ng-tooltip-label">${escapeHtml(label)}</span><span class="ng-tooltip-value">${escapeHtml(value)}</span></div>`;
+function buildRow(label: string, value: string, valueClass?: string): string {
+  const cls = valueClass ? ` ${valueClass}` : '';
+  return `<div class="ng-tooltip-row"><span class="ng-tooltip-label">${escapeHtml(label)}</span><span class="ng-tooltip-value${cls}">${escapeHtml(value)}</span></div>`;
+}
+
+/** Trim trailing-zero decimals: 8 \u2192 "8", 8.5 \u2192 "8.5", 8.25 \u2192 "8.3". */
+function formatHours(h: number): string {
+  return Number.isInteger(h) ? String(h) : h.toFixed(1);
+}
+
+/**
+ * Read a numeric field from a task, trying the top-level property first and
+ * then `metadata`, across several known key aliases. Hosts populate hours
+ * under different conventions (top-level `hours`, `metadata.estimatedHours`,
+ * `metadata.loggedHours`, etc.) \u2014 the tooltip should surface whichever exists.
+ */
+function readNum(task: GanttTask, ...keys: string[]): number | undefined {
+  const top = task as unknown as Record<string, unknown>;
+  for (const k of keys) {
+    const direct = top[k];
+    if (typeof direct === 'number' && !Number.isNaN(direct)) return direct;
+    const meta = task.metadata?.[k];
+    if (typeof meta === 'number' && !Number.isNaN(meta)) return meta;
+  }
+  return undefined;
+}
+
+/** Whole days spanned by [startDate, endDate], inclusive (min 1). */
+function durationDays(startISO: string, endISO: string): number | null {
+  const a = Date.parse(startISO);
+  const b = Date.parse(endISO);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return Math.max(1, Math.round((b - a) / 86_400_000) + 1);
 }
 
 function buildDefaultContent(task: GanttTask, color: string): string {
   const progress = Math.round((task.progress ?? 0) * 100);
-  const estimatedHours = task.metadata?.estimatedHours as number | undefined;
-  const loggedHours = task.metadata?.loggedHours as number | undefined;
+  const estimate = readNum(task, 'estimatedHours', 'estimateHours', 'hours');
+  const logged = readNum(task, 'loggedHours', 'actualHours');
 
+  // \u2500\u2500 Primary block: who / when / where it stands \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   let bodyRows = '';
-  bodyRows += buildRow('Status', task.status || 'None');
+  if (task.status) bodyRows += buildRow('Status', task.status);
+  if (task.priority) bodyRows += buildRow('Priority', task.priority);
   bodyRows += buildRow('Assignee', task.assignee || 'Unassigned');
-  bodyRows += buildRow('Dates', `${formatDate(task.startDate)} \u2192 ${formatDate(task.endDate)}`);
-
+  const days = durationDays(task.startDate, task.endDate);
+  const dateRange = `${formatDate(task.startDate)} \u2192 ${formatDate(task.endDate)}`;
+  bodyRows += buildRow('Dates', days ? `${dateRange} (${days}d)` : dateRange);
   if (progress > 0) {
     bodyRows += buildRow('Progress', `${progress}%`);
   }
 
-  if (estimatedHours != null) {
-    bodyRows += buildRow('Hours', `${loggedHours ?? 0} / ${estimatedHours}`);
+  // \u2500\u2500 Sizing & actuals block: estimate vs. logged, with burn % \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  let sizingRows = '';
+  if (estimate != null) sizingRows += buildRow('Estimate', `${formatHours(estimate)}h`);
+  if (logged != null) sizingRows += buildRow('Logged', `${formatHours(logged)}h`);
+  if (estimate != null && logged != null && estimate > 0) {
+    const pct = Math.round((logged / estimate) * 100);
+    const over = logged > estimate;
+    const remaining = estimate - logged;
+    const detail = over
+      ? `${pct}% (${formatHours(logged - estimate)}h over)`
+      : `${pct}% (${formatHours(remaining)}h left)`;
+    sizingRows += buildRow('Used', detail, over ? 'ng-tooltip-over' : undefined);
   }
 
-  return `<div class="ng-tooltip-header" style="border-left: 3px solid ${escapeHtml(color)}"><span class="ng-tooltip-name">${escapeHtml(task.name)}</span></div><div class="ng-tooltip-body">${bodyRows}</div>`;
+  const idHtml = `<div class="ng-tooltip-id" title="Work item ID">${escapeHtml(task.id)}</div>`;
+  const header = `<div class="ng-tooltip-header" style="border-left: 3px solid ${escapeHtml(color)}"><span class="ng-tooltip-name">${escapeHtml(task.name)}</span>${idHtml}</div>`;
+  const sizingBlock = sizingRows
+    ? `<div class="ng-tooltip-divider"></div><div class="ng-tooltip-body">${sizingRows}</div>`
+    : '';
+  return `${header}<div class="ng-tooltip-body">${bodyRows}</div>${sizingBlock}`;
 }
 
 export class TooltipManager {
