@@ -2629,16 +2629,24 @@ export class IIFEApp {
         // The drill-down "open item" reuses the existing onItemClick contract;
         // dollars / dated actuals / scoping / grading arrive once DH passes a
         // PacingData object (see docs/dispatch — DH→NG pacing contract).
-        renderPacingView(ganttHost, allTasks, {
-          // Drill-down item click reuses the existing host nav contract.
-          onOpenItem: options.onItemClick
-            ? (taskId) => options.onItemClick!(taskId)
-            : undefined,
-          // Optional blended $/hr so the $ measure lights up without full
-          // DH pacingData (host passes config.rate). DH's PacingData.rate
-          // overrides this once the engine is wired.
-          rate: (options.config as { rate?: number } | undefined)?.rate,
-        });
+        {
+          // Host pacing config (DH passes per-client via config.pacing):
+          // rate, defaults (initial bucket/range/measure/mode/series), and
+          // controls (which pills show — e.g. MF sets controls.dollars=false).
+          const pc = (options.config as { rate?: number; pacing?: Record<string, unknown> } | undefined) ?? {};
+          const pacingCfg = (pc.pacing ?? {}) as { defaults?: unknown; controls?: unknown };
+          renderPacingView(ganttHost, allTasks, {
+            // Drill-down item click reuses the existing host nav contract.
+            onOpenItem: options.onItemClick
+              ? (taskId) => options.onItemClick!(taskId)
+              : undefined,
+            rate: pc.rate,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            defaults: pacingCfg.defaults as any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            controls: pacingCfg.controls as any,
+          });
+        }
       } else {
         const labelMap: Record<string, string> = {
           calendar: 'Calendar', flow: 'Flow',

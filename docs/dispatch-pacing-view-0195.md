@@ -75,6 +75,18 @@ rate is present) · Mode (Per-period / **Cumulative** burn-up) · Series toggles
 of item** · Est · Logged · Remaining · % used, with a meta line
 (group · assignee · status · dates).
 
+**Host control config (DH tailors the pill set + initial state per client):**
+Passed via `mountConfig.config.pacing = { defaults, controls }` (and
+`config.rate`). NG reads them in the `pacing` view-mode branch.
+- `defaults` — initial state on load: `bucket`, `range`, `customStart/End`,
+  `measure`, `mode`, `series:{actual,forecast,target}`. DH seeds the view so
+  the client lands on the right cut (e.g. MF → `{ range:'rest', measure:'hours' }`).
+- `controls` — which pills show: `dollars:false` hides the `$` measure (MF),
+  `mode:false` / `series:false` hide those groups, `ranges:[…]` / `buckets:[…]`
+  restrict (or `false` to hide the group). Omitted → everything that has data
+  shows.
+Example MF config: `config:{ pacing:{ controls:{ dollars:false }, defaults:{ range:'rest' } } }`.
+
 **Interaction hooks (DH wires these — host owns nav + tooltips):**
 - `onOpenItem(taskId)` — drill-down row click → navigate to the work item.
 - `onItemHover(taskId|null, {x,y})` — row mousemove/leave → host renders a

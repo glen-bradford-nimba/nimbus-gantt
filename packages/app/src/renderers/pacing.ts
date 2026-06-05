@@ -80,13 +80,46 @@ export interface PacingData {
   authoritative?: boolean;
 }
 
+/** Initial control state on page load — host (DH) seeds the view per client. */
+export interface PacingDefaults {
+  bucket?: PacingBucketSize;
+  range?: RangePreset;
+  customStart?: string;        // ISO, only used when range === 'custom'
+  customEnd?: string;
+  measure?: 'hours' | 'dollars';
+  mode?: 'period' | 'cumulative';
+  series?: { actual?: boolean; forecast?: boolean; target?: boolean };
+}
+
+/** Which controls are shown / allowed — host (DH) tailors the pill set per
+ *  client. Omitted → sensible defaults (everything that has data shows). */
+export interface PacingControls {
+  /** Show the $ measure pill. Default: true when a rate is present. MF → false. */
+  dollars?: boolean;
+  /** Show the Measure group at all (Hours/$). Default: true. */
+  measure?: boolean;
+  /** Show the Mode group (Per-period / Cumulative). Default: true. */
+  mode?: boolean;
+  /** Show the Series toggles. Default: true. */
+  series?: boolean;
+  /** Restrict the Range presets shown (and order). Omit → all. `false` hides the group. */
+  ranges?: RangePreset[] | false;
+  /** Restrict the Bucket sizes shown. Omit → all three. `false` hides the group. */
+  buckets?: PacingBucketSize[] | false;
+}
+
 export interface PacingViewOptions {
   pacingData?: PacingData;
   rate?: number;
+  /** Initial control state on load (DH seeds per client). */
+  defaults?: PacingDefaults;
+  /** Which controls/pills are shown (DH tailors per client; MF hides $). */
+  controls?: PacingControls;
   onBucketChange?: (bucket: PacingBucketSize) => void;
   onOpenItem?: (taskId: string) => void;
   onItemHover?: (taskId: string | null, pos: { x: number; y: number }) => void;
   onOpenReport?: (ctx: { bucketKey: string; taskIds: string[] }) => void;
+  /** @deprecated use defaults.bucket */
   defaultBucket?: PacingBucketSize;
 }
 
@@ -334,13 +367,20 @@ const COL = { actual: '#10b981', actualOver: '#ef4444', forecast: '#93c5fd', tar
 
 export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], options: PacingViewOptions = {}): () => void {
   injectStyles();
-  let bucket: PacingBucketSize = options.pacingData?.bucket || options.defaultBucket || 'month';
-  let range: RangePreset = 'next6';
-  let customS = '', customE = '';
-  let measure: 'hours' | 'dollars' = 'hours';
-  let mode: 'period' | 'cumulative' = 'period';
+  const dflt = options.defaults ?? {};
+  const ctrl = options.controls ?? {};
+  const allowDollars = ctrl.dollars !== false; // MF passes controls.dollars=false
+  let bucket: PacingBucketSize = dflt.bucket || options.pacingData?.bucket || options.defaultBucket || 'month';
+  let range: RangePreset = dflt.range || 'next6';
+  let customS = dflt.customStart || '', customE = dflt.customEnd || '';
+  let measure: 'hours' | 'dollars' = (dflt.measure === 'dollars' && allowDollars) ? 'dollars' : 'hours';
+  let mode: 'period' | 'cumulative' = dflt.mode || 'period';
   let expandedKey: string | null = null;
-  const show = { actual: true, forecast: true, target: false };
+  const show = {
+    actual: dflt.series?.actual ?? true,
+    forecast: dflt.series?.forecast ?? true,
+    target: dflt.series?.target ?? false,
+  };
 
   function data(): PacingData {
     if (options.pacingData && options.pacingData.bucket === bucket) return options.pacingData;
@@ -368,51 +408,69 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
     host.innerHTML = '';
     const root = el('div', 'ngp-root');
 
-    // control bar
+    // control bar — each group is host-configurable via options.controls
     const bar = el('div', 'ngp-bar');
     const row1 = el('div', 'ngp-row');
-    row1.appendChild(grp('Range', ...(['next3', 'next6', 'rest', 'thisQtr', 'ytd', 'all', 'custom'] as RangePreset[])
-      .map(p => pill(RANGE_LABELS[p], range === p, () => { range = p; expandedKey = null; render(); }))));
-    if (range === 'custom') {
-      const mk = (v: string, set: (x: string) => void) => {
-        const i = document.createElement('input');
-        i.type = 'date'; i.value = v; i.className = 'ngp-date';
-        i.addEventListener('change', () => { set(i.value); render(); });
-        return i;
-      };
-      const cw = el('div', 'ngp-grp');
-      cw.appendChild(mk(customS, x => customS = x));
-      cw.appendChild(el('span', 'ngp-lbl', '→'));
-      cw.appendChild(mk(customE, x => customE = x));
-      row1.appendChild(cw);
+    let row1n = 0;
+    if (ctrl.ranges !== false) {
+      const ranges = (Array.isArray(ctrl.ranges) ? ctrl.ranges
+        : ['next3', 'next6', 'rest', 'thisQtr', 'ytd', 'all', 'custom']) as RangePreset[];
+      row1.appendChild(grp('Range', ...ranges.map(p =>
+        pill(RANGE_LABELS[p], range === p, () => { range = p; expandedKey = null; render(); })))); row1n++;
+      if (range === 'custom') {
+        const mk = (v: string, set: (x: string) => void) => {
+          const i = document.createElement('input');
+          i.type = 'date'; i.value = v; i.className = 'ngp-date';
+          i.addEventListener('change', () => { set(i.value); render(); });
+          return i;
+        };
+        const cw = el('div', 'ngp-grp');
+        cw.appendChild(mk(customS, x => customS = x));
+        cw.appendChild(el('span', 'ngp-lbl', '→'));
+        cw.appendChild(mk(customE, x => customE = x));
+        row1.appendChild(cw);
+      }
     }
-    row1.appendChild(grp('Bucket', ...(['week', 'month', 'quarter'] as PacingBucketSize[])
-      .map(b => pill(b[0].toUpperCase() + b.slice(1), bucket === b, () => {
-        bucket = b; expandedKey = null; options.onBucketChange?.(b); render();
-      }, true))));
-    bar.appendChild(row1);
+    if (ctrl.buckets !== false) {
+      const buckets = (Array.isArray(ctrl.buckets) ? ctrl.buckets
+        : ['week', 'month', 'quarter']) as PacingBucketSize[];
+      row1.appendChild(grp('Bucket', ...buckets.map(b =>
+        pill(b[0].toUpperCase() + b.slice(1), bucket === b, () => {
+          bucket = b; expandedKey = null; options.onBucketChange?.(b); render();
+        }, true)))); row1n++;
+    }
+    if (row1n > 0) bar.appendChild(row1);
 
     const row2 = el('div', 'ngp-row');
-    const measures = [pill('Hours', measure === 'hours', () => { measure = 'hours'; render(); })];
-    if (r) measures.push(pill('$', measure === 'dollars', () => { measure = 'dollars'; render(); }));
-    row2.appendChild(grp('Measure', ...measures));
-    row2.appendChild(grp('Mode',
-      pill('Per period', mode === 'period', () => { mode = 'period'; render(); }, true),
-      pill('Cumulative', mode === 'cumulative', () => { mode = 'cumulative'; render(); }, true)));
-    const legPill = (key: 'actual' | 'forecast' | 'target', label: string, color: string) => {
-      const b = el('button', 'ngp-leg' + (show[key] ? '' : ' off'));
-      b.appendChild(el('span', 'ngp-sw')).setAttribute('style', 'background:' + color);
-      b.appendChild(el('span', undefined, label));
-      b.addEventListener('click', () => { show[key] = !show[key]; render(); });
-      return b;
-    };
-    const leg = el('div', 'ngp-grp');
-    leg.appendChild(el('span', 'ngp-lbl', 'Series'));
-    leg.appendChild(legPill('actual', 'Actual', COL.actual));
-    leg.appendChild(legPill('forecast', 'Forecast', COL.forecast));
-    leg.appendChild(legPill('target', 'Target', COL.target));
-    row2.appendChild(leg);
-    bar.appendChild(row2);
+    let row2n = 0;
+    // Measure: show the group unless disabled; $ pill only when a rate exists AND
+    // dollars are allowed (MF passes controls.dollars=false to hide $).
+    if (ctrl.measure !== false) {
+      const measures = [pill('Hours', measure === 'hours', () => { measure = 'hours'; render(); })];
+      if (r && allowDollars) measures.push(pill('$', measure === 'dollars', () => { measure = 'dollars'; render(); }));
+      if (measures.length > 1) { row2.appendChild(grp('Measure', ...measures)); row2n++; }
+    }
+    if (ctrl.mode !== false) {
+      row2.appendChild(grp('Mode',
+        pill('Per period', mode === 'period', () => { mode = 'period'; render(); }, true),
+        pill('Cumulative', mode === 'cumulative', () => { mode = 'cumulative'; render(); }, true))); row2n++;
+    }
+    if (ctrl.series !== false) {
+      const legPill = (key: 'actual' | 'forecast' | 'target', label: string, color: string) => {
+        const b = el('button', 'ngp-leg' + (show[key] ? '' : ' off'));
+        b.appendChild(el('span', 'ngp-sw')).setAttribute('style', 'background:' + color);
+        b.appendChild(el('span', undefined, label));
+        b.addEventListener('click', () => { show[key] = !show[key]; render(); });
+        return b;
+      };
+      const leg = el('div', 'ngp-grp');
+      leg.appendChild(el('span', 'ngp-lbl', 'Series'));
+      leg.appendChild(legPill('actual', 'Actual', COL.actual));
+      leg.appendChild(legPill('forecast', 'Forecast', COL.forecast));
+      leg.appendChild(legPill('target', 'Target', COL.target));
+      row2.appendChild(leg); row2n++;
+    }
+    if (row2n > 0) bar.appendChild(row2);
     root.appendChild(bar);
 
     // body
