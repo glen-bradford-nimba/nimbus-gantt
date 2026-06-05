@@ -1,6 +1,33 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.195.0 Pacing/Forecast subtab (2026-06-05).** New `pacing`
+**📣 Latest cut: 0.196.0 NG-owned modals + UI conventions (2026-06-05).**
+Establishes the house rule **`docs/ng-ui-conventions.md`**: in-app surfaces
+(modals/panels/tooltips/menus) are **NG-rendered + self-styled** (so they look
+identical on web / Salesforce / demo); only **hand-offs** (open record / open
+report) are host-rendered. Brings the two dead FilterBar buttons into it:
+- **Auto-Schedule** — was a `console.log` stub *and untriggerable* (the
+  `autoSchedule:run` event had no public trigger). Fixed by adding a public
+  **`emit()` + `on()`** to `NimbusGantt` (core), then an NG-owned modal that
+  runs the in-bundle scheduler and shows the result (scheduled count / span /
+  violations). Host override: `onAutoSchedule` (DH's server-side ETA service).
+- **Team** — NG-owned capacity modal (edit hours/active, live runway projection
+  from remaining backlog). Host override: `onEditTeam`; emits `onTeamChange`.
+  *Capacity → resource-leveling in the scheduler is the next step (not yet wired).*
+- New modal primitive `packages/app/src/renderers/modal.ts` (`.ngm-*` injected
+  styles) — reusable for future surfaces. UI intents (`AUTOSCHEDULE_OPEN` /
+  `TEAM_OPEN`) intercepted in `IIFEApp.dispatch()` like `PATCH`.
+
+**TWO-bundle cut** (core API addition + app):
+- CORE `nimbus-gantt.iife.js` → `nimbusgantt.resource`, md5 **`72b9dc2d41309462c8839b97fa5659e5`**
+  (adds public `emit`/`on`; required for Auto-Schedule to run).
+- APP `nimbus-gantt-app.iife.js` → `nimbusganttapp.resource`, md5 **`d10ae855feb3b13f12a5303bcca296b3`**.
+Both must be re-copied. Branch `feat/0.196.0-ng-ui-conventions-modals`,
+**PR open (unmerged)** — review. Verification: my code tsc-clean (6 pre-existing
+errors unchanged vs master), core+app build clean, vitest 155/155, modal +
+`autoSchedule:run` present in the app bundle. Demo: the buttons are live in
+`pacing.html` (and any cloudnimbus mount).
+
+**0.195.0 Pacing/Forecast subtab (2026-06-05).** New `pacing`
 view-mode in the app (alongside Gantt/List/Treemap/Bubbles/Calendar/Flow) —
 the in-gantt "budget" screen. Reads the **same task state the Gantt draws**,
 so board edits flow into it. **Cuts (host-configurable):** Range

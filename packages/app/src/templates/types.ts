@@ -166,7 +166,13 @@ export type AppEvent =
   | { type: 'TOGGLE_ADMIN' }
   | { type: 'TOGGLE_ADVISOR' }
   | { type: 'TOGGLE_FEATURE'; key: string }
-  | { type: 'CLOSE_DETAIL'; taskId: string };
+  | { type: 'CLOSE_DETAIL'; taskId: string }
+  // 0.196.0 — UI-intent events. Carry no state; intercepted in
+  // IIFEApp.dispatch() (like PATCH) to open the NG-owned modal with engine +
+  // host-callback access. The reducer ignores them (no-op). See
+  // docs/ng-ui-conventions.md.
+  | { type: 'AUTOSCHEDULE_OPEN' }
+  | { type: 'TEAM_OPEN' };
 
 export interface PatchLogEntry {
   ts: Date;

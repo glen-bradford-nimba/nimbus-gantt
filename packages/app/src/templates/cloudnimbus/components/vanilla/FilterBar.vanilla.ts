@@ -139,8 +139,9 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
     tCnt.textContent = active.length + '×';
     teamBtn.appendChild(tCnt);
     teamBtn.addEventListener('click', () => {
-      // eslint-disable-next-line no-console
-      console.log('[FilterBar] open resource panel (placeholder)');
+      // 0.196.0 — open the NG-owned Team/capacity modal (or host override).
+      // IIFEApp.dispatch() intercepts this intent. See docs/ng-ui-conventions.md.
+      p.dispatch({ type: 'TEAM_OPEN' });
     });
     teamWrap.appendChild(teamBtn);
     const cap = el('span', CLS_CAPACITY_TEXT);
@@ -148,15 +149,14 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
     teamWrap.appendChild(cap);
     inner.appendChild(teamWrap);
 
-    /* 10. Auto-Schedule — button visible; behavior is a no-op stub until
-       DH-side scheduler wires up. Glen's call 2026-04-20: "i want it; DH
-       sorts out what it does." Follow-up will add an `onAutoSchedule`
-       callback to forward the click to DH's ETA service. */
+    /* 10. Auto-Schedule — 0.196.0: opens the NG-owned Auto-Schedule modal,
+       which runs the in-bundle scheduler (or hands off to a host override,
+       e.g. DH's server-side ETA service). IIFEApp.dispatch() intercepts the
+       intent; see docs/ng-ui-conventions.md. */
     const autoBtn = el('button', CLS_AUTO_SCHED_BTN);
     autoBtn.textContent = 'Auto-Schedule';
     autoBtn.addEventListener('click', () => {
-      // eslint-disable-next-line no-console
-      console.log('[FilterBar] auto-schedule (placeholder)');
+      p.dispatch({ type: 'AUTOSCHEDULE_OPEN' });
     });
     inner.appendChild(autoBtn);
 
