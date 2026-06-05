@@ -26,10 +26,13 @@
   <div id="wrap">
     <div id="banner">
       <span><b>Pacing / Forecast demo</b> — click the <span class="pill">Pacing</span> pill in the toolbar above the timeline.</span>
+      <button onclick="window.setPreset('dh')">DH preset (with $)</button>
+      <button onclick="window.setPreset('mf')">MF preset (no $)</button>
+      <span style="color:#475569">|</span>
       <button onclick="window.bumpFirst()">Move first task +7d</button>
       <button onclick="window.logMore()">Log hours on a task</button>
       <button onclick="window.addBig()">Add a big future task</button>
-      <span style="color:#94a3b8">Edit on Gantt → switch to Pacing → it updates (no reload).</span>
+      <span style="color:#94a3b8">Preset re-mounts; edits then update Pacing live (no reload).</span>
     </div>
     <div id="stage"><div id="gantt"></div></div>
   </div>
@@ -92,18 +95,37 @@
     const tasks = sampleTasks.map(toTask);
     const container = document.getElementById('gantt');
 
-    const handle = IIFEApp.mount(container, {
-      tasks,
-      dependencies: sampleDependencies,
-      engine: NgCore,
-      mode: 'fullscreen',
-      config: { rate: 135 },   // blended $/hr → enables the $ measure toggle
-      onItemClick: (id) => console.log('[pacing-demo] open item', id),
-      onPatch: async (p) => console.log('[pacing-demo] onPatch', p),
-    });
+    // Two client PRESETS exercise the per-client config (controls + defaults).
+    // NOTE: the rate below is a DEMO PLACEHOLDER ($/hr) — NOT a real client
+    // rate. In production the host (DH) supplies it via config.rate /
+    // PacingData.rate; NG has no built-in rate default (no $ shows without one).
+    const PRESETS = {
+      dh: { label: 'DH preset (full + $)',
+        config: { rate: 150, pacing: { defaults: { range: 'all', bucket: 'week', mode: 'cumulative', series: { target: true } } } } },
+      mf: { label: 'MF preset (hours only, no $)',
+        config: { pacing: { controls: { dollars: false }, defaults: { range: 'all', bucket: 'week' } } } },
+    };
 
-    const ng = handle.gantt;
-    window.handle = handle; window.gantt = ng;
+    let handle, ng;
+    function mountWith(key) {
+      if (handle) { try { IIFEApp.unmount(container); } catch (e) { /* first mount */ } }
+      handle = IIFEApp.mount(container, {
+        tasks,
+        dependencies: sampleDependencies,
+        engine: NgCore,
+        mode: 'fullscreen',
+        config: PRESETS[key].config,
+        onItemClick: (id) => console.log('[pacing-demo] open item', id),
+        onItemHover: (id) => { if (id) console.log('[pacing-demo] hover item', id); },
+        onOpenReport: (ctx) => console.log('[pacing-demo] open report', ctx),
+        onPatch: async (p) => console.log('[pacing-demo] onPatch', p),
+      });
+      ng = handle.gantt;
+      window.handle = handle; window.gantt = ng; window.__preset = key;
+      console.log('[pacing-demo] mounted preset:', PRESETS[key].label);
+    }
+    window.setPreset = mountWith;
+    mountWith('dh');   // land on the DH cumulative view (shows actual→today→forecast)
 
     // ── Demo edits — show the Pacing tab updating live from board changes ──
     window.bumpFirst = () => {

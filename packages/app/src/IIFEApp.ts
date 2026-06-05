@@ -2640,6 +2640,14 @@ export class IIFEApp {
             onOpenItem: options.onItemClick
               ? (taskId) => options.onItemClick!(taskId)
               : undefined,
+            // Row hover → host tooltip/mouseover (DH's richer detail card).
+            onItemHover: options.onItemHover
+              ? (taskId, pos) => options.onItemHover!(taskId, pos)
+              : undefined,
+            // Bucket "Open report ↗" → host-owned destination (no URLs in NG).
+            onOpenReport: options.onOpenReport
+              ? (ctx) => options.onOpenReport!(ctx)
+              : undefined,
             rate: pc.rate,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             defaults: pacingCfg.defaults as any,

@@ -28,12 +28,16 @@ and the demo.
 **Architecture (decided across NG/DH/MF): DH is the forecast brain, NG is the
 screen** — DH passes a render-ready `PacingData` (dated actuals + $ + scope +
 grading); NG draws it. Standalone, NG falls back to a forecast-only preview.
-**APP-bundle** change (core unchanged from 0.194.1). Branch
-`feat/0.195.0-pacing-view`, **PR #27 open (unmerged)** — review with DH. The
-`mountConfig.pacingData` pass-through is intentionally **not wired yet**
-(renderer + fallback + per-client config ship first; add the data pass-through
-once the contract's confirmed). Demo: `packages/demo/src/pacing.html`
-(`npx vite --config packages/demo/vite.config.ts` → `/pacing.html`).
+**APP-bundle** re-copy: `nimbus-gantt-app.iife.js` → `nimbusganttapp.resource`,
+md5 **`0945c97acc4906da507d4c4d2dde6474`** (core unchanged from 0.194.1 — do
+NOT re-copy core). Interaction callbacks (`onItemClick` / `onItemHover` /
+`onOpenReport`) + per-client `config.pacing` ({defaults, controls}) are wired.
+Branch `feat/0.195.0-pacing-view`, **PR #27 open (unmerged)** — review with DH.
+The `mountConfig.pacingData` data-object pass-through is intentionally **not
+wired yet** (renderer + fallback + config + callbacks ship first; add the
+data pass-through once the contract's confirmed). Demo:
+`packages/demo/src/pacing.html` (`npx vite --config packages/demo/vite.config.ts`
+→ `/pacing.html`; DH/MF preset toggle in the banner).
 
 **0.194.2 app pipeline feeds core hours-contract keys
 (2026-06-05).** The **app** adapter (`packages/app/src/pipeline.ts`) emitted

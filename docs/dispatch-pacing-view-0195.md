@@ -13,7 +13,7 @@ the **same task state the Gantt draws**, editing the board updates it live.
 ## What's in 0.195.0 (NG side)
 - New `pacing` subtab (`packages/app/src/renderers/pacing.ts`), wired in
   `IIFEApp.ts` + `defaults.ts` + `ViewMode`. **APP-bundle** change, md5
-  `3581a020128deebdc6b3657853333bda`.
+  `0945c97acc4906da507d4c4d2dde6474`.
 - Interactive, dependency-free SVG/DOM:
   - **Bucket selector** — Week / Month / Quarter.
   - **Stacked bars** — Actual (logged, past) + Forecast (future) + optional
@@ -108,10 +108,14 @@ subtab can't disagree.
    serialize to this shape. Bucket the *remaining* spread on
    `EstimatedStartDevDate__c`/`EstimatedEndDevDate__c` so it aligns 1:1 with
    the Gantt bars (same fields the timeline renders on).
-2. **Pass it to the NG mount.** The thread-through option (`mountConfig.pacingData`
-   + `onOpenReport` + `onPacingBucketChange`) is **not yet wired** — NG ships the
-   renderer + fallback first so you can see/shape it. Once you confirm the
-   contract, I add the one option pass-through (small, additive) and re-cut.
+2. **Pass it to the NG mount.** The **interaction callbacks + per-client config
+   are wired now** (0945c97a): `onItemClick` (drill row → open item),
+   `onItemHover` (row → host tooltip), `onOpenReport` (bucket → host report),
+   and `config.pacing = { defaults, controls }` + `config.rate`. The only thing
+   **not yet wired** is the authoritative-data object itself
+   (`mountConfig.pacingData` + `onPacingBucketChange`) — renderer + fallback +
+   config ship first so you can shape the contract. Once you confirm the shape,
+   I add the one `pacingData` pass-through (small, additive) and re-cut.
 3. **Bucket switching:** when NG owns the data (fallback) it re-buckets locally;
    when DH owns it, NG fires `onPacingBucketChange(bucket)` and you recompute +
    re-pass. (Or pre-compute all three granularities.)
@@ -124,4 +128,4 @@ subtab can't disagree.
 
 ## Adoption
 APP-bundle re-copy: `nimbus-gantt-app.iife.js` → `nimbusganttapp.resource`,
-md5 `3581a020128deebdc6b3657853333bda`. Core unchanged from 0.194.1.
+md5 `0945c97acc4906da507d4c4d2dde6474`. Core unchanged from 0.194.1.
