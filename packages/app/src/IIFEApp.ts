@@ -31,6 +31,7 @@ import { startDragReparent } from './dragReparent';
 import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/AuditListView.vanilla';
 import { renderTreemap } from './renderers/treemap';
 import { renderBubble } from './renderers/bubble';
+import { renderPacingView } from './renderers/pacing';
 
 import { resolveTemplate } from './templates/resolver';
 import { INITIAL_STATE, reduceAppState } from './templates/state';
@@ -2620,6 +2621,40 @@ export class IIFEApp {
           state.viewMode === 'treemap' ? renderTreemap : renderBubble,
           options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
         );
+      } else if (state.viewMode === 'pacing') {
+        // 0.195.0 — Pacing/Forecast subtab. NG renders; DH is the brain.
+        // With no host-supplied pacingData, NG draws a FORECAST-ONLY preview
+        // by spreading each task's remaining hours across its scheduled span
+        // (reads the same task state the Gantt does, so board edits flow in).
+        // The drill-down "open item" reuses the existing onItemClick contract;
+        // dollars / dated actuals / scoping / grading arrive once DH passes a
+        // PacingData object (see docs/dispatch — DH→NG pacing contract).
+        {
+          // Host pacing config (DH passes per-client via config.pacing):
+          // rate, defaults (initial bucket/range/measure/mode/series), and
+          // controls (which pills show — e.g. MF sets controls.dollars=false).
+          const pc = (options.config as { rate?: number; pacing?: Record<string, unknown> } | undefined) ?? {};
+          const pacingCfg = (pc.pacing ?? {}) as { defaults?: unknown; controls?: unknown };
+          renderPacingView(ganttHost, allTasks, {
+            // Drill-down item click reuses the existing host nav contract.
+            onOpenItem: options.onItemClick
+              ? (taskId) => options.onItemClick!(taskId)
+              : undefined,
+            // Row hover → host tooltip/mouseover (DH's richer detail card).
+            onItemHover: options.onItemHover
+              ? (taskId, pos) => options.onItemHover!(taskId, pos)
+              : undefined,
+            // Bucket "Open report ↗" → host-owned destination (no URLs in NG).
+            onOpenReport: options.onOpenReport
+              ? (ctx) => options.onOpenReport!(ctx)
+              : undefined,
+            rate: pc.rate,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            defaults: pacingCfg.defaults as any,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            controls: pacingCfg.controls as any,
+          });
+        }
       } else {
         const labelMap: Record<string, string> = {
           calendar: 'Calendar', flow: 'Flow',

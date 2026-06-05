@@ -14,7 +14,7 @@ import type {
 import type { TaskStats } from '../pipeline';
 
 /* ── §1.1 Primitive enums ───────────────────────────────────────────────── */
-export type ViewMode = 'gantt' | 'list' | 'treemap' | 'bubbles' | 'calendar' | 'flow';
+export type ViewMode = 'gantt' | 'list' | 'treemap' | 'bubbles' | 'calendar' | 'flow' | 'pacing';
 
 export type SlotName =
   | 'TitleBar' | 'StatsPanel' | 'FilterBar' | 'ZoomBar'

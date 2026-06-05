@@ -340,8 +340,18 @@ export interface MountOptions {
 
   /** Fired on single-click of a gantt bar (click, not drag). Host decides
    *  destination (record page, modal, side panel). Library does not
-   *  navigate itself. Passes taskId only — full task lookup is host-side. */
+   *  navigate itself. Passes taskId only — full task lookup is host-side.
+   *  Also fired by the Pacing drill-down rows (open the underlying work item). */
   onItemClick?: (taskId: string) => void;
+
+  /** Pacing (0.195) — fired as the cursor moves over a Pacing drill-down row
+   *  (taskId) and on leave (null), with viewport coords. Host renders its own
+   *  richer tooltip/mouseover (e.g. DH's detail card). Library stays UI-agnostic. */
+  onItemHover?: (taskId: string | null, pos: { x: number; y: number }) => void;
+
+  /** Pacing (0.195) — fired by a bucket's "Open report ↗" action. Host owns
+   *  the destination (e.g. a Salesforce report filtered to those task IDs). */
+  onOpenReport?: (ctx: { bucketKey: string; taskIds: string[] }) => void;
 
   /** Fired when `onItemEdit` rejects. Host surfaces its own UX (e.g.
    *  Lightning ShowToastEvent in Salesforce). Library stays UI-agnostic.
