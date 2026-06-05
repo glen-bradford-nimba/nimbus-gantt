@@ -81,16 +81,24 @@ Fixed: the header now also prefers `task.title || task.name`. Any host that sets
 a clean `title` (even if a label string lands in `name`) gets the right header.
 **CORE bundle re-copy**, md5 `65ba5d62f470f41c4f540f0591c4d44c`.
 
-### CN-side fix still owed (NOT an NG bug)
-**The sizing/actuals block is dark on CN's app-mount timeline** because
-`src/lib/nimbus-gantt-app/pipeline.ts` emits hours under
-`metadata.hoursHigh` / `metadata.hoursLogged`, but the NG tooltip reads
-`estimatedHours` / `loggedHours` / `hours` (top-level **or** metadata). The
-keys don't match → block silently hides. DH works because `_mapTasksForNg`
-sets the contract keys directly.
-**Fix (CN lane):** in `pipeline.ts`, also emit `estimatedHours` /
-`loggedHours` (mirror DH). NG deliberately does **not** chase `hoursHigh` into
-core — it's a CN-specific range concept; coupling the engine to one consumer's
-naming is the wrong layer. Conform to the documented contract instead.
-> Two+ CC sessions are active in the CN repo — land this in that session, not a
-> third writer.
+### Dark sizing block — FIXED in NG 0.194.2 (ownership correction)
+**The sizing/actuals block was dark on the app-mount timeline** because the
+app adapter emitted hours under `metadata.hoursHigh`/`hoursLogged`, but the NG
+tooltip reads `estimatedHours`/`loggedHours`/`hours`.
+
+**Ownership:** this transform is **`packages/app/src/pipeline.ts` in the
+monorepo** (NG's lane) — CN's `src/lib/nimbus-gantt-app/pipeline.ts` is only a
+*mirror* that arrives via the app-bundle copy. So the fix is NG's, not a
+consumer edit, and **CN must not patch/fork its inline mirror** (that would
+diverge from the bundle). Fixed at the source in 0.194.2: the leaf map now
+emits `estimatedHours`/`loggedHours` alongside the internal rollup keys.
+> Distinction from [[the don't-couple-core rule]]: the *core* tooltip stays
+> consumer-agnostic (we did NOT add `hoursHigh` to it). The *app adapter* —
+> also NG-owned — is exactly the right layer to map its own shape onto the core
+> contract. App-layer mapping = NG's job; core-layer key-chasing = not.
+
+**Consumer action (CN + DH):** re-copy the **APP** bundle
+`nimbus-gantt-app.iife.js` → `nimbusganttapp.resource`, md5
+`dd3b75e965ccdbdc1448051bbeec768f`. (Core bundle unchanged from 0.194.1.)
+This is the first app-bundle change since 0.192 — prior 0.193/0.194 cuts were
+core-only.
