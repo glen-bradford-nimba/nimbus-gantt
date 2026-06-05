@@ -75,9 +75,10 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 
 | Field | Value |
 |---|---|
-| Branch | `master` (merged `d875bf8`, PR #24) |
-| Commit SHA (source — latest) | `f79121b` *(0.194.0 Tooltip v2 — host rows + deps + baseline)* |
-| Commit subject | `feat(0.194.0): Tooltip v2 — host rows + dependency summary + baseline variance` |
+| Branch | `master` (merged `a06c26f`, PR #25) |
+| Commit SHA (source — latest) | `3c86acb` *(0.194.1 tooltip header honors title)* |
+| Commit subject | `fix(0.194.1): tooltip header honors task.title (matches bar-label convention)` |
+| 0.194.1 tooltip header→title (core md5 `65ba5d62…`) | `3c86acb` |
 | 0.194.0 Tooltip v2 (core md5 `ecf538f9…`) | `f79121b` |
 | 0.193.0 tooltip + hit-test parity (core md5 `a0e38a04…`) | `14f669b` |
 | 0.192.0 AutoSchedule + hours-bridge | `58bde0d` |
