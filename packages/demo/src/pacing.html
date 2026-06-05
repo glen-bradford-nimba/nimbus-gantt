@@ -36,6 +36,11 @@
 
   <script type="module">
     window.NGA_DIAG = true; window.__nga_diag = [];
+    // Load the cloudnimbus template stylesheet so the demo chrome (TitleBar,
+    // view pills, etc.) renders exactly as it does on CN/DH — the demo harness
+    // otherwise ships no CSS. (The Pacing view itself injects its own scoped
+    // styles, so it renders correctly even without this.)
+    import '../../app/src/templates/cloudnimbus/styles.css';
     import * as NgCore from '@nimbus-gantt/core';
     import { IIFEApp } from '@nimbus-gantt/app';
     import { sampleTasks, sampleDependencies } from './sample-data.ts';
