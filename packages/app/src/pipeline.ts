@@ -216,7 +216,12 @@ export function buildTasks(tasks: NormalizedTask[]): MappedTask[] {
       parentId: t.parentWorkItemId || undefined,
       sortOrder: Number(t.sortOrder) || 0,
       isInactive: !!t.isInactive,
-      metadata: { hoursHigh: hrs, hoursLogged: logged },
+      // `hoursHigh`/`hoursLogged` are this pipeline's internal rollup keys
+      // (read by the parent pass). `estimatedHours`/`loggedHours` are the NG
+      // core contract keys the tooltip reads for its sizing/actuals block —
+      // emit both so the app adapter feeds core correctly (the leaf metadata
+      // object is reused for parent rows, so parents inherit these too).
+      metadata: { hoursHigh: hrs, hoursLogged: logged, estimatedHours: hrs, loggedHours: logged },
     };
   });
 

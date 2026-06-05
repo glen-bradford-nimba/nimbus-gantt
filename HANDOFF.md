@@ -1,6 +1,19 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.194.1 tooltip header honors `title` (2026-06-05).** The
+**📣 Latest cut: 0.194.2 app pipeline feeds core hours-contract keys
+(2026-06-05).** The **app** adapter (`packages/app/src/pipeline.ts`) emitted
+hours under its internal `metadata.hoursHigh`/`hoursLogged` rollup keys but
+NOT the NG core contract keys, so the 0.194.0 sizing/actuals tooltip block
+was dark on every app-mount surface (Cowork found it on CN's v12). Fixed
+additively: the leaf map now also emits `estimatedHours`/`loggedHours` (kept
+the rollup keys; parents reuse the same metadata object). This is an
+**APP-bundle** change — first since 0.192 — so consumers re-copy
+**`nimbus-gantt-app.iife.js`** (`nimbusganttapp.resource`), md5
+**`dd3b75e965ccdbdc1448051bbeec768f`**. Core bundle unchanged from 0.194.1
+(`65ba5d62…`). This was NG's lane (monorepo app adapter), NOT a consumer fix.
+See `docs/dispatch-consumers-0194-tooltip-v2.md`.
+
+**0.194.1 tooltip header honors `title` (2026-06-05).** The
 hover tooltip header now uses `task.title || task.name`, matching the
 LayoutEngine bar-label convention — so hosts that route a label string into
 `name` but set a clean `title` get the right header text (Cowork live-test
