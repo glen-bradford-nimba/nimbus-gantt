@@ -64,3 +64,33 @@ inherits the same gap:
   `blockedBy`/`computeDepSummary`, `Start vs plan`).
 - Live (rendered) verification of the new blocks is a Cowork/visual job — the
   Node test env has no DOM.
+
+---
+
+## 0.194.1 patch (2026-06-05) — header honors `title` + Cowork findings
+
+A Cowork live-test of the 0.193/0.194 rollout on cloudnimbusllc.com confirmed
+the engine work is correct (right-click hit-test ✅, work-item ID ✅) but
+surfaced two real issues:
+
+### NG-side fix shipped (0.194.1)
+**Tooltip header showed the wrong text** — CN's v12 header read
+`"120h (83% budget)"` instead of the task title. Root cause: the tooltip
+header read `task.name` only, while the bar label uses `task.title || task.name`.
+Fixed: the header now also prefers `task.title || task.name`. Any host that sets
+a clean `title` (even if a label string lands in `name`) gets the right header.
+**CORE bundle re-copy**, md5 `65ba5d62f470f41c4f540f0591c4d44c`.
+
+### CN-side fix still owed (NOT an NG bug)
+**The sizing/actuals block is dark on CN's app-mount timeline** because
+`src/lib/nimbus-gantt-app/pipeline.ts` emits hours under
+`metadata.hoursHigh` / `metadata.hoursLogged`, but the NG tooltip reads
+`estimatedHours` / `loggedHours` / `hours` (top-level **or** metadata). The
+keys don't match → block silently hides. DH works because `_mapTasksForNg`
+sets the contract keys directly.
+**Fix (CN lane):** in `pipeline.ts`, also emit `estimatedHours` /
+`loggedHours` (mirror DH). NG deliberately does **not** chase `hoursHigh` into
+core — it's a CN-specific range concept; coupling the engine to one consumer's
+naming is the wrong layer. Conform to the documented contract instead.
+> Two+ CC sessions are active in the CN repo — land this in that session, not a
+> third writer.

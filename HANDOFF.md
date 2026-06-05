@@ -1,6 +1,17 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.194.0 Tooltip v2 (2026-06-04).** Three additive tooltip
+**📣 Latest cut: 0.194.1 tooltip header honors `title` (2026-06-05).** The
+hover tooltip header now uses `task.title || task.name`, matching the
+LayoutEngine bar-label convention — so hosts that route a label string into
+`name` but set a clean `title` get the right header text (Cowork live-test
+found CN's v12 header showing `"120h (83% budget)"`). One-line engine fix;
+**CORE bundle re-copy only**, md5 **`65ba5d62f470f41c4f540f0591c4d44c`**.
+NOTE: the *dark sizing block* the same Cowork pass found is **not** an NG
+bug — it's a CN `pipeline.ts` key mismatch (emits `metadata.hoursHigh`,
+contract reads `estimatedHours`/`loggedHours`/`hours`); CN-side fix, see
+`docs/dispatch-consumers-0194-tooltip-v2.md`.
+
+**0.194.0 Tooltip v2 (2026-06-04).** Three additive tooltip
 upgrades on the 0.193.0 base: (1) **`GanttTask.tooltipRows[]`** — hosts append
 domain rows (request #, budget, forecast) without forking the renderer (the
 fork-preventer); (2) **dependency summary** — `Blocked by N · Blocks N`,
