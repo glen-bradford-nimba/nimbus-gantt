@@ -215,7 +215,11 @@ function buildDefaultContent(task: GanttTask, color: string, extra?: TooltipExtr
   }
 
   const idHtml = `<div class="ng-tooltip-id" title="Work item ID">${escapeHtml(task.id)}</div>`;
-  const header = `<div class="ng-tooltip-header" style="border-left: 3px solid ${escapeHtml(color)}"><span class="ng-tooltip-name">${escapeHtml(task.name)}</span>${idHtml}</div>`;
+  // Prefer the display-title override, matching the bar-label convention in
+  // LayoutEngine (`task.title || task.name`). Hosts that route a hours/label
+  // string into `name` but set a clean `title` get the right header text.
+  const headerText = task.title || task.name;
+  const header = `<div class="ng-tooltip-header" style="border-left: 3px solid ${escapeHtml(color)}"><span class="ng-tooltip-name">${escapeHtml(headerText)}</span>${idHtml}</div>`;
   const block = (rows: string): string =>
     rows ? `<div class="ng-tooltip-divider"></div><div class="ng-tooltip-body">${rows}</div>` : '';
   return `${header}<div class="ng-tooltip-body">${bodyRows}</div>${block(sizingRows)}${block(baselineRows)}${block(hostRows)}`;
