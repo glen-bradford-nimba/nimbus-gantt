@@ -3,18 +3,37 @@
 **📣 Latest cut: 0.195.0 Pacing/Forecast subtab (2026-06-05).** New `pacing`
 view-mode in the app (alongside Gantt/List/Treemap/Bubbles/Calendar/Flow) —
 the in-gantt "budget" screen. Reads the **same task state the Gantt draws**,
-so board edits flow into it. Interactive: Week/Month/Quarter bucket selector,
-Actual+Forecast stacked bars, series toggles, **click a bucket → drill into
-the work items that compose it**, summary cards incl. an **Unscheduled**
-(estimate-but-no-dates) signal. Architecture (decided across NG/DH/MF): **DH
-is the forecast brain, NG is the screen** — DH passes a render-ready
-`PacingData` (dated actuals + $ + scope + grading); NG draws it. Standalone,
-NG falls back to a forecast-only preview (remaining-spread on the scheduled
-span). **APP-bundle** change, md5 `3581a020128deebdc6b3657853333bda` (core
-unchanged from 0.194.1). The DH→NG contract + DH action items are in
-**`docs/dispatch-pacing-view-0195.md`** — this is the piece to review with DH.
-The `mountConfig.pacingData` pass-through is intentionally **not wired yet**
-(renderer + fallback ship first; add the option once the contract's confirmed).
+so board edits flow into it. **Cuts (host-configurable):** Range
+(Next 3/6 · Rest-of-yr · This-Qtr · YTD · All · Custom start→end) · Bucket
+(W/M/Q) · Measure (Hours/$) · Mode (Per-period / Cumulative burn-up) · Series
+(Actual/Forecast/Target). **Click a bucket → rich drill-down** of the work
+items composing it (This-period · % of item · Est · Logged · Remaining · %used
++ group/assignee/status/dates), with `onOpenItem` (navigate) + `onItemHover`
+(tooltip) + per-bucket `onOpenReport` — host owns nav. Chart reads
+**actual → today → forecast** (logged spread over elapsed span, remaining over
+the rest). Summary cards incl. an **Unscheduled** (estimate-but-no-dates)
+signal.
+
+**Per-client config** (`mountConfig.config.pacing = { defaults, controls }`,
++ `config.rate`): `controls.dollars=false` hides the $ measure (MF);
+`controls.{mode,series,ranges,buckets}` restrict/hide groups; `defaults`
+seed the initial bucket/range/measure/mode/series on load. See
+`docs/dispatch-pacing-view-0195.md`.
+
+**Styling parity:** the view **injects its own scoped stylesheet** (`.ngp-*`,
+like TooltipManager/ContextMenuPlugin) — it does NOT depend on the host's
+pre-compiled `styles.css`, so it renders identically on CN-web, DH-Salesforce,
+and the demo.
+
+**Architecture (decided across NG/DH/MF): DH is the forecast brain, NG is the
+screen** — DH passes a render-ready `PacingData` (dated actuals + $ + scope +
+grading); NG draws it. Standalone, NG falls back to a forecast-only preview.
+**APP-bundle** change (core unchanged from 0.194.1). Branch
+`feat/0.195.0-pacing-view`, **PR #27 open (unmerged)** — review with DH. The
+`mountConfig.pacingData` pass-through is intentionally **not wired yet**
+(renderer + fallback + per-client config ship first; add the data pass-through
+once the contract's confirmed). Demo: `packages/demo/src/pacing.html`
+(`npx vite --config packages/demo/vite.config.ts` → `/pacing.html`).
 
 **0.194.2 app pipeline feeds core hours-contract keys
 (2026-06-05).** The **app** adapter (`packages/app/src/pipeline.ts`) emitted

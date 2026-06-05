@@ -16,6 +16,7 @@ export default defineConfig({
         gantt3d: resolve(__dirname, 'src/gantt3d.html'),
         temporalCanvas: resolve(__dirname, 'src/temporal-canvas.html'),
         autoSchedule: resolve(__dirname, 'src/autoschedule.html'),
+        pacing: resolve(__dirname, 'src/pacing.html'),
       },
     },
   },
