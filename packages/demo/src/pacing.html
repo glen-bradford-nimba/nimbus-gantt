@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NG — Pacing / Forecast subtab demo (0.195.0)</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    #banner {
+      background: #0f172a; color: #e2e8f0; padding: 8px 14px; font-size: 13px;
+      display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    }
+    #banner b { color: #fff; }
+    #banner .pill { background: #6366f1; color: #fff; padding: 1px 8px; border-radius: 6px; font-weight: 700; }
+    #banner button {
+      background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px;
+      padding: 4px 10px; font-size: 12px; cursor: pointer; font-weight: 600;
+    }
+    #banner button:hover { background: #334155; }
+    #gantt { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+    #wrap { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
+    #stage { flex: 1; position: relative; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="banner">
+      <span><b>Pacing / Forecast demo</b> — click the <span class="pill">Pacing</span> pill in the toolbar above the timeline.</span>
+      <button onclick="window.bumpFirst()">Move first task +7d</button>
+      <button onclick="window.logMore()">Log hours on a task</button>
+      <button onclick="window.addBig()">Add a big future task</button>
+      <span style="color:#94a3b8">Edit on Gantt → switch to Pacing → it updates (no reload).</span>
+    </div>
+    <div id="stage"><div id="gantt"></div></div>
+  </div>
+
+  <script type="module">
+    window.NGA_DIAG = true; window.__nga_diag = [];
+    import * as NgCore from '@nimbus-gantt/core';
+    import { IIFEApp } from '@nimbus-gantt/app';
+    import { sampleTasks, sampleDependencies } from './sample-data.ts';
+
+    const DAY = 86400000;
+    const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const parse = (s) => new Date(s + 'T00:00:00Z').getTime();
+
+    // Center the dataset on today so there's real past + future to forecast.
+    const PINNED = Date.UTC(2026, 3, 1);
+    const TODAY = (() => { const d = new Date(); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); })();
+    const SHIFT = Math.round((TODAY - PINNED) / DAY);
+    const shift = (s) => iso(parse(s) + SHIFT * DAY);
+
+    function bucket(status) {
+      const s = String(status || '').toLowerCase();
+      if (s.includes('complete') || s.includes('done')) return 'NOW';
+      if (s.includes('blocked')) return 'HOLD';
+      if (s.includes('dev') || s.includes('test') || s.includes('review')) return 'NOW';
+      if (s.includes('planning')) return 'NEXT';
+      return 'PLANNED';
+    }
+
+    // Synthesize hours the sample data doesn't carry, so the forecast is real:
+    //   estimate ≈ 6h/scheduled-day; logged ≈ estimate × progress.
+    function toTask(t) {
+      const start = shift(t.startDate), end = shift(t.endDate);
+      const days = Math.max(1, Math.round((parse(end) - parse(start)) / DAY) + 1);
+      const est = Math.max(4, Math.round(days * 6));
+      const logged = Math.round(est * (t.progress || 0));
+      return {
+        id: t.id,
+        title: t.name,
+        startDate: start,
+        endDate: end,
+        progress: t.progress,
+        status: t.status,
+        parentId: t.parentId,
+        groupId: bucket(t.status),
+        groupName: t.groupName,
+        isMilestone: t.isMilestone,
+        assignee: t.assignee,
+        sortOrder: t.sortOrder,
+        estimatedHours: est,
+        loggedHours: logged,
+      };
+    }
+
+    const tasks = sampleTasks.map(toTask);
+    const container = document.getElementById('gantt');
+
+    const handle = IIFEApp.mount(container, {
+      tasks,
+      dependencies: sampleDependencies,
+      engine: NgCore,
+      mode: 'fullscreen',
+      config: { rate: 135 },   // blended $/hr → enables the $ measure toggle
+      onItemClick: (id) => console.log('[pacing-demo] open item', id),
+      onPatch: async (p) => console.log('[pacing-demo] onPatch', p),
+    });
+
+    const ng = handle.gantt;
+    window.handle = handle; window.gantt = ng;
+
+    // ── Demo edits — show the Pacing tab updating live from board changes ──
+    window.bumpFirst = () => {
+      const snap = ng.agent.getSnapshot();
+      const t = snap.tasks.find(x => !x.parentId) || snap.tasks[0];
+      if (!t) return;
+      ng.agent.moveTask(t.id, iso(parse(t.startDate) + 7 * DAY), iso(parse(t.endDate) + 7 * DAY));
+      console.log('[pacing-demo] moved', t.id, '+7d — switch to Pacing to see the bars shift');
+    };
+    window.logMore = () => {
+      const snap = ng.agent.getSnapshot();
+      const t = snap.tasks[Math.floor(snap.tasks.length / 2)];
+      if (!t) return;
+      ng.agent.updateTask(t.id, { progress: Math.min(1, (t.progress || 0) + 0.25) });
+      console.log('[pacing-demo] logged more on', t.id, '— remaining shrinks in the forecast');
+    };
+    let big = 0;
+    window.addBig = () => {
+      const start = iso(TODAY + (30 + big * 20) * DAY);
+      const end = iso(TODAY + (75 + big * 20) * DAY);
+      ng.agent.addTask({
+        id: 'big-' + (big++),
+        name: 'Big future build ' + big,
+        startDate: start, endDate: end,
+        status: 'Planning',
+        estimatedHours: 240, loggedHours: 0,
+      });
+      console.log('[pacing-demo] added a 240h future task — watch it appear in the forecast months');
+    };
+
+    console.log('%c[Pacing demo loaded]', 'font-weight:bold;color:#6366f1',
+      '\nClick the "Pacing" pill. Then try the banner buttons and switch back to Pacing.');
+  </script>
+</body>
+</html>

@@ -1,86 +1,114 @@
 /**
  * renderers/pacing.ts — Pacing / Forecast view (0.195.0).
  *
- * The in-gantt "budget" subtab. Renders a per-period hours forecast aligned
- * to the same task data the Gantt draws, so editing the board updates this
- * view. Interactive: bucket selector, series toggles, click-a-bucket to
- * decompose it into the constituent work items, click an item to drill out.
+ * The in-gantt "budget" subtab. Renders a per-period hours/$ forecast aligned
+ * to the same task data the Gantt draws, so editing the board updates it.
+ * Interactive: range/bucket/measure/mode cuts, series toggles, and click-a-bar
+ * to decompose a period into its constituent work items (rich breakout).
  *
  * ── Layering (decided 2026-06-05 across NG/DH/MF) ───────────────────────────
  * DH is the forecast BRAIN; NG is the forecast SCREEN. The accurate engine —
- * dated actuals, $ at rate, client scoping, approval-governance, estimate-vs-
- * actual grading — lives in DH (Salesforce has the data). DH computes and
- * passes NG a render-ready `PacingData`; NG just draws it.
+ * dated actuals, $ at rate, client scoping, approval-governance, grading —
+ * lives in DH. DH computes and passes NG a render-ready `PacingData`; NG draws
+ * it. Standalone (no pacingData), NG derives a FORECAST-ONLY preview by
+ * spreading each task's REMAINING hours (estimate − logged) across its span —
+ * demoable + instant drag-feedback, not the authoritative engine.
  *
- * Fallback: when no `pacingData` is supplied (standalone demo, or for instant
- * drag-preview before DH recomputes on save), NG derives a FORECAST-ONLY view
- * client-side by spreading each task's REMAINING hours (estimate − logged)
- * across its scheduled span. This is preview math, not the authoritative
- * engine — actuals/$/grading require DH. The view labels itself accordingly.
+ * Interaction contract for hosts (DH wires these): every work item row and bar
+ * fires `onOpenItem` (navigate) and `onItemHover` (tooltip/mouseover); bucket
+ * "Open report" fires `onOpenReport`. NG never navigates itself — host owns it.
+ *
+ * Styling: uses the cloudnimbus template's Tailwind vocabulary + shared pill
+ * classes so the controls match the rest of the chrome.
  */
 
 import type { NormalizedTask } from '../types';
+import {
+  CLS_PILL_BTN_BASE,
+  CLS_PILL_BTN_ACTIVE_BLUE, CLS_PILL_BTN_IDLE_BLUE,
+  CLS_PILL_BTN_ACTIVE_SLATE, CLS_PILL_BTN_IDLE_SLATE,
+} from '../templates/cloudnimbus/components/shared/classes';
 
 // ─── DH → NG contract ───────────────────────────────────────────────────────
 
-/** One work item's hours contribution to a single bucket (for drill-down). */
+/** One work item's contribution to a single bucket, plus item-level metrics
+ *  for the breakout columns + host tooltips. NG's fallback fills what it can;
+ *  DH enriches (dated actuals, $, scope) when it owns the data. */
 export interface PacingBucketItem {
   id: string;
   name: string;
-  hours: number;
+  hours: number;             // hours landing in THIS bucket
+  pctOfItem?: number;        // this bucket's hours ÷ the item's spread total (0–100)
+  estimatedHours?: number;
+  loggedHours?: number;
+  remainingHours?: number;
+  budgetUsedPct?: number;    // loggedHours ÷ estimatedHours (0–100+)
+  startDate?: string;
+  endDate?: string;
+  assignee?: string;
+  status?: string;
+  group?: string;
 }
 
 export interface PacingBucket {
-  key: string;            // stable period key, e.g. '2026-06' / '2026-Q2' / '2026-W23'
-  label: string;          // display, e.g. 'Jun 26'
-  actual: number;         // logged hours landing in this period (DH-only; past)
-  forecast: number;       // projected remaining hours landing in this period
-  target: number;         // planned/estimate hours for this period (baseline)
+  key: string;            // '2026-06' | '2026-Q2' | 'W2026-06-01'
+  label: string;          // 'Jun 26'
+  startMs?: number;       // bucket start (NG sets it; host may omit → parsed from key)
+  actual: number;         // logged hours in this period (DH-only: dated WorkLogs)
+  forecast: number;       // projected remaining hours landing here
+  target: number;         // planned/estimate hours for this period
   isPast: boolean;
   isCurrent: boolean;
-  items: PacingBucketItem[]; // composition for the drill-down panel
+  items: PacingBucketItem[];
 }
 
 export interface PacingSummary {
   estimatedHours: number;
   loggedHours: number;
   remainingHours: number;
-  projectedFinalHours: number;   // logged + remaining
-  pacingPct: number;             // loggedHours / estimatedHours (0–100+)
+  projectedFinalHours: number;
+  pacingPct: number;
   activeItems: number;
-  unscheduledHours: number;      // estimate present but no dates → can't place
+  unscheduledHours: number;
 }
+
+export type PacingBucketSize = 'week' | 'month' | 'quarter';
 
 export interface PacingData {
   buckets: PacingBucket[];
   bucket: PacingBucketSize;
   summary: PacingSummary;
-  rate?: number;          // $/hr — when present, NG shows $ as a secondary unit
-  currency?: string;      // e.g. 'USD'
-  scopeLabel?: string;    // e.g. client name (DH client-scoping)
-  authoritative?: boolean; // true when this came from DH's engine (vs NG fallback)
+  rate?: number;
+  currency?: string;
+  scopeLabel?: string;
+  authoritative?: boolean;
 }
 
-export type PacingBucketSize = 'week' | 'month' | 'quarter';
-
 export interface PacingViewOptions {
-  /** DH-computed, render-ready data. When present NG renders it verbatim. */
   pacingData?: PacingData;
-  /** Fired when the user switches bucket. When pacingData is host-owned, the
-   *  host should recompute at the new granularity and re-pass pacingData. */
+  /** $/hr used when no pacingData.rate — lets a host turn on $ without the full engine. */
+  rate?: number;
   onBucketChange?: (bucket: PacingBucketSize) => void;
-  /** Fired when the user clicks a work item in the drill-down. Host owns nav. */
+  /** Navigate to a work item (drill-down row or — future — its Gantt bar). Host owns nav. */
   onOpenItem?: (taskId: string) => void;
-  /** Fired from a bucket's "Open report" action. Host owns nav (no URLs here). */
+  /** Hover a work item row — host can show a tooltip/mouseover. */
+  onItemHover?: (taskId: string | null, pos: { x: number; y: number }) => void;
+  /** Bucket "Open report" — host owns nav (no URLs in NG). */
   onOpenReport?: (ctx: { bucketKey: string; taskIds: string[] }) => void;
   defaultBucket?: PacingBucketSize;
 }
 
-// ─── Small DOM helpers (dependency-free, match codebase style) ───────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function el(tag: string, style?: string, text?: string): HTMLElement {
   const e = document.createElement(tag);
   if (style) e.setAttribute('style', style);
+  if (text != null) e.textContent = text;
+  return e;
+}
+function elc(tag: string, className: string, text?: string): HTMLElement {
+  const e = document.createElement(tag);
+  e.className = className;
   if (text != null) e.textContent = text;
   return e;
 }
@@ -91,28 +119,26 @@ function svgEl(tag: string, attrs: Record<string, string | number>): SVGElement 
 }
 const FONT = '-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif';
 const DAY_MS = 86_400_000;
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function parseISO(d?: string | null): number | null {
   if (!d) return null;
   const t = Date.parse(d.length <= 10 ? d + 'T00:00:00Z' : d);
   return Number.isNaN(t) ? null : t;
 }
-function round(n: number): number { return Math.round(n); }
-function fmtH(n: number): string { return (Number.isInteger(n) ? n : Math.round(n)) + 'h'; }
+const round = (n: number) => Math.round(n);
+function fmtH(n: number): string { return round(n) + 'h'; }
+function fmtMoney(n: number): string { return '$' + round(n).toLocaleString('en-US'); }
 
 // ─── Bucketing ───────────────────────────────────────────────────────────────
-
-const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function bucketKey(ms: number, size: PacingBucketSize): string {
   const d = new Date(ms);
   const y = d.getUTCFullYear();
   if (size === 'month') return y + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
   if (size === 'quarter') return y + '-Q' + (Math.floor(d.getUTCMonth() / 3) + 1);
-  // week: ISO-ish Monday anchor
   const dow = (d.getUTCDay() + 6) % 7;
-  const monday = ms - dow * DAY_MS;
-  return 'W' + new Date(monday).toISOString().slice(0, 10);
+  return 'W' + new Date(ms - dow * DAY_MS).toISOString().slice(0, 10);
 }
 function bucketLabel(ms: number, size: PacingBucketSize): string {
   const d = new Date(ms);
@@ -133,26 +159,26 @@ function nextBucketMs(ms: number, size: PacingBucketSize): number {
   if (size === 'quarter') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 3, 1);
   return d.getTime() + 7 * DAY_MS;
 }
+/** Recover a bucket's start ms from its key when the host omitted startMs. */
+function keyToMs(key: string): number {
+  if (key[0] === 'W') return parseISO(key.slice(1)) ?? 0;
+  if (key.indexOf('Q') >= 0) { const [y, q] = key.split('-Q'); return Date.UTC(+y, (+q - 1) * 3, 1); }
+  const [y, m] = key.split('-'); return Date.UTC(+y, +m - 1, 1);
+}
 
-/**
- * NG fallback: forecast-only buckets from task spans. Spreads each task's
- * REMAINING hours (estimate − logged) evenly across its scheduled span,
- * from max(today, start) to end. Past buckets get 0 forecast (remaining is
- * future work); actuals are left 0 because NG has no dated worklogs. Tracks
- * unscheduled hours (estimate but no dates) as a board-sizing signal.
- */
+/** NG fallback: forecast-only buckets from task spans (remaining-spread). */
 function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): PacingData {
   const now = Date.now();
   const buckets = new Map<string, PacingBucket>();
   let estTotal = 0, loggedTotal = 0, unscheduled = 0, active = 0;
 
   function ensure(ms: number): PacingBucket {
+    const start = bucketStartMs(ms, size);
     const k = bucketKey(ms, size);
     let b = buckets.get(k);
     if (!b) {
-      const start = bucketStartMs(ms, size);
       b = {
-        key: k, label: bucketLabel(start, size),
+        key: k, label: bucketLabel(start, size), startMs: start,
         actual: 0, forecast: 0, target: 0,
         isPast: nextBucketMs(start, size) <= now,
         isCurrent: start <= now && now < nextBucketMs(start, size),
@@ -169,32 +195,37 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
     const logged = Number(t.loggedHours) || 0;
     if (est <= 0 && logged <= 0) continue;
     active++;
-    estTotal += est;
-    loggedTotal += logged;
+    estTotal += est; loggedTotal += logged;
     const remaining = Math.max(0, est - logged);
     const s = parseISO(t.startDate);
     const e = parseISO(t.endDate);
     if (remaining <= 0) continue;
     if (s == null || e == null || e < s) { unscheduled += remaining; continue; }
-    const from = Math.max(s, bucketStartMs(now, size));
-    const spanStart = Math.max(from, s);
+    const spanStart = Math.max(s, bucketStartMs(now, size));
     const spanEnd = Math.max(spanStart + DAY_MS, e);
     const spanDays = (spanEnd - spanStart) / DAY_MS;
     if (spanDays <= 0) { unscheduled += remaining; continue; }
     const perDay = remaining / spanDays;
-    // Walk buckets across the span, allocating day-overlap × perDay.
-    let cur = bucketStartMs(spanStart, size);
-    let guard = 0;
+    const str = (v: unknown): string | undefined => (v == null || v === '') ? undefined : String(v);
+    const meta = {
+      estimatedHours: round(est), loggedHours: round(logged), remainingHours: round(remaining),
+      budgetUsedPct: est > 0 ? round(logged / est * 100) : 0,
+      startDate: str(t.startDate), endDate: str(t.endDate),
+      assignee: str(t.assignee), status: str(t.status), group: str(t.groupName) || str(t.groupId),
+    };
+    let cur = bucketStartMs(spanStart, size), guard = 0;
     while (cur < spanEnd && guard++ < 600) {
       const next = nextBucketMs(cur, size);
-      const oS = Math.max(cur, spanStart);
-      const oE = Math.min(next, spanEnd);
+      const oS = Math.max(cur, spanStart), oE = Math.min(next, spanEnd);
       if (oE > oS) {
         const hrs = perDay * (oE - oS) / DAY_MS;
         if (hrs > 0.01) {
           const b = ensure(cur);
           b.forecast += hrs;
-          b.items.push({ id: t.id, name: t.title || t.name || t.id, hours: hrs });
+          b.items.push({
+            id: t.id, name: t.title || t.name || t.id, hours: hrs,
+            pctOfItem: remaining > 0 ? round(hrs / remaining * 100) : 0, ...meta,
+          });
         }
       }
       cur = next;
@@ -204,30 +235,48 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
   const ordered = Array.from(buckets.values()).sort((a, b) => a.key < b.key ? -1 : 1);
   for (const b of ordered) {
     b.forecast = round(b.forecast);
-    b.items.sort((x, y) => y.hours - x.hours).forEach(i => i.hours = round(i.hours));
+    b.items.sort((x, y) => y.hours - x.hours).forEach(i => { i.hours = round(i.hours); });
   }
   const remainingTotal = Math.max(0, estTotal - loggedTotal);
   return {
-    buckets: ordered,
-    bucket: size,
+    buckets: ordered, bucket: size,
     summary: {
-      estimatedHours: round(estTotal),
-      loggedHours: round(loggedTotal),
-      remainingHours: round(remainingTotal),
-      projectedFinalHours: round(loggedTotal + remainingTotal),
+      estimatedHours: round(estTotal), loggedHours: round(loggedTotal),
+      remainingHours: round(remainingTotal), projectedFinalHours: round(loggedTotal + remainingTotal),
       pacingPct: estTotal > 0 ? round(loggedTotal / estTotal * 100) : 0,
-      activeItems: active,
-      unscheduledHours: round(unscheduled),
+      activeItems: active, unscheduledHours: round(unscheduled),
     },
     authoritative: false,
   };
+}
+
+// ─── Ranges ──────────────────────────────────────────────────────────────────
+
+type RangePreset = 'all' | 'ytd' | 'thisQtr' | 'next3' | 'next6' | 'rest' | 'custom';
+const RANGE_LABELS: Record<RangePreset, string> = {
+  all: 'All', ytd: 'YTD', thisQtr: 'This Qtr', next3: 'Next 3', next6: 'Next 6', rest: 'Rest of yr', custom: 'Custom',
+};
+
+function rangeWindow(preset: RangePreset, size: PacingBucketSize, customS: string, customE: string): { from: number | null; to: number | null } {
+  const now = Date.now();
+  const d = new Date(now);
+  const y = d.getUTCFullYear();
+  if (preset === 'all') return { from: null, to: null };
+  if (preset === 'ytd') return { from: Date.UTC(y, 0, 1), to: now };
+  if (preset === 'rest') return { from: bucketStartMs(now, size), to: Date.UTC(y, 11, 31) };
+  if (preset === 'thisQtr') { const q = Math.floor(d.getUTCMonth() / 3); return { from: Date.UTC(y, q * 3, 1), to: Date.UTC(y, q * 3 + 3, 0) }; }
+  if (preset === 'custom') return { from: parseISO(customS), to: parseISO(customE) };
+  const n = preset === 'next3' ? 3 : 6;
+  let cur = bucketStartMs(now, size);
+  for (let i = 0; i < n; i++) cur = nextBucketMs(cur, size);
+  return { from: bucketStartMs(now, size), to: cur };
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 
 const COL = {
   actual: '#10b981', actualOver: '#ef4444', forecast: '#93c5fd',
-  target: '#64748b', grid: '#e2e8f0', text: '#1f2937', muted: '#64748b', bg: '#ffffff',
+  target: '#64748b', grid: '#e2e8f0', text: '#1f2937', muted: '#64748b',
 };
 
 export function renderPacingView(
@@ -236,240 +285,297 @@ export function renderPacingView(
   options: PacingViewOptions = {},
 ): () => void {
   let bucket: PacingBucketSize = options.pacingData?.bucket || options.defaultBucket || 'month';
+  let range: RangePreset = 'next6';
+  let customS = '', customE = '';
+  let measure: 'hours' | 'dollars' = 'hours';
+  let mode: 'period' | 'cumulative' = 'period';
   let expandedKey: string | null = null;
   const show = { actual: true, forecast: true, target: false };
 
   function data(): PacingData {
-    // Authoritative DH data wins; otherwise NG's forecast-only fallback.
     if (options.pacingData && options.pacingData.bucket === bucket) return options.pacingData;
     return computeFromTasks(tasks, bucket);
+  }
+  function rate(d: PacingData): number | undefined { return d.rate ?? options.rate; }
+  function canDollars(d: PacingData): boolean { return !!rate(d); }
+
+  function pill(label: string, on: boolean, onClick: () => void, blue = true): HTMLElement {
+    const cls = CLS_PILL_BTN_BASE + ' ' + (on
+      ? (blue ? CLS_PILL_BTN_ACTIVE_BLUE : CLS_PILL_BTN_ACTIVE_SLATE)
+      : (blue ? CLS_PILL_BTN_IDLE_BLUE : CLS_PILL_BTN_IDLE_SLATE));
+    const b = elc('button', cls, label);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  function group(label: string, ...pills: HTMLElement[]): HTMLElement {
+    const g = elc('div', 'flex items-center gap-1');
+    g.appendChild(elc('span', 'text-[10px] font-bold text-slate-500 uppercase tracking-wide mr-0.5', label));
+    pills.forEach(p => g.appendChild(p));
+    return g;
   }
 
   function render(): void {
     const d = data();
+    const r = rate(d);
+    const useDollars = measure === 'dollars' && !!r;
+    const cum = mode === 'cumulative';
     host.innerHTML = '';
-    const root = el('div', [
-      'height:100%', 'width:100%', 'overflow:auto', 'background:#f8fafc',
-      'font-family:' + FONT, 'color:' + COL.text, 'padding:16px', 'box-sizing:border-box',
-    ].join(';'));
+    const rootCls = 'nga-pacing flex flex-col h-full w-full bg-slate-50 overflow-auto';
+    const root = elc('div', rootCls);
 
-    // ── Header ───────────────────────────────────────────────────────────
-    const head = el('div', 'display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px');
-    const titleWrap = el('div');
-    titleWrap.appendChild(el('div', 'font-size:18px;font-weight:800;letter-spacing:-0.01em', 'Pacing & Forecast'));
+    // ── Control bar (template-aligned) ────────────────────────────────────
+    const bar = elc('div', 'nga-pacing-controls bg-white border-b border-slate-200 px-3 py-2 flex flex-col gap-1.5');
+    const row1 = elc('div', 'flex items-center gap-3 flex-wrap');
+    row1.appendChild(group('Range',
+      ...(['next3', 'next6', 'rest', 'thisQtr', 'ytd', 'all', 'custom'] as RangePreset[]).map(p =>
+        pill(RANGE_LABELS[p], range === p, () => { range = p; expandedKey = null; render(); }))));
+    if (range === 'custom') {
+      const inp = (val: string, set: (v: string) => void) => {
+        const i = document.createElement('input');
+        i.type = 'date'; i.value = val;
+        i.className = 'text-[10px] px-2 py-1 rounded-full border border-slate-200 text-slate-700 focus:border-blue-400 focus:outline-none';
+        i.addEventListener('change', () => { set(i.value); render(); });
+        return i;
+      };
+      const cwrap = elc('div', 'flex items-center gap-1');
+      cwrap.appendChild(inp(customS, v => customS = v));
+      cwrap.appendChild(elc('span', 'text-[10px] text-slate-400', '→'));
+      cwrap.appendChild(inp(customE, v => customE = v));
+      row1.appendChild(cwrap);
+    }
+    row1.appendChild(group('Bucket',
+      ...(['week', 'month', 'quarter'] as PacingBucketSize[]).map(b =>
+        pill(b[0].toUpperCase() + b.slice(1), bucket === b, () => {
+          bucket = b; expandedKey = null;
+          if (options.onBucketChange) options.onBucketChange(b);
+          render();
+        }, false))));
+    bar.appendChild(row1);
+
+    const row2 = elc('div', 'flex items-center gap-3 flex-wrap');
+    const measures: HTMLElement[] = [pill('Hours', measure === 'hours', () => { measure = 'hours'; render(); })];
+    if (canDollars(d)) measures.push(pill('$', measure === 'dollars', () => { measure = 'dollars'; render(); }));
+    row2.appendChild(group('Measure', ...measures));
+    row2.appendChild(group('Mode',
+      pill('Per period', mode === 'period', () => { mode = 'period'; render(); }, false),
+      pill('Cumulative', mode === 'cumulative', () => { mode = 'cumulative'; render(); }, false)));
+    row2.appendChild(group('Series',
+      pill('Actual', show.actual, () => { show.actual = !show.actual; render(); }),
+      pill('Forecast', show.forecast, () => { show.forecast = !show.forecast; render(); }),
+      pill('Target', show.target, () => { show.target = !show.target; render(); })));
+    bar.appendChild(row2);
+    root.appendChild(bar);
+
+    // ── Body ───────────────────────────────────────────────────────────────
+    const body = elc('div', 'flex-1 p-4');
+
+    // header line
     const sub = d.authoritative
-      ? 'Actuals, forecast and target' + (d.scopeLabel ? ' · ' + d.scopeLabel : '')
+      ? 'Actuals · forecast · target' + (d.scopeLabel ? ' — ' + d.scopeLabel : '')
       : 'Forecast preview — remaining hours spread across scheduled dates (live from the board)';
-    titleWrap.appendChild(el('div', 'font-size:12px;color:' + COL.muted + ';margin-top:2px', sub));
-    head.appendChild(titleWrap);
+    const hd = elc('div', 'mb-3');
+    hd.appendChild(elc('div', 'text-lg font-extrabold tracking-tight text-slate-900', 'Pacing & Forecast'));
+    hd.appendChild(elc('div', 'text-xs text-slate-500 mt-0.5', sub + (useDollars ? ' · $ at ' + fmtMoney(r!) + '/hr' : '') + (cum ? ' · cumulative' : '')));
+    body.appendChild(hd);
 
-    // bucket selector
-    const seg = el('div', 'display:flex;gap:0;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden');
-    (['week', 'month', 'quarter'] as PacingBucketSize[]).forEach((b) => {
-      const on = b === bucket;
-      const btn = el('button', [
-        'border:0', 'padding:6px 12px', 'font-size:12px', 'font-weight:600', 'cursor:pointer',
-        'font-family:' + FONT,
-        on ? 'background:#1e293b;color:#fff' : 'background:#fff;color:#475569',
-      ].join(';'), b[0].toUpperCase() + b.slice(1));
-      btn.addEventListener('click', () => {
-        bucket = b; expandedKey = null;
-        if (options.onBucketChange) options.onBucketChange(b);
-        render();
-      });
-      seg.appendChild(btn);
-    });
-    head.appendChild(seg);
-    root.appendChild(head);
-
-    // ── Stat cards ───────────────────────────────────────────────────────
+    // stat cards
     const s = d.summary;
-    const cards = el('div', 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px');
+    const cards = elc('div', 'grid gap-2.5 mb-4');
+    cards.setAttribute('style', 'grid-template-columns:repeat(auto-fit,minmax(120px,1fr))');
+    const val = (h: number) => useDollars ? fmtMoney(h * r!) : fmtH(h);
     const stat = (label: string, value: string, tone?: string) => {
-      const c = el('div', 'background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px');
-      c.appendChild(el('div', 'font-size:20px;font-weight:800;' + (tone ? 'color:' + tone : ''), value));
-      c.appendChild(el('div', 'font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:' + COL.muted + ';margin-top:2px', label));
+      const c = elc('div', 'bg-white border border-slate-200 rounded-xl px-3 py-2.5');
+      c.appendChild(el('div', 'font-size:20px;font-weight:800;line-height:1.1' + (tone ? ';color:' + tone : ''), value));
+      c.appendChild(elc('div', 'text-[10px] uppercase tracking-wide text-slate-500 mt-0.5', label));
       return c;
     };
-    const dollars = (h: number) => d.rate ? ' · $' + (h * d.rate).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '';
-    cards.appendChild(stat('Logged', fmtH(s.loggedHours) + dollars(s.loggedHours)));
-    cards.appendChild(stat('Estimated', fmtH(s.estimatedHours) + dollars(s.estimatedHours)));
-    cards.appendChild(stat('Remaining', fmtH(s.remainingHours), '#2563eb'));
-    cards.appendChild(stat('Projected final', fmtH(s.projectedFinalHours)));
+    cards.appendChild(stat('Logged', val(s.loggedHours)));
+    cards.appendChild(stat('Estimated', val(s.estimatedHours)));
+    cards.appendChild(stat('Remaining', val(s.remainingHours), '#2563eb'));
+    cards.appendChild(stat('Projected final', val(s.projectedFinalHours)));
     cards.appendChild(stat('Pacing', s.pacingPct + '%', s.pacingPct > 100 ? COL.actualOver : '#10b981'));
     cards.appendChild(stat('Active items', String(s.activeItems)));
-    if (s.unscheduledHours > 0) {
-      cards.appendChild(stat('Unscheduled', fmtH(s.unscheduledHours), '#d97706'));
-    }
-    root.appendChild(cards);
+    if (s.unscheduledHours > 0) cards.appendChild(stat('Unscheduled', val(s.unscheduledHours), '#d97706'));
+    body.appendChild(cards);
 
-    // ── Unscheduled callout (board-sizing signal) ─────────────────────────
     if (s.unscheduledHours > 0) {
-      const warn = el('div', 'background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:#92400e');
-      warn.textContent = '⚠ ' + fmtH(s.unscheduledHours) + ' of work has an estimate but no scheduled dates — the forecast can\'t place it. Size + schedule those items to make the forecast complete.';
-      root.appendChild(warn);
+      const warn = elc('div', 'bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-xs text-amber-800');
+      warn.textContent = '⚠ ' + fmtH(s.unscheduledHours) + ' of work has an estimate but no scheduled dates — the forecast can\'t place it. Size + schedule those items to complete the picture.';
+      body.appendChild(warn);
     }
 
-    // ── Legend / series toggles ───────────────────────────────────────────
-    const legend = el('div', 'display:flex;gap:14px;margin-bottom:8px;flex-wrap:wrap');
-    const toggle = (key: 'actual' | 'forecast' | 'target', label: string, color: string) => {
-      const on = show[key];
-      const item = el('button', [
-        'display:flex', 'align-items:center', 'gap:6px', 'border:0', 'background:none',
-        'cursor:pointer', 'font-family:' + FONT, 'font-size:12px', 'padding:2px 4px',
-        'opacity:' + (on ? '1' : '0.4'), 'color:' + COL.text,
-      ].join(';'));
-      const sw = el('span', 'width:12px;height:12px;border-radius:3px;background:' + color + (on ? '' : ';filter:grayscale(1)'));
-      item.appendChild(sw);
-      item.appendChild(el('span', '', label));
-      item.addEventListener('click', () => { show[key] = !show[key]; render(); });
-      return item;
-    };
-    legend.appendChild(toggle('actual', 'Actual (logged)', COL.actual));
-    legend.appendChild(toggle('forecast', 'Forecast', COL.forecast));
-    legend.appendChild(toggle('target', 'Target (estimate)', COL.target));
-    root.appendChild(legend);
-
-    // ── Chart (SVG) ───────────────────────────────────────────────────────
-    const chart = buildChart(d, show, expandedKey, (key) => {
-      expandedKey = expandedKey === key ? null : key;
-      render();
+    // chart (range-filtered)
+    const win = rangeWindow(range, bucket, customS, customE);
+    const visible = d.buckets.filter(b => {
+      const ms = b.startMs ?? keyToMs(b.key);
+      if (win.from != null && ms < win.from) return false;
+      if (win.to != null && ms > win.to) return false;
+      return true;
     });
-    root.appendChild(chart);
+    body.appendChild(buildChart(visible, { show, useDollars, rate: r || 0, cum, expandedKey }, (key) => {
+      expandedKey = expandedKey === key ? null : key; render();
+    }));
 
-    // ── Drill-down panel ──────────────────────────────────────────────────
+    // drill-down
     if (expandedKey) {
-      const b = d.buckets.find(x => x.key === expandedKey);
-      if (b) root.appendChild(buildDrilldown(b, d, options));
+      const b = visible.find(x => x.key === expandedKey) || d.buckets.find(x => x.key === expandedKey);
+      if (b) body.appendChild(buildDrilldown(b, { useDollars, rate: r || 0 }, options));
     } else {
-      root.appendChild(el('div', 'font-size:11px;color:' + COL.muted + ';margin-top:10px;text-align:center',
-        'Click a bar to see the work items that make up that period.'));
+      body.appendChild(elc('div', 'text-[11px] text-slate-400 mt-2.5 text-center',
+        'Click a bar to break the period down into its work items.'));
     }
 
+    root.appendChild(body);
     host.appendChild(root);
   }
 
   render();
-  return () => { host.innerHTML = ''; };
+  return () => {
+    try { options.onItemHover?.(null, { x: 0, y: 0 }); } catch { /* ignore */ }
+    host.innerHTML = '';
+  };
 }
 
-// ─── Chart builder ───────────────────────────────────────────────────────────
+// ─── Chart ───────────────────────────────────────────────────────────────────
 
-function buildChart(
-  d: PacingData,
-  show: { actual: boolean; forecast: boolean; target: boolean },
-  expandedKey: string | null,
-  onBucketClick: (key: string) => void,
-): HTMLElement {
-  const wrap = el('div', 'background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px');
-  const buckets = d.buckets;
-  const W = 900, H = 280, padL = 44, padB = 34, padT = 10, padR = 10;
+interface ChartOpts { show: { actual: boolean; forecast: boolean; target: boolean }; useDollars: boolean; rate: number; cum: boolean; expandedKey: string | null; }
+
+function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (key: string) => void): HTMLElement {
+  const wrap = elc('div', 'bg-white border border-slate-200 rounded-xl p-3');
+  if (buckets.length === 0) {
+    wrap.appendChild(elc('div', 'text-xs text-slate-400 text-center py-10', 'No periods in this range.'));
+    return wrap;
+  }
+  const mul = o.useDollars ? (o.rate || 1) : 1;
+  // cumulative running sums
+  let cumA = 0, cumF = 0, cumT = 0;
+  const rows = buckets.map((b) => {
+    cumA += b.actual; cumF += b.forecast; cumT += b.target;
+    return {
+      b,
+      actual: (o.cum ? cumA : b.actual) * mul,
+      forecast: (o.cum ? cumF : b.forecast) * mul,
+      target: (o.cum ? cumT : b.target) * mul,
+    };
+  });
+
+  const W = 920, H = 300, padL = 52, padB = 34, padT = 10, padR = 10;
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const n = Math.max(1, buckets.length);
-  const slot = plotW / n;
-  const barW = Math.min(46, slot * 0.62);
-
+  const n = rows.length, slot = plotW / n, barW = Math.min(46, slot * 0.62);
   let maxV = 1;
-  for (const b of buckets) {
-    const stacked = (show.actual ? b.actual : 0) + (show.forecast ? b.forecast : 0);
-    maxV = Math.max(maxV, stacked, show.target ? b.target : 0);
+  for (const r of rows) {
+    maxV = Math.max(maxV, (o.show.actual ? r.actual : 0) + (o.show.forecast ? r.forecast : 0), o.show.target ? r.target : 0);
   }
   const niceMax = niceCeil(maxV);
   const y = (v: number) => padT + plotH - (v / niceMax) * plotH;
+  const fmtAxis = (v: number) => o.useDollars ? '$' + (v >= 1000 ? round(v / 1000) + 'k' : round(v)) : round(v) + '';
 
   const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: 'auto', style: 'display:block' });
-
-  // gridlines + y labels
   const ticks = 4;
   for (let i = 0; i <= ticks; i++) {
-    const val = niceMax * i / ticks;
-    const yy = y(val);
+    const v = niceMax * i / ticks, yy = y(v);
     svg.appendChild(svgEl('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: COL.grid, 'stroke-width': 1 }));
     const lbl = svgEl('text', { x: padL - 6, y: yy + 3, 'text-anchor': 'end', 'font-size': 9, fill: COL.muted, 'font-family': FONT });
-    lbl.textContent = String(round(val));
-    svg.appendChild(lbl);
+    lbl.textContent = fmtAxis(v); svg.appendChild(lbl);
   }
 
-  buckets.forEach((b, i) => {
-    const cx = padL + slot * i + slot / 2;
-    const x = cx - barW / 2;
+  rows.forEach((r, i) => {
+    const cx = padL + slot * i + slot / 2, x = cx - barW / 2;
+    if (r.b.isCurrent) svg.appendChild(svgEl('rect', { x: padL + slot * i, y: padT, width: slot, height: plotH, fill: '#6366f1', opacity: 0.06 }));
     let top = padT + plotH;
-    // actual (bottom)
-    if (show.actual && b.actual > 0) {
-      const h = (b.actual / niceMax) * plotH;
-      top -= h;
-      svg.appendChild(svgEl('rect', {
-        x, y: top, width: barW, height: h, rx: 2,
-        fill: b.actual > b.target && b.target > 0 ? COL.actualOver : COL.actual,
-      }));
+    if (o.show.actual && r.actual > 0) {
+      const h = (r.actual / niceMax) * plotH; top -= h;
+      svg.appendChild(svgEl('rect', { x, y: top, width: barW, height: h, rx: 2, fill: r.actual > r.target && r.target > 0 ? COL.actualOver : COL.actual }));
     }
-    // forecast (stacked on top)
-    if (show.forecast && b.forecast > 0) {
-      const h = (b.forecast / niceMax) * plotH;
-      top -= h;
-      const r = svgEl('rect', { x, y: top, width: barW, height: h, rx: 2, fill: COL.forecast });
-      if (!b.isPast) r.setAttribute('opacity', '0.92');
-      svg.appendChild(r);
+    if (o.show.forecast && r.forecast > 0) {
+      const h = (r.forecast / niceMax) * plotH; top -= h;
+      const rc = svgEl('rect', { x, y: top, width: barW, height: h, rx: 2, fill: COL.forecast });
+      if (!r.b.isPast) rc.setAttribute('opacity', '0.92');
+      svg.appendChild(rc);
     }
-    // target marker (line across the slot)
-    if (show.target && b.target > 0) {
-      const ty = y(b.target);
+    if (o.show.target && r.target > 0) {
+      const ty = y(r.target);
       svg.appendChild(svgEl('line', { x1: x - 3, y1: ty, x2: x + barW + 3, y2: ty, stroke: COL.target, 'stroke-width': 2, 'stroke-dasharray': '4 2' }));
     }
-    // current-period marker
-    if (b.isCurrent) {
-      svg.appendChild(svgEl('rect', { x: padL + slot * i, y: padT, width: slot, height: plotH, fill: '#6366f1', opacity: 0.06 }));
-    }
-    // hit area + selection outline
-    const hit = svgEl('rect', {
-      x: padL + slot * i, y: padT, width: slot, height: plotH,
-      fill: 'transparent', cursor: 'pointer',
-    });
-    hit.addEventListener('click', () => onBucketClick(b.key));
+    const hit = svgEl('rect', { x: padL + slot * i, y: padT, width: slot, height: plotH, fill: 'transparent', cursor: 'pointer' });
+    const tip = (o.useDollars ? '$' + round((r.actual + r.forecast)) : round(r.actual + r.forecast) + 'h');
+    hit.appendChild(svgEl('title', {})).textContent = r.b.label + ' — ' + tip + (o.cum ? ' (cumulative)' : '');
+    hit.addEventListener('click', () => onBucketClick(r.b.key));
     svg.appendChild(hit);
-    if (b.key === expandedKey) {
-      svg.appendChild(svgEl('rect', { x: padL + slot * i + 1, y: padT, width: slot - 2, height: plotH, fill: 'none', stroke: '#6366f1', 'stroke-width': 1.5, rx: 4 }));
-    }
-    // x label (thin out if crowded)
+    if (r.b.key === o.expandedKey) svg.appendChild(svgEl('rect', { x: padL + slot * i + 1, y: padT, width: slot - 2, height: plotH, fill: 'none', stroke: '#6366f1', 'stroke-width': 1.5, rx: 4 }));
     if (n <= 16 || i % Math.ceil(n / 16) === 0) {
-      const lbl = svgEl('text', { x: cx, y: H - padB + 14, 'text-anchor': 'middle', 'font-size': 9, fill: b.isCurrent ? '#4f46e5' : COL.muted, 'font-family': FONT, 'font-weight': b.isCurrent ? 700 : 400 });
-      lbl.textContent = b.label;
-      svg.appendChild(lbl);
+      const lbl = svgEl('text', { x: cx, y: H - padB + 14, 'text-anchor': 'middle', 'font-size': 9, fill: r.b.isCurrent ? '#4f46e5' : COL.muted, 'font-family': FONT, 'font-weight': r.b.isCurrent ? 700 : 400 });
+      lbl.textContent = r.b.label; svg.appendChild(lbl);
     }
   });
-
   wrap.appendChild(svg);
   return wrap;
 }
 
-function buildDrilldown(b: PacingBucket, d: PacingData, options: PacingViewOptions): HTMLElement {
-  const panel = el('div', 'background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-top:12px;overflow:hidden');
-  const head = el('div', 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:#f1f5f9;border-bottom:1px solid #e2e8f0');
+// ─── Drill-down (rich breakout) ──────────────────────────────────────────────
+
+function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number }, options: PacingViewOptions): HTMLElement {
+  const panel = elc('div', 'bg-white border border-slate-200 rounded-xl mt-3 overflow-hidden');
   const total = b.actual + b.forecast;
-  head.appendChild(el('div', 'font-weight:700;font-size:13px', b.label + ' — ' + fmtH(round(total)) + (d.rate ? ' · $' + round(total * d.rate).toLocaleString('en-US') : '')));
+  const head = elc('div', 'flex items-center justify-between gap-2 px-4 py-2.5 bg-slate-100 border-b border-slate-200');
+  const tv = o.useDollars ? fmtMoney(total * o.rate) : fmtH(total);
+  head.appendChild(elc('div', 'font-bold text-sm text-slate-800', b.label + ' — ' + tv + ' · ' + b.items.length + ' item' + (b.items.length === 1 ? '' : 's')));
   if (options.onOpenReport) {
-    const rpt = el('button', 'border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:' + FONT, 'Open report ↗');
+    const rpt = elc('button', CLS_PILL_BTN_BASE + ' ' + CLS_PILL_BTN_IDLE_SLATE, 'Open report ↗');
     rpt.addEventListener('click', () => options.onOpenReport!({ bucketKey: b.key, taskIds: b.items.map(i => i.id) }));
     head.appendChild(rpt);
   }
   panel.appendChild(head);
 
   if (b.items.length === 0) {
-    panel.appendChild(el('div', 'padding:14px;font-size:12px;color:' + COL.muted, 'No itemized work in this period.'));
+    panel.appendChild(elc('div', 'p-4 text-xs text-slate-500', 'No itemized work in this period.'));
     return panel;
   }
+
+  // column header
+  const fmtv = (h?: number) => h == null ? '—' : (o.useDollars ? fmtMoney(h * o.rate) : fmtH(h));
+  const hrow = elc('div', 'grid items-center gap-2 px-4 py-1.5 border-b border-slate-100 text-[9px] font-bold uppercase tracking-wide text-slate-400');
+  const cols = 'grid-template-columns:minmax(0,2.4fr) 64px 54px 60px 60px 70px 64px';
+  hrow.setAttribute('style', cols);
+  ['Work item', 'This period', '% of item', 'Est', 'Logged', 'Remaining', '% used'].forEach((c, i) =>
+    hrow.appendChild(elc('div', i === 0 ? '' : 'text-right', c)));
+  panel.appendChild(hrow);
+
   const maxH = Math.max(...b.items.map(i => i.hours), 1);
   for (const it of b.items) {
-    const row = el('div', 'display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid #f1f5f9;cursor:' + (options.onOpenItem ? 'pointer' : 'default'));
-    const name = el('div', 'flex:1;font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis', it.name);
-    const track = el('div', 'width:120px;height:8px;background:#f1f5f9;border-radius:4px;overflow:hidden;flex-shrink:0');
+    const row = elc('div', 'grid items-center gap-2 px-4 py-2 border-b border-slate-50 ' + (options.onOpenItem ? 'cursor-pointer hover:bg-slate-50' : ''));
+    row.setAttribute('style', cols);
+
+    // name cell (name + bar + secondary meta line)
+    const nameCell = elc('div', 'min-w-0');
+    const nameLine = elc('div', 'flex items-center gap-2 min-w-0');
+    nameLine.appendChild(elc('div', 'text-xs text-slate-800 truncate flex-1 min-w-0', it.name));
+    const track = elc('div', 'w-14 h-1.5 bg-slate-100 rounded-full overflow-hidden flex-shrink-0');
     track.appendChild(el('div', 'height:100%;background:#93c5fd;width:' + round(it.hours / maxH * 100) + '%'));
-    const hrs = el('div', 'width:48px;text-align:right;font-size:12px;font-weight:600;flex-shrink:0', fmtH(it.hours));
-    row.appendChild(name); row.appendChild(track); row.appendChild(hrs);
-    if (options.onOpenItem) {
-      row.addEventListener('mouseenter', () => row.style.background = '#f8fafc');
-      row.addEventListener('mouseleave', () => row.style.background = '');
-      row.addEventListener('click', () => options.onOpenItem!(it.id));
+    nameLine.appendChild(track);
+    nameCell.appendChild(nameLine);
+    const meta = [it.group, it.assignee, it.status,
+      (it.startDate && it.endDate) ? (it.startDate + ' → ' + it.endDate) : null].filter(Boolean).join(' · ');
+    if (meta) nameCell.appendChild(elc('div', 'text-[10px] text-slate-400 truncate mt-0.5', meta));
+    row.appendChild(nameCell);
+
+    const cell = (txt: string, tone?: string) => {
+      const c = elc('div', 'text-right text-xs ' + (tone || 'text-slate-700'));
+      c.textContent = txt; return c;
+    };
+    row.appendChild(cell(o.useDollars ? fmtMoney(it.hours * o.rate) : fmtH(it.hours), 'text-right text-xs font-semibold text-slate-900'));
+    row.appendChild(cell(it.pctOfItem != null ? it.pctOfItem + '%' : '—', 'text-right text-xs text-slate-500'));
+    row.appendChild(cell(fmtv(it.estimatedHours)));
+    row.appendChild(cell(fmtv(it.loggedHours)));
+    row.appendChild(cell(fmtv(it.remainingHours)));
+    row.appendChild(cell(it.budgetUsedPct != null ? it.budgetUsedPct + '%' : '—',
+      it.budgetUsedPct != null && it.budgetUsedPct > 100 ? 'text-right text-xs font-semibold text-red-600' : 'text-right text-xs text-slate-500'));
+
+    // interactions — host owns navigation + tooltips
+    if (options.onOpenItem) row.addEventListener('click', () => options.onOpenItem!(it.id));
+    if (options.onItemHover) {
+      row.addEventListener('mousemove', (e) => options.onItemHover!(it.id, { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY }));
+      row.addEventListener('mouseleave', () => options.onItemHover!(null, { x: 0, y: 0 }));
     }
     panel.appendChild(row);
   }

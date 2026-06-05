@@ -2630,9 +2630,14 @@ export class IIFEApp {
         // dollars / dated actuals / scoping / grading arrive once DH passes a
         // PacingData object (see docs/dispatch — DH→NG pacing contract).
         renderPacingView(ganttHost, allTasks, {
+          // Drill-down item click reuses the existing host nav contract.
           onOpenItem: options.onItemClick
             ? (taskId) => options.onItemClick!(taskId)
             : undefined,
+          // Optional blended $/hr so the $ measure lights up without full
+          // DH pacingData (host passes config.rate). DH's PacingData.rate
+          // overrides this once the engine is wired.
+          rate: (options.config as { rate?: number } | undefined)?.rate,
         });
       } else {
         const labelMap: Record<string, string> = {

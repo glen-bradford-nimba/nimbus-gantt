@@ -62,11 +62,11 @@ export interface ViewModeDef { id: ViewMode; label: string; icon: string; }
 export const CLOUD_NIMBUS_VIEW_MODES: ViewModeDef[] = [
   { id: 'gantt',    label: 'Gantt',    icon: '\u25A4' },
   { id: 'list',     label: 'List',     icon: '\u2630' },
+  { id: 'pacing',   label: 'Pacing',   icon: '\u25B0' },
   { id: 'treemap',  label: 'Treemap',  icon: '\u25A6' },
   { id: 'bubbles',  label: 'Bubbles',  icon: '\u25C9' },
   { id: 'calendar', label: 'Calendar', icon: '\u25A5' },
   { id: 'flow',     label: 'Flow',     icon: '\u27FF' },
-  { id: 'pacing',   label: 'Pacing',   icon: '\u25B0' },
 ];
 
 /**
@@ -87,11 +87,11 @@ export const CLOUD_NIMBUS_VIEW_MODES: ViewModeDef[] = [
 export const CLOUD_NIMBUS_VIEWS: ViewMode[] = [
   'gantt',
   'list',
+  'pacing',
   'treemap',
   'bubbles',
   'calendar',
   'flow',
-  'pacing',
 ];
 
 /* ── Category display — drives FilterBar color legend ──────────────────── */

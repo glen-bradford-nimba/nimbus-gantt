@@ -37,26 +37,52 @@ verbatim (and marks it authoritative). Shape (exported from
 `renderers/pacing.ts`):
 
 ```ts
-interface PacingBucketItem { id: string; name: string; hours: number; }
+interface PacingBucketItem {
+  id: string; name: string;
+  hours: number;            // hours landing in THIS bucket
+  pctOfItem?: number;       // this bucket ÷ the item's spread total (0–100)
+  estimatedHours?: number; loggedHours?: number; remainingHours?: number;
+  budgetUsedPct?: number;   // logged ÷ est (0–100+)
+  startDate?: string; endDate?: string;
+  assignee?: string; status?: string; group?: string;   // for breakout meta + tooltips
+}
 interface PacingBucket {
   key: string;        // '2026-06' | '2026-Q2' | 'W2026-06-01'
   label: string;      // 'Jun 26'
+  startMs?: number;    // bucket start (omit → NG parses from key)
   actual: number;     // logged hours in this period  (DH-only: dated WorkLogs)
   forecast: number;   // projected remaining hours landing here
   target: number;     // planned/estimate hours for this period
   isPast: boolean; isCurrent: boolean;
-  items: PacingBucketItem[];   // composition for the drill-down
+  items: PacingBucketItem[];   // composition for the rich drill-down
 }
 interface PacingData {
   buckets: PacingBucket[];
   bucket: 'week'|'month'|'quarter';
   summary: { estimatedHours; loggedHours; remainingHours; projectedFinalHours;
              pacingPct; activeItems; unscheduledHours };
-  rate?: number;      // $/hr → NG shows $ as secondary unit
+  rate?: number;      // $/hr → NG shows the $ measure
   currency?: string;  scopeLabel?: string;  // e.g. client name
   authoritative?: boolean;
 }
 ```
+
+**Client-facing cuts NG renders (all client-side once it has the data):**
+Range (Next 3 / Next 6 / Rest-of-yr / This-Qtr / YTD / All / **Custom
+start→end**) · Bucket (Week/Month/Quarter) · Measure (Hours / **$** when a
+rate is present) · Mode (Per-period / **Cumulative** burn-up) · Series toggles
+(Actual / Forecast / Target). Drill-down breakout columns: This-period · **%
+of item** · Est · Logged · Remaining · % used, with a meta line
+(group · assignee · status · dates).
+
+**Interaction hooks (DH wires these — host owns nav + tooltips):**
+- `onOpenItem(taskId)` — drill-down row click → navigate to the work item.
+- `onItemHover(taskId|null, {x,y})` — row mousemove/leave → host renders a
+  tooltip/mouseover (DH's richer detail).
+- `onOpenReport({bucketKey, taskIds})` — per-bucket "Open report ↗".
+- `rate` (or `config.rate`) — blended $/hr to enable the $ measure before full
+  `pacingData`.
+NG never navigates itself (no URLs) — it emits, DH routes.
 
 **Why this split is right:** only DH can produce `actual` (dated WorkLogs),
 `rate`/`$`, `scopeLabel` (client scoping), and the grading history. NG owns
