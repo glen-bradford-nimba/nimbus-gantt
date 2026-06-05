@@ -66,6 +66,7 @@ export const CLOUD_NIMBUS_VIEW_MODES: ViewModeDef[] = [
   { id: 'bubbles',  label: 'Bubbles',  icon: '\u25C9' },
   { id: 'calendar', label: 'Calendar', icon: '\u25A5' },
   { id: 'flow',     label: 'Flow',     icon: '\u27FF' },
+  { id: 'pacing',   label: 'Pacing',   icon: '\u25B0' },
 ];
 
 /**
@@ -90,6 +91,7 @@ export const CLOUD_NIMBUS_VIEWS: ViewMode[] = [
   'bubbles',
   'calendar',
   'flow',
+  'pacing',
 ];
 
 /* ── Category display — drives FilterBar color legend ──────────────────── */

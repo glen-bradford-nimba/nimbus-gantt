@@ -1,6 +1,22 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.194.2 app pipeline feeds core hours-contract keys
+**📣 Latest cut: 0.195.0 Pacing/Forecast subtab (2026-06-05).** New `pacing`
+view-mode in the app (alongside Gantt/List/Treemap/Bubbles/Calendar/Flow) —
+the in-gantt "budget" screen. Reads the **same task state the Gantt draws**,
+so board edits flow into it. Interactive: Week/Month/Quarter bucket selector,
+Actual+Forecast stacked bars, series toggles, **click a bucket → drill into
+the work items that compose it**, summary cards incl. an **Unscheduled**
+(estimate-but-no-dates) signal. Architecture (decided across NG/DH/MF): **DH
+is the forecast brain, NG is the screen** — DH passes a render-ready
+`PacingData` (dated actuals + $ + scope + grading); NG draws it. Standalone,
+NG falls back to a forecast-only preview (remaining-spread on the scheduled
+span). **APP-bundle** change, md5 `3581a020128deebdc6b3657853333bda` (core
+unchanged from 0.194.1). The DH→NG contract + DH action items are in
+**`docs/dispatch-pacing-view-0195.md`** — this is the piece to review with DH.
+The `mountConfig.pacingData` pass-through is intentionally **not wired yet**
+(renderer + fallback ship first; add the option once the contract's confirmed).
+
+**0.194.2 app pipeline feeds core hours-contract keys
 (2026-06-05).** The **app** adapter (`packages/app/src/pipeline.ts`) emitted
 hours under its internal `metadata.hoursHigh`/`hoursLogged` rollup keys but
 NOT the NG core contract keys, so the 0.194.0 sizing/actuals tooltip block

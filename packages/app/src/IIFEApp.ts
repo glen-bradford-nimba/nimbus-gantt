@@ -31,6 +31,7 @@ import { startDragReparent } from './dragReparent';
 import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/AuditListView.vanilla';
 import { renderTreemap } from './renderers/treemap';
 import { renderBubble } from './renderers/bubble';
+import { renderPacingView } from './renderers/pacing';
 
 import { resolveTemplate } from './templates/resolver';
 import { INITIAL_STATE, reduceAppState } from './templates/state';
@@ -2620,6 +2621,19 @@ export class IIFEApp {
           state.viewMode === 'treemap' ? renderTreemap : renderBubble,
           options.config?.colorMap || { ...STAGE_COLORS, ...STAGE_TO_CATEGORY_COLOR },
         );
+      } else if (state.viewMode === 'pacing') {
+        // 0.195.0 — Pacing/Forecast subtab. NG renders; DH is the brain.
+        // With no host-supplied pacingData, NG draws a FORECAST-ONLY preview
+        // by spreading each task's remaining hours across its scheduled span
+        // (reads the same task state the Gantt does, so board edits flow in).
+        // The drill-down "open item" reuses the existing onItemClick contract;
+        // dollars / dated actuals / scoping / grading arrive once DH passes a
+        // PacingData object (see docs/dispatch — DH→NG pacing contract).
+        renderPacingView(ganttHost, allTasks, {
+          onOpenItem: options.onItemClick
+            ? (taskId) => options.onItemClick!(taskId)
+            : undefined,
+        });
       } else {
         const labelMap: Record<string, string> = {
           calendar: 'Calendar', flow: 'Flow',
