@@ -32,10 +32,11 @@ grading); NG draws it. Standalone, NG falls back to a forecast-only preview.
 md5 **`0945c97acc4906da507d4c4d2dde6474`** (core unchanged from 0.194.1 — do
 NOT re-copy core). Interaction callbacks (`onItemClick` / `onItemHover` /
 `onOpenReport`) + per-client `config.pacing` ({defaults, controls}) are wired.
-Branch `feat/0.195.0-pacing-view`, **PR #27 open (unmerged)** — review with DH.
-The `mountConfig.pacingData` data-object pass-through is intentionally **not
+**Merged to master at `dfcdc23` (PR #27); md5 above is reproducible from a
+clean `packages/app` build of master — DH/CN cut from master.** The
+`mountConfig.pacingData` data-object pass-through is intentionally **not
 wired yet** (renderer + fallback + config + callbacks ship first; add the
-data pass-through once the contract's confirmed). Demo:
+data pass-through once DH confirms the contract). Demo:
 `packages/demo/src/pacing.html` (`npx vite --config packages/demo/vite.config.ts`
 → `/pacing.html`; DH/MF preset toggle in the banner).
 
