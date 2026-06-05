@@ -21,11 +21,14 @@ report) are host-rendered. Brings the two dead FilterBar buttons into it:
 - CORE `nimbus-gantt.iife.js` → `nimbusgantt.resource`, md5 **`72b9dc2d41309462c8839b97fa5659e5`**
   (adds public `emit`/`on`; required for Auto-Schedule to run).
 - APP `nimbus-gantt-app.iife.js` → `nimbusganttapp.resource`, md5 **`d10ae855feb3b13f12a5303bcca296b3`**.
-Both must be re-copied. Branch `feat/0.196.0-ng-ui-conventions-modals`,
-**PR open (unmerged)** — review. Verification: my code tsc-clean (6 pre-existing
+Both must be re-copied. **Merged to master at `b900397` (PR #28); both md5s
+reproduce from a clean build of master.** Verification: tsc-clean (6 pre-existing
 errors unchanged vs master), core+app build clean, vitest 155/155, modal +
-`autoSchedule:run` present in the app bundle. Demo: the buttons are live in
-`pacing.html` (and any cloudnimbus mount).
+`autoSchedule:run` present in the app bundle.
+**DH/CN before release:** visually confirm the two modals render (Cowork/click)
+— verified at the code level, but the rendered modals were not DOM-checked here.
+Auto-Schedule overlaps DH's existing `deliveryGanttAutoScheduleModal` →
+converge-or-keep is a DH integration call. Demo: buttons live in `pacing.html`.
 
 **0.195.0 Pacing/Forecast subtab (2026-06-05).** New `pacing`
 view-mode in the app (alongside Gantt/List/Treemap/Bubbles/Calendar/Flow) —
