@@ -88,9 +88,10 @@ callbacks. DH CC wires TRACK B (live Apex records) against this contract.
 
 | Field | Value |
 |---|---|
-| Branch | `master` (merged `a06c26f`, PR #25) |
-| Commit SHA (source — latest) | `3c86acb` *(0.194.1 tooltip header honors title)* |
-| Commit subject | `fix(0.194.1): tooltip header honors task.title (matches bar-label convention)` |
+| Branch | `master` (merged `6247cb4`, PR #26) |
+| Commit SHA (source — latest) | `<this commit>` *(0.194.2 app pipeline hours-contract keys)* |
+| Commit subject | `fix(0.194.2): app pipeline emits core hours-contract keys (lights up sizing block)` |
+| 0.194.2 app pipeline hours (APP md5 `dd3b75e9…`) | merged `6247cb4` |
 | 0.194.1 tooltip header→title (core md5 `65ba5d62…`) | `3c86acb` |
 | 0.194.0 Tooltip v2 (core md5 `ecf538f9…`) | `f79121b` |
 | 0.193.0 tooltip + hit-test parity (core md5 `a0e38a04…`) | `14f669b` |
