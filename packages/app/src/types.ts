@@ -207,6 +207,15 @@ export interface NimbusGanttEngine {
  *  any Salesforce URLs. */
 export type AppMode = 'embedded' | 'fullscreen';
 
+/** 0.196 — a team capacity entry (matches the template's CLOUD_NIMBUS_POOL
+ *  shape). DH supplies these from Salesforce users / network entities. */
+export interface TeamMember {
+  name: string;
+  role?: string;
+  hoursPerMonth: number;
+  active?: boolean;
+}
+
 export interface MountOptions {
   tasks: NormalizedTask[];
   /** 0.185.27 — initial dependency edges rendered as arrows between bars.
@@ -352,6 +361,26 @@ export interface MountOptions {
   /** Pacing (0.195) — fired by a bucket's "Open report ↗" action. Host owns
    *  the destination (e.g. a Salesforce report filtered to those task IDs). */
   onOpenReport?: (ctx: { bucketKey: string; taskIds: string[] }) => void;
+
+  /** 0.196 — host-supplied team capacity pool. Overrides the template default
+   *  (CLOUD_NIMBUS_POOL) for the Team modal + capacity display. DH feeds this
+   *  from Salesforce (users / network entities). */
+  team?: TeamMember[];
+
+  /** 0.196 — Auto-Schedule host override. When provided, NG hands off (the
+   *  scheduler may run server-side, e.g. DH's capacity-aware ETA service) and
+   *  does NOT open its own modal. When absent, NG runs its in-bundle scheduler
+   *  so web/demo still work. See docs/ng-ui-conventions.md (dual pattern). */
+  onAutoSchedule?: (ctx: { taskCount: number }) => void;
+
+  /** 0.196 — Team/capacity host override. When provided, NG hands off (the
+   *  team lives in Salesforce); host pops its own capacity source. When absent,
+   *  NG opens its own capacity modal over `team` / the template default. */
+  onEditTeam?: () => void;
+
+  /** 0.196 — fired when NG's own Team modal saves an edited capacity pool, so
+   *  the host can persist it. Not fired when `onEditTeam` is provided. */
+  onTeamChange?: (team: TeamMember[]) => void;
 
   /** Fired when `onItemEdit` rejects. Host surfaces its own UX (e.g.
    *  Lightning ShowToastEvent in Salesforce). Library stays UI-agnostic.

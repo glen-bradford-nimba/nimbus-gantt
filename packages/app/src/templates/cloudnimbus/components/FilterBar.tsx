@@ -74,11 +74,13 @@ export function FilterBar({ config, state, dispatch, data }: SlotProps) {
           );
         })}
         <Sep />
-        <button type="button" className={CLS_TEAM_PILL}>
+        {/* 0.196.0 — NG-owned Team + Auto-Schedule modals (intent intercepted
+            in IIFEApp.dispatch()). Keep in sync with FilterBar.vanilla.ts. */}
+        <button type="button" className={CLS_TEAM_PILL} onClick={() => dispatch({ type: 'TEAM_OPEN' })}>
           Team <span>{CLOUD_NIMBUS_POOL.length}×</span>
         </button>
         <span className={CLS_CAPACITY_TEXT}>{totalH}h/mo</span>
-        <button type="button" className={CLS_AUTO_SCHED_BTN}>
+        <button type="button" className={CLS_AUTO_SCHED_BTN} onClick={() => dispatch({ type: 'AUTOSCHEDULE_OPEN' })}>
           Auto-Schedule
         </button>
         <div className="flex-1" />

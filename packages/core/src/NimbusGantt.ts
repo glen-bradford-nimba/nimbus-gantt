@@ -920,6 +920,26 @@ export class NimbusGantt {
     this.plugins.push(plugin);
   }
 
+  /**
+   * Public event trigger. Lets a host (or the app shell) fire a plugin event
+   * on the internal bus — e.g. `gantt.emit('autoSchedule:run', cb)` to run the
+   * AutoSchedulePlugin on demand. Before 0.196.0 plugin events like
+   * `autoSchedule:run` had no public trigger, so a dormant-installed
+   * AutoSchedulePlugin (autoRun:false) could never be invoked from outside.
+   */
+  emit(event: string, ...args: unknown[]): void {
+    this.eventBus.emit(event, ...args);
+  }
+
+  /**
+   * Public event subscription — the read side of `emit`. Returns an
+   * unsubscribe function. Hosts can listen for engine/plugin events
+   * (e.g. lifecycle, plugin results) without reaching into internals.
+   */
+  on(event: string, handler: (...args: unknown[]) => void): () => void {
+    return this.eventBus.on(event, handler);
+  }
+
   // ─── Lifecycle API ──────────────────────────────────────────────────────
 
   render(): void {

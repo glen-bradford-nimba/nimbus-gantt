@@ -32,6 +32,8 @@ import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/
 import { renderTreemap } from './renderers/treemap';
 import { renderBubble } from './renderers/bubble';
 import { renderPacingView } from './renderers/pacing';
+import { openModal } from './renderers/modal';
+import { CLOUD_NIMBUS_POOL } from './templates/cloudnimbus/defaults';
 
 import { resolveTemplate } from './templates/resolver';
 import { INITIAL_STATE, reduceAppState } from './templates/state';
@@ -1951,6 +1953,11 @@ export class IIFEApp {
         onTaskPatch(ev.patch);
         return;
       }
+      // 0.196.0 — UI-intent events (NG-owned modals). Intercepted here like
+      // PATCH so they reach the engine + host callbacks; the reducer ignores
+      // them. See docs/ng-ui-conventions.md.
+      if (ev.type === 'AUTOSCHEDULE_OPEN') { openAutoScheduleModal(); return; }
+      if (ev.type === 'TEAM_OPEN') { openTeamModal(); return; }
       const nextState = reduceAppState(state, ev);
       const stateChanged = nextState !== state;
       state = nextState;
@@ -1985,6 +1992,154 @@ export class IIFEApp {
           emitViewport();
         }
       }
+    }
+
+    // ── 0.196.0 — NG-owned modals (Auto-Schedule + Team) ───────────────
+    // Per docs/ng-ui-conventions.md: in-app surfaces are rendered by NG
+    // (self-styled, identical on web/Salesforce/demo) with a host-override
+    // callback + a working built-in fallback.
+    function mk(tag: string, cls?: string, text?: string): HTMLElement {
+      const e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function readNum(t: Record<string, unknown>, keys: string[]): number {
+      for (const k of keys) {
+        if (typeof t[k] === 'number') return t[k] as number;
+        const meta = t['metadata'] as Record<string, unknown> | undefined;
+        if (meta && typeof meta[k] === 'number') return meta[k] as number;
+      }
+      return 0;
+    }
+
+    function openAutoScheduleModal(): void {
+      // Host override — the scheduler may run server-side (DH's ETA service).
+      if (options.onAutoSchedule) { options.onAutoSchedule({ taskCount: allTasks.length }); return; }
+
+      const gi = ganttInst as { emit?: (e: string, ...a: unknown[]) => void } | null;
+      const hasEmit = !!gi && typeof gi.emit === 'function';
+      const m = openModal({ title: 'Auto-Schedule', width: 460 });
+
+      const dated = allTasks.filter((t) => t.startDate && t.endDate);
+      const span = dated.length
+        ? {
+            start: dated.reduce((a, t) => ((t.startDate as string) < a ? (t.startDate as string) : a), dated[0].startDate as string),
+            end: dated.reduce((a, t) => ((t.endDate as string) > a ? (t.endDate as string) : a), dated[0].endDate as string),
+          }
+        : null;
+
+      m.body.appendChild(mk('div', undefined,
+        'Reflow start/end dates from dependencies (ASAP / critical-path), so the timeline and forecast line up with what actually has to happen first.'));
+      const stat = mk('div', 'ngm-stat');
+      const s1 = mk('div'); s1.appendChild(mk('b', undefined, String(allTasks.length))); s1.appendChild(document.createTextNode('work items')); stat.appendChild(s1);
+      const s2 = mk('div'); s2.appendChild(mk('b', undefined, String(dated.length))); s2.appendChild(document.createTextNode('have dates')); stat.appendChild(s2);
+      if (span) { const s3 = mk('div'); s3.appendChild(mk('b', undefined, span.start + ' → ' + span.end)); s3.appendChild(document.createTextNode('current span')); stat.appendChild(s3); }
+      m.body.appendChild(stat);
+
+      if (!hasEmit) {
+        m.body.appendChild(mk('div', 'ngm-note ngm-warn',
+          'Auto-schedule needs the core engine 0.196.0+ (the public emit trigger). Re-copy the core bundle, then reload.'));
+        m.setFooter([{ label: 'Close', primary: true, onClick: () => m.close() }]);
+        return;
+      }
+      m.body.appendChild(mk('div', 'ngm-note',
+        'Applies to this session immediately; use Undo (Ctrl+Z) to revert. Dependencies drive the order — items with no dates are left as-is.'));
+
+      function showResult(result: { scheduledTasks?: Map<string, unknown>; violations?: Array<{ message: string }>; projectStart?: string; projectEnd?: string; totalDuration?: number } | null): void {
+        m.body.textContent = '';
+        const scheduled = result?.scheduledTasks ? result.scheduledTasks.size : 0;
+        const violations = result?.violations ?? [];
+        m.body.appendChild(mk('div', undefined, scheduled ? 'Schedule applied.' : 'No changes were needed.'));
+        const rs = mk('div', 'ngm-stat');
+        const a = mk('div'); a.appendChild(mk('b', undefined, String(scheduled))); a.appendChild(document.createTextNode('tasks scheduled')); rs.appendChild(a);
+        if (result?.projectStart && result?.projectEnd) { const b = mk('div'); b.appendChild(mk('b', undefined, result.projectStart + ' → ' + result.projectEnd)); b.appendChild(document.createTextNode('project span')); rs.appendChild(b); }
+        if (typeof result?.totalDuration === 'number') { const c = mk('div'); c.appendChild(mk('b', undefined, String(result.totalDuration))); c.appendChild(document.createTextNode('working days')); rs.appendChild(c); }
+        const v = mk('div'); v.appendChild(mk('b', undefined, String(violations.length))); v.appendChild(document.createTextNode('violations')); rs.appendChild(v);
+        m.body.appendChild(rs);
+        if (violations.length) {
+          const list = mk('div', 'ngm-note');
+          violations.slice(0, 8).forEach((vi) => list.appendChild(mk('div', 'ngm-warn', '• ' + vi.message)));
+          m.body.appendChild(list);
+        }
+        m.setFooter([{ label: 'Done', primary: true, onClick: () => m.close() }]);
+      }
+
+      m.setFooter([
+        { label: 'Cancel', onClick: () => m.close() },
+        { label: 'Run schedule', primary: true, onClick: () => {
+          gi!.emit!('autoSchedule:run', (result: unknown) => showResult(result as Parameters<typeof showResult>[0]));
+        } },
+      ]);
+    }
+
+    function openTeamModal(): void {
+      // Host override — the team lives in Salesforce; DH pops its own source.
+      if (options.onEditTeam) { options.onEditTeam(); return; }
+
+      const usingDefault = !(options.team && options.team.length);
+      const pool = (usingDefault ? CLOUD_NIMBUS_POOL : options.team!).map((p) => ({ ...p }));
+      const m = openModal({ title: 'Team capacity', width: 540 });
+
+      const remaining = allTasks.reduce((sum, t) => {
+        const est = readNum(t as unknown as Record<string, unknown>, ['estimatedHours', 'estimateHours', 'hours', 'hoursHigh']);
+        const logged = readNum(t as unknown as Record<string, unknown>, ['loggedHours', 'actualHours', 'hoursLogged']);
+        return sum + Math.max(0, est - logged);
+      }, 0);
+
+      const capLine = mk('div', 'ngm-stat');
+      m.body.appendChild(capLine);
+
+      const tbl = mk('table', 'ngm-tbl') as HTMLTableElement;
+      const thead = mk('tr');
+      ['Member', 'Role', 'Hours/mo', 'Active'].forEach((h) => thead.appendChild(mk('th', undefined, h)));
+      const thd = mk('thead'); thd.appendChild(thead); tbl.appendChild(thd);
+      const tb = mk('tbody');
+      pool.forEach((member, i) => {
+        const tr = mk('tr');
+        tr.appendChild(mk('td', undefined, member.name));
+        tr.appendChild(mk('td', undefined, member.role || ''));
+        const hCell = mk('td');
+        const hInput = document.createElement('input');
+        hInput.type = 'number'; hInput.className = 'ngm-num'; hInput.value = String(member.hoursPerMonth);
+        hInput.addEventListener('input', () => { pool[i].hoursPerMonth = parseFloat(hInput.value) || 0; recompute(); });
+        hCell.appendChild(hInput); tr.appendChild(hCell);
+        const aCell = mk('td');
+        const aInput = document.createElement('input');
+        aInput.type = 'checkbox'; aInput.checked = member.active !== false;
+        aInput.addEventListener('change', () => { pool[i].active = aInput.checked; recompute(); });
+        aCell.appendChild(aInput); tr.appendChild(aCell);
+        tb.appendChild(tr);
+      });
+      tbl.appendChild(tb);
+      m.body.appendChild(tbl);
+
+      const proj = mk('div', 'ngm-note');
+      m.body.appendChild(proj);
+      m.body.appendChild(mk('div', 'ngm-note',
+        'Capacity drives this projection today; feeding it into the auto-scheduler (resource leveling) is the next step.'));
+
+      function recompute(): void {
+        const capacity = pool.filter((p) => p.active !== false).reduce((s, p) => s + (p.hoursPerMonth || 0), 0);
+        capLine.textContent = '';
+        const c1 = mk('div'); c1.appendChild(mk('b', undefined, capacity + ' h/mo')); c1.appendChild(document.createTextNode('team capacity')); capLine.appendChild(c1);
+        const c2 = mk('div'); c2.appendChild(mk('b', undefined, Math.round(remaining) + ' h')); c2.appendChild(document.createTextNode('remaining backlog')); capLine.appendChild(c2);
+        const months = capacity > 0 ? remaining / capacity : 0;
+        proj.textContent = capacity > 0
+          ? `At ${capacity} h/mo, the ${Math.round(remaining)} h of remaining estimated work is ≈ ${months.toFixed(1)} months of runway.`
+          : 'Set a capacity above to project runway.';
+      }
+      recompute();
+
+      m.setFooter([
+        { label: 'Cancel', onClick: () => m.close() },
+        { label: 'Save', primary: true, onClick: () => {
+          if (usingDefault) { CLOUD_NIMBUS_POOL.length = 0; pool.forEach((p) => CLOUD_NIMBUS_POOL.push(p)); }
+          options.onTeamChange?.(pool);
+          renderSlots();
+          m.close();
+        } },
+      ]);
     }
 
     // 0.185.8 — snapshot of tplConfig.features at mount time; overrides
