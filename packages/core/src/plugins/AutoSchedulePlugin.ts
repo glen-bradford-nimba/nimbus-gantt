@@ -666,6 +666,16 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
     return result;
   }
 
+  // 0.196.1 — compute the schedule WITHOUT applying it. Lets a host present
+  // the proposed date changes for review (review-before-DML) and decide
+  // whether/when to commit. No TASK_MOVE is dispatched.
+  function previewSchedule(): ScheduleResult {
+    const state = host.getState();
+    const result = computeSchedule(state.tasks, state.dependencies, opts, calendar);
+    lastResult = result;
+    return result;
+  }
+
   // ── Middleware: auto-reschedule on dependency changes ──────────────
 
   function middleware(action: Action, next: (action: Action) => void): void {
@@ -696,6 +706,15 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
         host.on('autoSchedule:run', (...args: unknown[]) => {
           const callback = args[0] as ((result: ScheduleResult) => void) | undefined;
           const result = scheduleAll();
+          if (callback) callback(result);
+        }),
+      );
+
+      // 0.196.1 — preview (compute without applying) for review-before-commit.
+      unsubscribers.push(
+        host.on('autoSchedule:preview', (...args: unknown[]) => {
+          const callback = args[0] as ((result: ScheduleResult) => void) | undefined;
+          const result = previewSchedule();
           if (callback) callback(result);
         }),
       );

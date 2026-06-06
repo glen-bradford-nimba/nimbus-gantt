@@ -216,6 +216,18 @@ export interface TeamMember {
   active?: boolean;
 }
 
+/** 0.196.1 — one proposed Auto-Schedule date change, for review-before-commit.
+ *  `startDate`/`endDate` are the NEW (proposed) dates; `previousStartDate`/
+ *  `previousEndDate` are the current values, for the review diff. */
+export interface AutoScheduleChange {
+  id: string;
+  name?: string;
+  startDate: string;
+  endDate: string;
+  previousStartDate?: string;
+  previousEndDate?: string;
+}
+
 export interface MountOptions {
   tasks: NormalizedTask[];
   /** 0.185.27 — initial dependency edges rendered as arrows between bars.
@@ -367,11 +379,15 @@ export interface MountOptions {
    *  from Salesforce (users / network entities). */
   team?: TeamMember[];
 
-  /** 0.196 — Auto-Schedule host override. When provided, NG hands off (the
-   *  scheduler may run server-side, e.g. DH's capacity-aware ETA service) and
-   *  does NOT open its own modal. When absent, NG runs its in-bundle scheduler
-   *  so web/demo still work. See docs/ng-ui-conventions.md (dual pattern). */
-  onAutoSchedule?: (ctx: { taskCount: number }) => void;
+  /** 0.196.1 — Auto-Schedule **review-before-DML** hand-off. NG always computes
+   *  a PREVIEW (no in-engine apply) and shows the proposed date changes for
+   *  review. On Apply, if this is provided NG hands the host the full proposed
+   *  batch — the host stages it for commit/reject (e.g. DH's review-before-DML
+   *  audit list) and owns when DML happens. Nothing is applied in-engine in
+   *  this path. If absent but `onPatch` is present, NG emits each change via
+   *  `onPatch` (same path drag edits use → host's pending/audit list). If
+   *  neither, NG applies in-engine (standalone/CN/demo fallback). */
+  onAutoSchedule?: (result: { changes: AutoScheduleChange[] }) => void;
 
   /** 0.196 — Team/capacity host override. When provided, NG hands off (the
    *  team lives in Salesforce); host pops its own capacity source. When absent,
