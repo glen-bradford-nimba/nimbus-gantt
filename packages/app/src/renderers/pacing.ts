@@ -80,6 +80,75 @@ export interface PacingData {
   authoritative?: boolean;
 }
 
+/** 0.197.0 — DH's PortfolioPacingDTO shape
+ *  (DeliveryHoursAnalyticsController.getPortfolioPacing). Mirrored here so NG
+ *  can adapt it; DH owns the canonical Apex definition. */
+export interface PortfolioPacingDTO {
+  granularity?: string;
+  rootCount?: number;
+  totalEstimatedHours?: number;
+  totalLoggedHours?: number;
+  projectedFinalHours?: number;
+  runRateHoursPerPeriod?: number;
+  blendedRate?: number;
+  hasEstimate?: boolean;
+  isOverBudgetTrajectory?: boolean;
+  earliestStart?: string;
+  latestEnd?: string;
+  periods?: Array<{
+    label?: string; startDate?: string; endDate?: string;
+    loggedHours?: number; targetHours?: number; forecastHours?: number;
+    isForecast?: boolean; overTarget?: boolean;
+  }>;
+}
+
+const _num = (v: unknown): number => (typeof v === 'number' && isFinite(v) ? v : 0);
+
+/** 0.197.0 — adapt DH's PortfolioPacingDTO → NG PacingData (one call for DH's
+ *  LWC). Period totals map 1:1 (logged→actual, forecast, target); per-period
+ *  items[] are left empty — NG's items-hybrid fills the drill-down from the
+ *  task list, so no DH change is needed for drill-down to work. `todayMs` is
+ *  injectable for testing; defaults to today. */
+export function portfolioPacingToPacingData(dto: PortfolioPacingDTO, todayMs?: number): PacingData {
+  const g = String(dto.granularity || 'month').toLowerCase();
+  const bucket: PacingBucketSize = g.startsWith('week') ? 'week' : g.startsWith('quart') ? 'quarter' : 'month';
+  const now = todayMs ?? Date.parse(new Date().toISOString().slice(0, 10));
+  const est = _num(dto.totalEstimatedHours);
+  const logged = _num(dto.totalLoggedHours);
+  const buckets: PacingBucket[] = (dto.periods || []).map((p) => {
+    const startMs = p.startDate ? Date.parse(p.startDate) : undefined;
+    const endMs = p.endDate ? Date.parse(p.endDate) : undefined;
+    const isCurrent = startMs != null && endMs != null && now >= startMs && now <= endMs;
+    const isPast = !p.isForecast && (endMs != null ? endMs < now : false);
+    return {
+      key: p.startDate || p.label || '',
+      label: p.label || p.startDate || '',
+      startMs,
+      actual: _num(p.loggedHours),
+      forecast: _num(p.forecastHours),
+      target: _num(p.targetHours),
+      isPast,
+      isCurrent,
+      items: [],
+    };
+  });
+  return {
+    buckets,
+    bucket,
+    summary: {
+      estimatedHours: est,
+      loggedHours: logged,
+      remainingHours: Math.max(0, est - logged),
+      projectedFinalHours: _num(dto.projectedFinalHours) || est,
+      pacingPct: est > 0 ? Math.round((logged / est) * 100) : 0,
+      activeItems: _num(dto.rootCount),
+      unscheduledHours: 0,
+    },
+    rate: dto.blendedRate != null ? _num(dto.blendedRate) : undefined,
+    authoritative: true,
+  };
+}
+
 /** Initial control state on page load — host (DH) seeds the view per client. */
 export interface PacingDefaults {
   bucket?: PacingBucketSize;
@@ -383,8 +452,31 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
   };
 
   function data(): PacingData {
-    if (options.pacingData && options.pacingData.bucket === bucket) return options.pacingData;
+    if (options.pacingData && options.pacingData.bucket === bucket) {
+      return mergeLocalItems(options.pacingData);
+    }
     return computeFromTasks(tasks, bucket);
+  }
+
+  // 0.197.0 — items-hybrid. DH's authoritative PacingData carries period totals
+  // (actual/forecast/target/summary/$) but no per-period items[] — its
+  // PacingPeriodDTO has no composition list. So when an authoritative bucket
+  // has no items, borrow the drill-down composition from NG's own task-derived
+  // preview (matched by key/startMs/label). Authoritative numbers drive the
+  // bars + summary; local tasks populate the drill-down — no DH change needed.
+  function mergeLocalItems(d: PacingData): PacingData {
+    if (!d.buckets.some(b => !b.items || b.items.length === 0)) return d;
+    const local = computeFromTasks(tasks, d.bucket);
+    const byKey = new Map(local.buckets.map(b => [b.key, b] as const));
+    return {
+      ...d,
+      buckets: d.buckets.map(b => {
+        if (b.items && b.items.length) return b;
+        const lb = byKey.get(b.key)
+          || local.buckets.find(x => (b.startMs != null && x.startMs === b.startMs) || x.label === b.label);
+        return { ...b, items: lb ? lb.items : [] };
+      }),
+    };
   }
   const rate = (d: PacingData) => d.rate ?? options.rate;
 

@@ -32,6 +32,7 @@ import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/
 import { renderTreemap } from './renderers/treemap';
 import { renderBubble } from './renderers/bubble';
 import { renderPacingView } from './renderers/pacing';
+import type { PacingData } from './renderers/pacing';
 import { openModal } from './renderers/modal';
 import { CLOUD_NIMBUS_POOL } from './templates/cloudnimbus/defaults';
 
@@ -2333,6 +2334,11 @@ export class IIFEApp {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let ganttInst: any = null;
     let cleanupShading: (() => void) | null = null;
+    // 0.197.0 — host-supplied authoritative PacingData (DH's getPortfolioPacing
+    // → PacingData). Seeded from config.pacing.data; updated live (no reload)
+    // via handle.setPacingData(). When null, the pacing view derives a preview
+    // from the task list.
+    let hostPacingData: PacingData | null = null;
     let cleanupDrag:    (() => void) | null = null;
     let depthMap = buildDepthMap(allTasks);
     // 0.185.32 — coordinate-based hit-test, populated by initGantt and
@@ -2886,8 +2892,12 @@ export class IIFEApp {
           // rate, defaults (initial bucket/range/measure/mode/series), and
           // controls (which pills show — e.g. MF sets controls.dollars=false).
           const pc = (options.config as { rate?: number; pacing?: Record<string, unknown> } | undefined) ?? {};
-          const pacingCfg = (pc.pacing ?? {}) as { defaults?: unknown; controls?: unknown };
+          const pacingCfg = (pc.pacing ?? {}) as { defaults?: unknown; controls?: unknown; data?: unknown };
+          // 0.197.0 — authoritative data: live (setPacingData) wins, else the
+          // initial config.pacing.data, else undefined (→ task-derived preview).
+          if (hostPacingData == null && pacingCfg.data) hostPacingData = pacingCfg.data as PacingData;
           renderPacingView(ganttHost, allTasks, {
+            pacingData: hostPacingData ?? undefined,
             // Drill-down item click reuses the existing host nav contract.
             onOpenItem: options.onItemClick
               ? (taskId) => options.onItemClick!(taskId)
@@ -3143,6 +3153,15 @@ export class IIFEApp {
       /** 0.196.2 — current mode (mirrors the batchMode flag). */
       getMode(): 'wired' | 'gather' {
         return options.batchMode ? 'gather' : 'wired';
+      },
+      /** 0.197.0 — push authoritative PacingData (DH's getPortfolioPacing,
+       *  adapted via portfolioPacingToPacingData) into the pacing view. Live,
+       *  no reload — if the Pacing tab is showing, it re-renders immediately;
+       *  otherwise the data is held for the next switch to Pacing. This is the
+       *  "DH recomputes → pushes back to the NG view" loop. */
+      setPacingData(data: PacingData | null): void {
+        hostPacingData = data;
+        if (state.viewMode === 'pacing') rebuildView();
       },
       /** 0.185 — snapshot of the batch buffer. Empty array when batchMode
        *  is off or the buffer is clean. Insertion-order preserved across

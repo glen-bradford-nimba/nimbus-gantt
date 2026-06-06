@@ -53,6 +53,18 @@ export { renderTreemap } from './renderers/treemap';
 export type { TreemapRenderOptions } from './renderers/treemap';
 export { renderBubble } from './renderers/bubble';
 export type { BubbleRenderOptions } from './renderers/bubble';
+// 0.197.0 — Pacing/Forecast contract: the DH→NG adapter + the PacingData shape
+// DH serializes to. (renderPacingView itself is mounted internally by IIFEApp;
+// hosts feed data via config.pacing.data + handle.setPacingData.)
+export { portfolioPacingToPacingData } from './renderers/pacing';
+export type {
+  PacingData,
+  PortfolioPacingDTO,
+  PacingBucket,
+  PacingBucketItem,
+  PacingSummary,
+  PacingBucketSize,
+} from './renderers/pacing';
 
 /* ── v10 template framework ────────────────────────────────────────────── */
 export {
