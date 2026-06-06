@@ -1,6 +1,25 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.199.0 Saved Views (2026-06-06).** **APP-only** (core unchanged
+**📣 Latest cut: 0.199.1 zoom-blank-canvas + Views-clip fixes (2026-06-06).**
+**TWO-bundle cut** (core AND app changed) — from the live v12 punch-list.
+- **Month/Quarter zoom → blank canvas (CORE, high).** Zooming out shrank the
+  timeline but `scrollX` stayed stale, so `ctx.translate(-scrollX,0)` pushed all
+  bars off the left edge — DOM lanes showed, canvas bars vanished (Day/Week had
+  enough width to survive). Fix: clamp scrollX/scrollY to the content extent in
+  `NimbusGantt.render()` (also covers window-resize/row-collapse); syncs the DOM
+  scrollbar + persists SET_SCROLL when it bites; in-range renders untouched.
+- **Views dropdown clipped behind the toolbar (APP).** 0.199.0's `position:
+  absolute` menu was clipped by the titlebar overflow context. Fix: `position:
+  fixed` anchored to the trigger's measured rect (rAF after attach, viewport-
+  clamped, LWS-guarded) + max-height/scroll for long lists.
+- Core version literal bumped **0.198.0 → 0.199.1**. (Punch-list #4 — editing
+  ops not firing via automation — is a synthetic-event limitation; needs a human
+  click-through, no code change.)
+Re-copy **BOTH** bundles: core md5 **`68953c5165a505d37804be82300dc1ef`**,
+app md5 **`c4122a888997b692c303e3f9903acfdf`**. Merged PR #36. **163/163**, core
+tsc clean, app 6 pre-existing (zero new).
+
+**0.199.0 Saved Views (2026-06-06).** **APP-only** (core unchanged
 **6fdb3a54636c6d4b25f8ceef98414b75**). The app-wide saved-views layer on the
 0.198.0 pacing-prefs foundation — Glen's bigger ask, the optimal superset.
 - A **view** = named layout snapshot: view-mode + filter/search/zoom/grouping/
