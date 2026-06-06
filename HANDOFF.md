@@ -1,6 +1,26 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.198.1 audit dupes + LWS guard + Calendar/Flow pulled (2026-06-06).**
+**📣 Latest cut: 0.199.0 Saved Views (2026-06-06).** **APP-only** (core unchanged
+**6fdb3a54636c6d4b25f8ceef98414b75**). The app-wide saved-views layer on the
+0.198.0 pacing-prefs foundation — Glen's bigger ask, the optimal superset.
+- A **view** = named layout snapshot: view-mode + filter/search/zoom/grouping/
+  hide-completed + the Pacing view's full prefs blob.
+- **Views dropdown** (next to the view pills): save current layout, apply a saved
+  view, **★ star a default** (opens on load), ✕ delete. **Remember-last** when
+  nothing is starred. Per-browser localStorage (key `nga.views.v1`), LWS-guarded.
+- **Configurable:** seed via `config.savedViews` / `config.defaultViewId`; opt out
+  with `config.viewsManager === false`; drive via handle methods
+  `getSavedViews` / `saveView` / `applyView` / `deleteView` / `setDefaultView` /
+  `getDefaultView`. Works with zero host changes (defaults on).
+- New `savedViews.ts` (+ 8 unit tests); `pacing.ts` exports get/setPacingPrefs
+  (opaque-blob round-trip, decoupled); `AppState`/`AppEvent` extended; IIFEApp
+  mount-seeds initial layout + routes non-gantt first render; TitleBar dropdown.
+Re-copy **APP** bundle only: app md5 **`33510f83d164b281b691c97e85cf69e2`**.
+Merged PR #35. tsc-clean (6 pre-existing, zero new), **163/163** (155 + 8 new).
+**NG queue now clear** of the 2026-06-06 dispatch items (range controls, version
+bump, dupes, LWS guard, Calendar/Flow, saved views all shipped).
+
+**0.198.1 audit dupes + LWS guard + Calendar/Flow pulled (2026-06-06).**
 **APP-only** (core unchanged at **6fdb3a54636c6d4b25f8ceef98414b75**). Three
 NG-queue items, the fast/low-risk lane:
 - **Audit dupe-detection** (`AuditListView.vanilla.ts`) — `dupeIds` was an empty
