@@ -1,6 +1,25 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.198.0 pacing range controls + core version bump (2026-06-06).**
+**📣 Latest cut: 0.198.1 audit dupes + LWS guard + Calendar/Flow pulled (2026-06-06).**
+**APP-only** (core unchanged at **6fdb3a54636c6d4b25f8ceef98414b75**). Three
+NG-queue items, the fast/low-risk lane:
+- **Audit dupe-detection** (`AuditListView.vanilla.ts`) — `dupeIds` was an empty
+  stub so the Dupes KPI/chip always read 0 even with obvious collisions
+  (QBAG-PARENT ×2, "Can't Save Page Layout Edits" ×3). Now groups by normalized
+  title (`trim().toLowerCase()`, empty skipped) and flags every member of a >1
+  group; the existing chip + count were already wired to the set.
+- **LWS blank-canvas guard** (`IIFEApp.ts` `rebuildView`) — double-RAF check
+  (gantt view only) calls the gantt's existing `resize()` iff the canvas is still
+  0×0 after a view-switch/reload re-mount at 0 layout size. try/catch guarded,
+  no-op on the healthy path. *Repro-gated — confirm on a current SF bundle.*
+- **Calendar/Flow** pulled from `CLOUD_NIMBUS_VIEWS` so the dead "coming in
+  0.183" tabs stop rendering; union + stub + catch-all kept for an easy port.
+Re-copy **APP** bundle only: app md5 **`d5eaf0780a84285ac211708a0085d409`**.
+Merged PR #34. tsc-clean (6 pre-existing), 155/155. **Still open (NG queue):**
+saved named multi-views + default-which-view-opens (Glen's bigger ask; 0.198.0
+shipped the pacing-prefs foundation).
+
+**0.198.0 pacing range controls + core version bump (2026-06-06).**
 Two-bundle cut. **APP** (`packages/app/src/renderers/pacing.ts`):
 - **Symmetric range presets** — `span3` (±3) / `span6` (±6) centred on today
   replace forward-only `next3`/`next6` (kept as back-compat aliases). **New
