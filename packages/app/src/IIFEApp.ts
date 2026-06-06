@@ -31,8 +31,12 @@ import { startDragReparent } from './dragReparent';
 import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/AuditListView.vanilla';
 import { renderTreemap } from './renderers/treemap';
 import { renderBubble } from './renderers/bubble';
-import { renderPacingView } from './renderers/pacing';
+import { renderPacingView, getPacingPrefs, setPacingPrefs } from './renderers/pacing';
 import type { PacingData } from './renderers/pacing';
+import {
+  loadViewsStore, saveViewsStore, newViewId,
+} from './savedViews';
+import type { SavedView, SavedViewState } from './savedViews';
 import { openModal } from './renderers/modal';
 import { CLOUD_NIMBUS_POOL } from './templates/cloudnimbus/defaults';
 
@@ -1139,6 +1143,26 @@ export class IIFEApp {
     if (options.initialViewport?.zoom) {
       state = { ...state, zoom: options.initialViewport.zoom as AppState['zoom'] };
     }
+    // 0.199.0 — Saved Views. Hydrate the persisted store (or the host-seeded
+    // list when storage is empty), then seed the initial layout: a starred
+    // default view wins, else the remembered last session, else the built-in
+    // default (gantt). We MUTATE state before the first render (no dispatch) so
+    // the first paint already shows the right view-mode + pills with no flicker
+    // and no double-render. applyViewState also restores the pacing prefs blob.
+    {
+      const cfgAny = (options.config ?? {}) as { savedViews?: SavedView[]; defaultViewId?: string | null };
+      const store = loadViewsStore();
+      const views: SavedView[] = store.views.length ? store.views : (cfgAny.savedViews ?? []);
+      const defaultViewId = store.defaultId ?? cfgAny.defaultViewId ?? null;
+      state = { ...state, savedViews: views, defaultViewId, activeViewId: null };
+      const def = defaultViewId ? views.find((v) => v.id === defaultViewId) : null;
+      if (def) {
+        applyViewState(def);
+        state = { ...state, activeViewId: def.id };
+      } else if (store.last) {
+        applyViewState(store.last);
+      }
+    }
     // 0.192.0 — hours-bridge intake on chrome-aware mount path. See engineOnly
     // path for rationale.
     let allTasks: NormalizedTask[] = applyHoursBridge(options.tasks || [], options.hoursPerDay);
@@ -2002,6 +2026,82 @@ export class IIFEApp {
       _patchRefreshTimer.t = setTimeout(() => { _patchRefreshTimer.t = null; refreshGantt(); }, 50);
     }
 
+    // ── 0.199.0 — Saved Views helpers ─────────────────────────────────
+    // Capture the current layout. For the Pacing view we also snapshot its
+    // prefs blob so a saved "forecast" view restores its exact range/bucket.
+    function snapshotCurrentView(): SavedViewState {
+      const snap: SavedViewState = {
+        viewMode: state.viewMode,
+        filter: String(state.filter),
+        search: state.search,
+        zoom: String(state.zoom),
+        groupBy: String(state.groupBy),
+        hideCompleted: state.hideCompleted,
+      };
+      if (state.viewMode === 'pacing') {
+        const p = getPacingPrefs();
+        if (p) snap.pacing = p;
+      }
+      return snap;
+    }
+    // Apply a layout to `state` (pure-ish: mutates `state`, writes pacing prefs).
+    // Used both at mount-seed time (before render) and on APPLY_VIEW. Pacing
+    // prefs are written FIRST so the subsequent rebuild paints pacing restored.
+    function applyViewState(v: SavedViewState): void {
+      if (v.pacing !== undefined) setPacingPrefs(v.pacing);
+      state = {
+        ...state,
+        viewMode: (v.viewMode as AppState['viewMode']) ?? state.viewMode,
+        filter: v.filter ?? state.filter,
+        search: v.search ?? state.search,
+        zoom: (v.zoom as AppState['zoom']) ?? state.zoom,
+        groupBy: (v.groupBy as AppState['groupBy']) ?? state.groupBy,
+        hideCompleted: v.hideCompleted ?? state.hideCompleted,
+      };
+    }
+    // Persist the full store (list + default + a fresh `last` snapshot).
+    function persistViewsStore(): void {
+      saveViewsStore({
+        views: state.savedViews,
+        defaultId: state.defaultViewId,
+        last: snapshotCurrentView(),
+      });
+    }
+    function handleSaveView(name: string): string {
+      const id = newViewId(state.savedViews);
+      const view: SavedView = { id, name: name.trim() || ('View ' + (state.savedViews.length + 1)), ...snapshotCurrentView() };
+      state = { ...state, savedViews: [...state.savedViews, view], activeViewId: id };
+      persistViewsStore();
+      renderSlots();
+      return id;
+    }
+    function handleApplyView(id: string): void {
+      const v = state.savedViews.find((x) => x.id === id);
+      if (!v) return;
+      applyViewState(v);
+      state = { ...state, activeViewId: id };
+      reconcileFeatureOverrides();
+      renderSlots();
+      rebuildView();
+      persistViewsStore();
+    }
+    function handleDeleteView(id: string): void {
+      state = {
+        ...state,
+        savedViews: state.savedViews.filter((x) => x.id !== id),
+        defaultViewId: state.defaultViewId === id ? null : state.defaultViewId,
+        activeViewId: state.activeViewId === id ? null : state.activeViewId,
+      };
+      persistViewsStore();
+      renderSlots();
+    }
+    function handleSetDefaultView(id: string | null): void {
+      // Toggle: clicking the star on the current default clears it.
+      state = { ...state, defaultViewId: state.defaultViewId === id ? null : id };
+      persistViewsStore();
+      renderSlots();
+    }
+
     function dispatch(ev: AppEvent): void {
       // Slot-dispatched PATCH (e.g. DetailPanel Save button) needs to flow
       // to the consumer's onPatch callback — same surface drag/resize use
@@ -2017,6 +2117,12 @@ export class IIFEApp {
       // them. See docs/ng-ui-conventions.md.
       if (ev.type === 'AUTOSCHEDULE_OPEN') { openAutoScheduleModal(); return; }
       if (ev.type === 'TEAM_OPEN') { openTeamModal(); return; }
+      // 0.199.0 — Saved Views. Side-effecting (localStorage + pacing-prefs
+      // round-trip), so handled here rather than in the pure reducer.
+      if (ev.type === 'SAVE_VIEW') { handleSaveView(ev.name); return; }
+      if (ev.type === 'APPLY_VIEW') { handleApplyView(ev.id); return; }
+      if (ev.type === 'DELETE_VIEW') { handleDeleteView(ev.id); return; }
+      if (ev.type === 'SET_DEFAULT_VIEW') { handleSetDefaultView(ev.id); return; }
       const nextState = reduceAppState(state, ev);
       const stateChanged = nextState !== state;
       state = nextState;
@@ -2038,6 +2144,10 @@ export class IIFEApp {
         const viewChangingEvents = ['SET_VIEW','SET_GROUP_BY','SET_FILTER','SET_SEARCH','TOGGLE_HIDE_COMPLETED'];
         if (viewChangingEvents.indexOf(ev.type) >= 0) {
           rebuildView();
+          // 0.199.0 — remember the last view-mode the user landed on so the next
+          // mount can restore it when no default view is starred. Persist on the
+          // mode switch only (not every keystroke); pacing keeps its own prefs.
+          if (ev.type === 'SET_VIEW') persistViewsStore();
         } else if (ev.type === 'TOGGLE_FEATURE') {
           // Column-affecting feature toggles require a rebuild; slot-visibility
           // toggles are handled by renderSlots alone. Rebuild unconditionally
@@ -2966,7 +3076,14 @@ export class IIFEApp {
         features: tplConfig.features,
       });
     } catch (_e) { /* diag never throws */ }
-    if (ganttHost) initGantt(ganttHost);
+    // 0.199.0 — first render routes by the seeded view-mode. Default stays the
+    // direct initGantt() fast path (unchanged behaviour); a saved/default view
+    // that opens on a non-gantt mode (list/pacing/treemap/bubbles) goes through
+    // rebuildView so the correct renderer mounts instead of an empty gantt.
+    if (ganttHost) {
+      if (state.viewMode === 'gantt') initGantt(ganttHost);
+      else rebuildView();
+    }
 
     /* ── Post-mount layout + canvas diagnostics ─────────────────────── */
     // Defer one animation frame so browser layout has settled. Gives Cowork
@@ -3073,6 +3190,15 @@ export class IIFEApp {
        *  instance for additional plugin installs / direct core API calls. */
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       get gantt(): any { return ganttInst; },
+      // 0.199.0 — Saved Views programmatic API. Hosts can read/seed/drive the
+      // saved-view list and default without touching the UI (e.g. provision a
+      // "Client forecast" view per org, or set which view opens on load).
+      getSavedViews(): SavedView[] { return state.savedViews.map((v) => ({ ...v })); },
+      saveView(name: string): string { return handleSaveView(name); },
+      applyView(id: string): void { dispatch({ type: 'APPLY_VIEW', id }); },
+      deleteView(id: string): void { dispatch({ type: 'DELETE_VIEW', id }); },
+      setDefaultView(id: string | null): void { dispatch({ type: 'SET_DEFAULT_VIEW', id }); },
+      getDefaultView(): string | null { return state.defaultViewId; },
       setTasks(tasks: NormalizedTask[]) {
         allTasks = applyHoursBridge(tasks, options.hoursPerDay);
         depthMap = buildDepthMap(allTasks);
