@@ -90,8 +90,11 @@ export const CLOUD_NIMBUS_VIEWS: ViewMode[] = [
   'pacing',
   'treemap',
   'bubbles',
-  'calendar',
-  'flow',
+  // 0.198.1 — Calendar/Flow pulled from the pill list: they only ever routed
+  // to renderComingSoon ("coming in 0.183") and shipping dead tabs is worse UX
+  // than absence. The ViewMode union, renderComingSoon, and the rebuildView
+  // catch-all all stay intact, so a future port is just re-adding the id here
+  // plus a real renderer branch (follow the 'pacing' pattern in IIFEApp).
 ];
 
 /* ── Category display — drives FilterBar color legend ──────────────────── */

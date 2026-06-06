@@ -2924,6 +2924,32 @@ export class IIFEApp {
         renderComingSoon(ganttHost, labelMap[state.viewMode] || state.viewMode);
       }
       renderSlots();
+
+      // 0.198.1 — blank-canvas guard. rebuildView clears ganttHost and
+      // re-mounts synchronously; under Salesforce LWS a view-switch or reload
+      // can run while ganttHost still has zero layout size, so the first paint
+      // sizes the canvas 0x0 and the core ResizeObserver's later tick can be
+      // missed (LWS sometimes blocks the global ResizeObserver, leaving only
+      // the window-resize fallback, which never fires on a same-size switch).
+      // After two RAFs (layout settled), if the canvas is still 0x0 we call
+      // the gantt's existing public resize() to re-measure + repaint. RAF and
+      // the DOM reads are LWS-guarded; the size check makes this a no-op on the
+      // healthy path. Only the gantt view owns a NimbusGantt canvas.
+      if (state.viewMode === 'gantt' && ganttInst && typeof requestAnimationFrame === 'function') {
+        const inst = ganttInst;
+        const host = ganttHost;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              const canvas = host.querySelector('canvas');
+              if (canvas && (canvas.width === 0 || canvas.height === 0)) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (inst as any).resize();
+              }
+            } catch (_e) { /* LWS / detached node — ignore */ void 0; }
+          });
+        });
+      }
     }
 
     /* ── First render ───────────────────────────────────────────────── */
