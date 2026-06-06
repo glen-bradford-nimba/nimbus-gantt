@@ -1,6 +1,28 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.196.1 Auto-Schedule review-before-DML (2026-06-05).**
+**📣 Latest cut: 0.196.2 Gather vs Wired mode (2026-06-05).** The timeline now
+has two host-toggleable modes (Glen's ask): **wired** = edits run the DML as
+made; **gather** (hypothetical) = every edit buffers into the review/audit list
+as a **potential DML**, committed later through review-and-edit. Two parts:
+- **(A) field-generic buffer** — the pending-changes buffer/translator/revert
+  now tracks **any** changed field (title, stage, assignee, progress, dates, …),
+  old→new, not just dates. (Was the gap behind "are we tracking anything that
+  changes?" — answer is now yes.) `PendingEdit.changes/original/before` widened.
+- **(B) the mode** — `batchMode` is the gather flag; **field edits now buffer in
+  gather mode too** (`onTaskPatch` was forwarding immediately — now it stages
+  into the buffer like drags/reorders do). Runtime toggle on the handle:
+  `setMode('wired'|'gather')` + `getMode()` so DH/CN expose the setting. Review
+  surface is the existing audit panel + `commitEdits()`/`discardEdits()` +
+  per-row reject; auto-schedule (0.196.1) hands its batch through the same gate.
+**APP-only** (no core change — core stays 0.196.1 `39df71d7…`). APP
+`nimbus-gantt-app.iife.js` md5 **`c793a4f86dbdf08ba332579588f42abd`**. Branch
+`feat/0.196.2-field-generic-buffer` (A, merged `67ec303`) + the gather-mode cut.
+tsc-clean (6 pre-existing unchanged), build clean, vitest 155/155. Demo:
+`pacing.html` has a wired⇄gather toggle (logs pending-edit count). **DH/CN:
+re-copy the APP bundle; wire the setMode toggle into a host setting; gather-mode
+edits land in your review-before-DML audit list.** Resource-leveling still later.
+
+**0.196.1 Auto-Schedule review-before-DML (2026-06-05).**
 Auto-Schedule no longer applies silently. It now does **preview → review →
 commit**: NG computes a **preview** (new core `autoSchedule:preview` event —
 computes WITHOUT dispatching TASK_MOVE), the modal shows the **proposed

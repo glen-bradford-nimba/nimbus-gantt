@@ -1928,14 +1928,21 @@ export class IIFEApp {
     function onTaskPatch(patch: TaskPatch): void {
       // Apply optimistic update locally (mirrors v5 behaviour)
       const idx = allTasks.findIndex(t => t.id === patch.id);
-      if (idx !== -1) {
-        const t = allTasks[idx];
-        const u: NormalizedTask = { ...t };
+      const prev = idx !== -1 ? allTasks[idx] : undefined;
+      if (idx !== -1 && prev) {
+        const u: NormalizedTask = { ...prev };
         if (patch.priorityGroup !== undefined) u.priorityGroup = patch.priorityGroup;
         if (patch.sortOrder     !== undefined) u.sortOrder = patch.sortOrder;
         if ('parentId' in patch)               u.parentWorkItemId = patch.parentId ?? null;
         if (patch.startDate     !== undefined) u.startDate = patch.startDate;
         if (patch.endDate       !== undefined) u.endDate = patch.endDate;
+        // 0.196.2 — field-generic optimistic apply: any other changed key
+        // (title, stage, assignee, …) so the gather list + bars reflect it.
+        const ur = u as unknown as Record<string, unknown>;
+        for (const k of Object.keys(patch)) {
+          if (k === 'id' || k === 'priorityGroup' || k === 'sortOrder' || k === 'parentId' || k === 'startDate' || k === 'endDate') continue;
+          ur[k] = (patch as unknown as Record<string, unknown>)[k];
+        }
         allTasks[idx] = u;
       }
       // Log entry
@@ -1949,6 +1956,38 @@ export class IIFEApp {
       if (parts.length) {
         patchLog.unshift({ ts: new Date(), desc: title + ': ' + parts.join(', ') });
         if (patchLog.length > 50) patchLog.pop();
+      }
+      // 0.196.2 — GATHER MODE (batchMode): buffer the change into the
+      // review/audit list instead of forwarding it to the host (= a "potential
+      // DML"). Splits structural keys (reorder) from field keys (edit) so each
+      // stages with the right kind. The host commits/rejects later via the
+      // audit panel + commitEdits()/discardEdits(). WIRED mode (batchMode off)
+      // falls through to rawOnPatch = run-the-DML-as-made.
+      if (options.batchMode && prev) {
+        const STRUCT = new Set(['priorityGroup', 'sortOrder', 'parentId']);
+        const pr = prev as unknown as Record<string, unknown>;
+        const editChanges: Record<string, unknown> = {};
+        const editOrig: Record<string, unknown> = {};
+        const reorderChanges: Record<string, unknown> = {};
+        const reorderOrig: Record<string, unknown> = {};
+        for (const k of Object.keys(patch)) {
+          if (k === 'id') continue;
+          const val = (patch as unknown as Record<string, unknown>)[k];
+          if (STRUCT.has(k)) {
+            reorderChanges[k] = val;
+            reorderOrig[k] = k === 'parentId' ? (prev.parentWorkItemId ?? null) : pr[k];
+          } else {
+            editChanges[k] = val;
+            editOrig[k] = pr[k];
+          }
+        }
+        if (Object.keys(editChanges).length) bufferEdit(patch.id, 'edit', editChanges, editOrig as PendingEdit['original']);
+        if (Object.keys(reorderChanges).length) bufferEdit(patch.id, 'reorder', reorderChanges, reorderOrig as PendingEdit['original']);
+        dirtyTaskIds.add(patch.id);
+        syncPendingChanges();
+        if (_patchRefreshTimer.t) clearTimeout(_patchRefreshTimer.t);
+        _patchRefreshTimer.t = setTimeout(() => { _patchRefreshTimer.t = null; refreshGantt(); }, 50);
+        return;
       }
       // NOTE (2026-04-18 regression fix): removed `dispatch({ type: 'PATCH', patch })`
       // here. `dispatch` intercepts PATCH events and routes them back to
@@ -3089,6 +3128,21 @@ export class IIFEApp {
        *  toggles share one code path. */
       toggleChrome(visible?: boolean) {
         runToggleChrome(visible);
+      },
+      /** 0.196.2 — runtime mode toggle. 'gather' = batchMode ON (every edit
+       *  buffers into the review/audit list as a potential DML; commit later);
+       *  'wired' = batchMode OFF (edits run the DML as made). Lets DH/CN expose
+       *  the setting and flip it live. Switching to 'wired' does NOT auto-commit
+       *  or discard pending edits — call commitEdits()/discardEdits() first if
+       *  you want a clean switch. Returns the new mode. */
+      setMode(mode: 'wired' | 'gather'): 'wired' | 'gather' {
+        (options as { batchMode?: boolean }).batchMode = (mode === 'gather');
+        syncPendingChanges();
+        return mode;
+      },
+      /** 0.196.2 — current mode (mirrors the batchMode flag). */
+      getMode(): 'wired' | 'gather' {
+        return options.batchMode ? 'gather' : 'wired';
       },
       /** 0.185 — snapshot of the batch buffer. Empty array when batchMode
        *  is off or the buffer is clean. Insertion-order preserved across

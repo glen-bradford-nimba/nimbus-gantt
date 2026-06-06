@@ -29,6 +29,8 @@
       <button onclick="window.setPreset('dh')">DH preset (with $)</button>
       <button onclick="window.setPreset('mf')">MF preset (no $)</button>
       <span style="color:#475569">|</span>
+      <button onclick="window.toggleMode()" id="modeBtn">Mode: wired</button>
+      <span style="color:#475569">|</span>
       <button onclick="window.bumpFirst()">Move first task +7d</button>
       <button onclick="window.logMore()">Log hours on a task</button>
       <button onclick="window.addBig()">Add a big future task</button>
@@ -130,6 +132,17 @@
       console.log('[pacing-demo] mounted preset:', PRESETS[key].label);
     }
     window.setPreset = mountWith;
+    // 0.196.2 — wired (DML-as-made) ⇄ gather (buffer changes as potential DMLs
+    // for review-before-commit). In gather mode, edits accumulate in
+    // handle.getPendingEdits() / the audit panel instead of forwarding.
+    window.toggleMode = () => {
+      const cur = handle.getMode ? handle.getMode() : 'wired';
+      const next = cur === 'wired' ? 'gather' : 'wired';
+      handle.setMode && handle.setMode(next);
+      const btn = document.getElementById('modeBtn');
+      if (btn) btn.textContent = 'Mode: ' + next;
+      console.log('[pacing-demo] mode →', next, '· pending edits:', handle.getPendingEdits ? handle.getPendingEdits().length : 0);
+    };
     mountWith('dh');   // land on the DH cumulative view (shows actual→today→forecast)
 
     // ── Demo edits — show the Pacing tab updating live from board changes ──
