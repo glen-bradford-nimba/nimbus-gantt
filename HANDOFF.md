@@ -17,10 +17,11 @@ Resource-leveling (team capacity → schedule math) still the later step.
 **TWO-bundle cut** (core preview event + app review modal):
 - CORE `nimbus-gantt.iife.js` md5 **`39df71d7f44dec64d35134f77c8f11a7`**.
 - APP `nimbus-gantt-app.iife.js` md5 **`876bef0e4368e0b0fdb00284d27e3fe1`**.
-Branch `feat/0.196.1-autoschedule-review`, **PR open (unmerged)**. Verification:
-my code tsc-clean (6 pre-existing errors unchanged), core+app build clean,
-vitest 155/155, `autoSchedule:preview` in both bundles. Demo: Auto-Schedule in
-`pacing.html` now shows the diff + logs the proposed batch on Apply.
+**Merged to master at `fd15f3a` (PR #29); both md5s reproduce from a clean
+build of master.** Verification: tsc-clean (6 pre-existing errors unchanged),
+core+app build clean, vitest 155/155, `autoSchedule:preview` in both bundles.
+Demo: Auto-Schedule in `pacing.html` shows the diff + logs the proposed batch
+on Apply. **DH/CN: re-copy both bundles; visual-verify the review modal.**
 
 **0.196.0 NG-owned modals + UI conventions (2026-06-05).**
 Establishes the house rule **`docs/ng-ui-conventions.md`**: in-app surfaces
