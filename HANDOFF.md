@@ -1,6 +1,25 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.197.0 pacingData pass-through (2026-06-06).** Closes the live
+**📣 Latest cut: 0.198.0 pacing range controls + core version bump (2026-06-06).**
+Two-bundle cut. **APP** (`packages/app/src/renderers/pacing.ts`):
+- **Symmetric range presets** — `span3` (±3) / `span6` (±6) centred on today
+  replace forward-only `next3`/`next6` (kept as back-compat aliases). **New
+  default cut = bucket `week` + `span6`** (last 6 + next 6 weeks) — supersedes
+  the "opens on one giant Month bar" finding.
+- **Edge steppers** — Earlier `[− / +<unit>]` and Later `[+<unit> / −]` add/trim
+  one bucket at each window end (first click resolves the active preset to a
+  concrete custom window, then nudges; guards start<end).
+- **Preference persistence** — localStorage (LWS-guarded try/catch) saves
+  range/bucket/custom-window/measure/mode/series; restores on next mount.
+  Precedence: **saved prefs > host `config.pacing.defaults` > built-in default**.
+**CORE** (`NimbusGantt.ts`): `capabilities().version` bumped **0.187.0 → 0.198.0**
+(was stale across 0.188→0.197) — unblocks version-guarded Auto-Schedule on CN.
+Re-copy **both** bundles: core md5 **6fdb3a54636c6d4b25f8ceef98414b75**,
+app md5 **b88b39b57294ca93ee7cd2c38e0d7c37**. Merged 0.198.0 (PR #33). tsc-clean
+(6 pre-existing), 155/155. **Still open (NG queue):** Calendar/Flow stubs,
+audit dupe-detection, LWS blank-canvas guard (repro-gated), saved named-views.
+
+**0.197.0 pacingData pass-through (2026-06-06).** Closes the live
 gap Cowork found on MF prod 0.264: the Pacing view was running NG's task-derived
 **fallback preview** ("Forecast preview — remaining spread"), not DH's
 authoritative numbers, because there was no way to feed `PacingData` in. Now:
