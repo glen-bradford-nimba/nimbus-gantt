@@ -302,6 +302,38 @@ function nextBucketMs(ms: number, size: PacingBucketSize): number {
   if (size === 'quarter') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 3, 1);
   return d.getTime() + 7 * DAY_MS;
 }
+function prevBucketMs(ms: number, size: PacingBucketSize): number {
+  const d = new Date(bucketStartMs(ms, size));
+  if (size === 'month') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1);
+  if (size === 'quarter') return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 3, 1);
+  return d.getTime() - 7 * DAY_MS;
+}
+/** Step a timestamp by n buckets (n<0 = earlier), snapping to bucket start. */
+function stepBuckets(ms: number, size: PacingBucketSize, n: number): number {
+  let cur = bucketStartMs(ms, size);
+  const step = n >= 0 ? nextBucketMs : prevBucketMs;
+  for (let i = 0; i < Math.abs(n); i++) cur = step(cur, size);
+  return cur;
+}
+const isoOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+// ─── Saved preferences (0.198 — restart from where you left off) ───────────────
+// Persisted to localStorage, LWS-guarded (Salesforce can throw on storage access).
+const PACING_PREFS_KEY = 'nga.pacing.prefs.v1';
+interface PacingPrefs {
+  range?: string; bucket?: PacingBucketSize; customS?: string; customE?: string;
+  measure?: 'hours' | 'dollars'; mode?: 'period' | 'cumulative';
+  show?: { actual: boolean; forecast: boolean; target: boolean };
+}
+function loadPacingPrefs(): PacingPrefs | null {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PACING_PREFS_KEY) : null;
+    return raw ? (JSON.parse(raw) as PacingPrefs) : null;
+  } catch { return null; }
+}
+function savePacingPrefs(p: PacingPrefs): void {
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(PACING_PREFS_KEY, JSON.stringify(p)); } catch { /* LWS / no storage — ignore */ }
+}
 function keyToMs(key: string): number {
   if (key[0] === 'W') return parseISO(key.slice(1)) ?? 0;
   if (key.indexOf('Q') >= 0) { const [y, q] = key.split('-Q'); return Date.UTC(+y, (+q - 1) * 3, 1); }
@@ -413,9 +445,13 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
 
 // ─── Ranges ──────────────────────────────────────────────────────────────────
 
-type RangePreset = 'all' | 'ytd' | 'thisQtr' | 'next3' | 'next6' | 'rest' | 'custom';
+// 0.198 — 'span3'/'span6' are symmetric windows centred on today (last N + next N
+// buckets) — the best situational-awareness default. 'next3'/'next6' kept as
+// back-compat aliases (legacy host configs) that normalise to the symmetric span.
+type RangePreset = 'all' | 'ytd' | 'thisQtr' | 'span3' | 'span6' | 'rest' | 'custom' | 'next3' | 'next6';
 const RANGE_LABELS: Record<RangePreset, string> = {
-  all: 'All', ytd: 'YTD', thisQtr: 'This Qtr', next3: 'Next 3', next6: 'Next 6', rest: 'Rest of yr', custom: 'Custom',
+  all: 'All', ytd: 'YTD', thisQtr: 'This Qtr', span3: '±3', span6: '±6', rest: 'Rest of yr', custom: 'Custom',
+  next3: '±3', next6: '±6',
 };
 function rangeWindow(preset: RangePreset, size: PacingBucketSize, cs: string, ce: string): { from: number | null; to: number | null } {
   const now = Date.now(), d = new Date(now), y = d.getUTCFullYear();
@@ -424,10 +460,14 @@ function rangeWindow(preset: RangePreset, size: PacingBucketSize, cs: string, ce
   if (preset === 'rest') return { from: bucketStartMs(now, size), to: Date.UTC(y, 11, 31) };
   if (preset === 'thisQtr') { const q = Math.floor(d.getUTCMonth() / 3); return { from: Date.UTC(y, q * 3, 1), to: Date.UTC(y, q * 3 + 3, 0) }; }
   if (preset === 'custom') return { from: parseISO(cs), to: parseISO(ce) };
-  const n = preset === 'next3' ? 3 : 6;
-  let cur = bucketStartMs(now, size);
-  for (let i = 0; i < n; i++) cur = nextBucketMs(cur, size);
-  return { from: bucketStartMs(now, size), to: cur };
+  // symmetric span: last N + current + next N buckets, centred on today.
+  const n = (preset === 'span3' || preset === 'next3') ? 3 : 6;
+  const cur = bucketStartMs(now, size);
+  let from = cur;
+  for (let i = 0; i < n; i++) from = prevBucketMs(from, size);
+  let to = cur;
+  for (let i = 0; i <= n; i++) to = nextBucketMs(to, size); // through the end of the next-N bucket
+  return { from, to };
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────────
@@ -439,17 +479,47 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
   const dflt = options.defaults ?? {};
   const ctrl = options.controls ?? {};
   const allowDollars = ctrl.dollars !== false; // MF passes controls.dollars=false
-  let bucket: PacingBucketSize = dflt.bucket || options.pacingData?.bucket || options.defaultBucket || 'month';
-  let range: RangePreset = dflt.range || 'next6';
-  let customS = dflt.customStart || '', customE = dflt.customEnd || '';
-  let measure: 'hours' | 'dollars' = (dflt.measure === 'dollars' && allowDollars) ? 'dollars' : 'hours';
-  let mode: 'period' | 'cumulative' = dflt.mode || 'period';
+  // 0.198 — precedence: the user's saved prefs (last session) win over host
+  // defaults, which win over the built-in default. So the view reopens exactly
+  // where the user left it; a host can still seed the first-ever load via defaults.
+  const saved = loadPacingPrefs() ?? {};
+  let bucket: PacingBucketSize = saved.bucket || dflt.bucket || options.pacingData?.bucket || options.defaultBucket || 'week';
+  let range: RangePreset = saved.range as RangePreset || dflt.range || 'span6';
+  let customS = saved.customS ?? dflt.customStart ?? '';
+  let customE = saved.customE ?? dflt.customEnd ?? '';
+  let measure: 'hours' | 'dollars' = (((saved.measure || dflt.measure) === 'dollars') && allowDollars) ? 'dollars' : 'hours';
+  let mode: 'period' | 'cumulative' = saved.mode || dflt.mode || 'period';
   let expandedKey: string | null = null;
   const show = {
-    actual: dflt.series?.actual ?? true,
-    forecast: dflt.series?.forecast ?? true,
-    target: dflt.series?.target ?? false,
+    actual: saved.show?.actual ?? dflt.series?.actual ?? true,
+    forecast: saved.show?.forecast ?? dflt.series?.forecast ?? true,
+    target: saved.show?.target ?? dflt.series?.target ?? false,
   };
+  // Persist the full control state so the next mount restarts from here.
+  function persistPrefs(): void {
+    savePacingPrefs({ range, bucket, customS, customE, measure, mode, show: { ...show } });
+  }
+  // 0.198 — window steppers: nudge one end of the visible window by ±1 bucket.
+  // First click on a preset resolves it to a concrete custom window, then nudges;
+  // grows/shrinks at the start (past) or end (future). Guards start < end.
+  function stepWindow(end: 'start' | 'end', dirBuckets: number): void {
+    if (range !== 'custom' || !customS || !customE) {
+      const w = rangeWindow(range, bucket, customS, customE);
+      const baseFrom = w.from ?? bucketStartMs(Date.now(), bucket);
+      const baseTo = w.to ?? nextBucketMs(bucketStartMs(Date.now(), bucket), bucket);
+      customS = isoOf(baseFrom);
+      customE = isoOf(baseTo);
+      range = 'custom';
+    }
+    if (end === 'start') {
+      const cand = isoOf(stepBuckets(parseISO(customS) ?? Date.now(), bucket, dirBuckets));
+      if ((parseISO(cand) ?? 0) < (parseISO(customE) ?? 0)) customS = cand;
+    } else {
+      const cand = isoOf(stepBuckets(parseISO(customE) ?? Date.now(), bucket, dirBuckets));
+      if ((parseISO(cand) ?? 0) > (parseISO(customS) ?? 0)) customE = cand;
+    }
+    expandedKey = null; render();
+  }
 
   function data(): PacingData {
     if (options.pacingData && options.pacingData.bucket === bucket) {
@@ -493,6 +563,7 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
   }
 
   function render(): void {
+    persistPrefs(); // 0.198 — restart-where-you-left-off
     const d = data();
     const r = rate(d);
     const useDollars = measure === 'dollars' && !!r;
@@ -506,9 +577,19 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
     let row1n = 0;
     if (ctrl.ranges !== false) {
       const ranges = (Array.isArray(ctrl.ranges) ? ctrl.ranges
-        : ['next3', 'next6', 'rest', 'thisQtr', 'ytd', 'all', 'custom']) as RangePreset[];
+        : ['span3', 'span6', 'rest', 'thisQtr', 'ytd', 'all', 'custom']) as RangePreset[];
       row1.appendChild(grp('Range', ...ranges.map(p =>
         pill(RANGE_LABELS[p], range === p, () => { range = p; expandedKey = null; render(); })))); row1n++;
+      // 0.198 — edge steppers: add/remove one bucket at each end of the window.
+      const u = bucket === 'week' ? 'wk' : bucket === 'quarter' ? 'qtr' : 'mo';
+      row1.appendChild(grp('Earlier',
+        pill('−', false, () => stepWindow('start', 1), true),   // trim oldest
+        pill('+' + u, false, () => stepWindow('start', -1), true), // add a past bucket
+      ));
+      row1.appendChild(grp('Later',
+        pill('+' + u, false, () => stepWindow('end', 1), true),  // add a future bucket
+        pill('−', false, () => stepWindow('end', -1), true),     // trim newest
+      ));
       if (range === 'custom') {
         const mk = (v: string, set: (x: string) => void) => {
           const i = document.createElement('input');
