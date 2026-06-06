@@ -168,7 +168,7 @@ interface Kpis {
   proposalTotal:    number;
 }
 
-function computeKpis(tasks: NormalizedTask[], audits: Map<string, AuditResult>): Kpis {
+function computeKpis(tasks: NormalizedTask[], audits: Map<string, AuditResult>, dupeIds: Set<string>): Kpis {
   let totalSizedHours = 0;
   let needsAttention  = 0;
   let proposalReady   = 0;
@@ -192,7 +192,7 @@ function computeKpis(tasks: NormalizedTask[], audits: Map<string, AuditResult>):
     totalItems:      tasks.length,
     totalSizedHours: Math.round(totalSizedHours),
     needsAttention,
-    dupeCount:       0,
+    dupeCount:       dupeIds.size,
     proposalReady,
     proposalTotal,
   };
@@ -339,7 +339,26 @@ export function renderAuditListView(
   const audits = new Map<string, AuditResult>();
   for (const t of tasks) audits.set(t.id, auditTask(t));
 
-  const dupeIds = new Set<string>(); // 0.183: real dupe detection
+  // Duplicate detection (0.198.1): flag every item whose normalized title
+  // collides with another item's. Exact-name dupes (e.g. "QBAG-PARENT" ×2,
+  // "Can't Save Page Layout Edits" ×3) are the common case; trim + lowercase
+  // so trailing-space / casing variants still group. Group headers and empty
+  // titles are skipped so they never count as a dupe.
+  const dupeIds = (() => {
+    const byTitle = new Map<string, string[]>();
+    for (const t of tasks) {
+      const key = (t.title || t.name || '').trim().toLowerCase();
+      if (!key) continue;
+      const ids = byTitle.get(key);
+      if (ids) ids.push(t.id);
+      else byTitle.set(key, [t.id]);
+    }
+    const dupes = new Set<string>();
+    for (const ids of byTitle.values()) {
+      if (ids.length > 1) for (const id of ids) dupes.add(id);
+    }
+    return dupes;
+  })();
 
   // ── Filtering (re-computed on every render) ────────────────────────────
   function getFilteredTasks(): NormalizedTask[] {
@@ -778,7 +797,7 @@ export function renderAuditListView(
       'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
     ].join(';');
 
-    const kpis = computeKpis(tasks, audits);
+    const kpis = computeKpis(tasks, audits, dupeIds);
 
     // ── Header (stable across re-renders) ───────────────────────────────
     const header = el('div', '');
