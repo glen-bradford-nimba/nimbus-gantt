@@ -797,7 +797,7 @@ export class NimbusGantt {
       // NOTE: bump this with each core release — consumers (e.g. the app's
       // Auto-Schedule guard) feature-detect first but also surface this string
       // for diagnostics. Stale value = false "needs newer core" reports.
-      version: '0.198.0',
+      version: '0.199.1',
       pushRemoteEvent: typeof this.pushRemoteEvent === 'function',
       timeCursor: true,
       history: !!self.history,
@@ -979,26 +979,50 @@ export class NimbusGantt {
     const panelHeight = this.timelinePanel.clientHeight;
     this.canvasRenderer.resize(panelWidth, panelHeight);
 
+    // 0.199.1 — clamp the scroll offset to the current content extent. The
+    // canvas draws with ctx.translate(-scrollX, 0); after a zoom-OUT (Day/Week
+    // → Month/Quarter) the timeline shrinks dramatically, so a scrollX left
+    // over from the wider zoom now exceeds the new max and translates every bar
+    // off the left edge — the DOM swimlanes still show but the canvas paints
+    // ZERO bars (the reported "Month/Quarter blank canvas"). The browser
+    // auto-clamps the native scrollbar on shrink, but state.scrollX (what the
+    // canvas + hit-test read) stays stale. Clamp here — the convergence point
+    // for every state change with the dims in hand — so it also covers window
+    // resize and row-collapse, not just zoom. When the clamp bites we sync the
+    // DOM scrollbar + persist to the store (so hit-test/drag use the real
+    // offset); the store dispatch reschedules one coalesced render (rAF), which
+    // re-clamps to a no-op — no loop.
+    const maxScrollX = Math.max(0, totalWidth - panelWidth);
+    const maxScrollY = Math.max(0, totalHeight - panelHeight);
+    const clampedX = Math.min(Math.max(0, state.scrollX), maxScrollX);
+    const clampedY = Math.min(Math.max(0, state.scrollY), maxScrollY);
+    let renderState = state;
+    if (clampedX !== state.scrollX || clampedY !== state.scrollY) {
+      renderState = { ...state, scrollX: clampedX, scrollY: clampedY };
+      this.scrollManager.setScrollPosition(clampedX, clampedY);
+      this.store.dispatch({ type: 'SET_SCROLL', x: clampedX, y: clampedY });
+    }
+
     // Render canvas
-    this.canvasRenderer.render(state, this.layouts, this.timeScale);
+    this.canvasRenderer.render(renderState, this.layouts, this.timeScale);
 
     // Render dependency arrows on top of bars
-    if (state.dependencies.size > 0) {
+    if (renderState.dependencies.size > 0) {
       const canvas = this.timelinePanel.querySelector('canvas');
       if (canvas) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           this.dependencyRenderer.render(
-            ctx, state, this.layouts, state.config.theme,
-            state.scrollX, state.scrollY, state.config.headerHeight,
+            ctx, renderState, this.layouts, renderState.config.theme,
+            renderState.scrollX, renderState.scrollY, renderState.config.headerHeight,
           );
         }
       }
     }
 
     // Render tree grid
-    this.treeGrid.render(state, state.tree);
-    this.treeGrid.setScrollY(state.scrollY);
+    this.treeGrid.render(renderState, renderState.tree);
+    this.treeGrid.setScrollY(renderState.scrollY);
 
     // Sync selection highlights
     this.treeGrid.clearHighlight();

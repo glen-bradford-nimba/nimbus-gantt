@@ -486,7 +486,7 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
    * save / delete / default all dispatch (→ renderSlots re-renders the bar). */
   function buildViewsMenu(state: SlotProps['state'], dispatch: SlotProps['dispatch']): HTMLElement {
     const wrap = el('span', '');
-    wrap.style.cssText = 'position:relative;display:inline-block;';
+    wrap.style.cssText = 'display:inline-block;';
     const activeName = state.activeViewId
       ? (state.savedViews.find((v) => v.id === state.activeViewId)?.name ?? null)
       : null;
@@ -497,10 +497,15 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     wrap.appendChild(trigger);
     if (!viewsMenuOpen) return wrap;
 
+    // 0.199.1 — position:fixed anchored to the trigger's measured rect, so the
+    // menu escapes the titlebar's overflow/stacking context (the earlier
+    // position:absolute got clipped behind row 2 / the toolbar). Placed after
+    // attach via rAF because getBoundingClientRect needs the trigger in the DOM.
     const menu = el('div', '');
     menu.style.cssText = [
-      'position:absolute', 'z-index:60', 'top:calc(100% + 4px)', 'left:0',
-      'min-width:248px', 'background:#ffffff', 'border:1px solid #e2e8f0',
+      'position:fixed', 'z-index:9999', 'top:0', 'left:0', 'visibility:hidden',
+      'min-width:248px', 'max-height:70vh', 'overflow:auto',
+      'background:#ffffff', 'border:1px solid #e2e8f0',
       'border-radius:8px', 'box-shadow:0 10px 28px rgba(15,23,42,.16)',
       'padding:6px', 'font-size:13px', 'color:#0f172a',
     ].join(';');
@@ -565,6 +570,20 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     menu.appendChild(saveRow);
 
     wrap.appendChild(menu);
+    // Anchor under the trigger once both are in the DOM. Viewport-clamped so a
+    // wide menu near the right edge doesn't spill off-screen. LWS-guarded.
+    const place = (): void => {
+      try {
+        const r = trigger.getBoundingClientRect();
+        const vw = (typeof window !== 'undefined' && window.innerWidth) || 1280;
+        const left = Math.max(8, Math.min(r.left, vw - menu.offsetWidth - 8));
+        menu.style.top = (r.bottom + 4) + 'px';
+        menu.style.left = left + 'px';
+        menu.style.visibility = 'visible';
+      } catch { menu.style.visibility = 'visible'; }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(place);
+    else place();
     return wrap;
   }
 
