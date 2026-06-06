@@ -1,6 +1,29 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.196.2 Gather vs Wired mode (2026-06-05).** The timeline now
+**📣 Latest cut: 0.197.0 pacingData pass-through (2026-06-06).** Closes the live
+gap Cowork found on MF prod 0.264: the Pacing view was running NG's task-derived
+**fallback preview** ("Forecast preview — remaining spread"), not DH's
+authoritative numbers, because there was no way to feed `PacingData` in. Now:
+- **`mountConfig.config.pacing.data`** seeds the Pacing view's authoritative data.
+- **`handle.setPacingData(data)`** — live push, no reload (DH recompute →
+  re-render if Pacing is active); `null` reverts to the task-derived preview.
+- **`portfolioPacingToPacingData(dto)`** — exported adapter mapping DH's
+  `PortfolioPacingDTO` (getPortfolioPacing) → NG `PacingData` in one call
+  (period totals 1:1, granularity→bucket, blendedRate→rate, summary from totals).
+- **items-hybrid** — DH's `PacingPeriodDTO` has no per-period `items[]`, so when
+  an authoritative bucket lacks composition NG borrows drill-down items from its
+  own task buckets (key/startMs/label match) — rich drill-down works, zero DH change.
+- `index.ts` exports the adapter + `PacingData`/`PortfolioPacingDTO`/bucket types
+  (npm/ESM contract; matches renderTreemap/renderBubble).
+**APP-only** (core unchanged at 0.196.2 `39df71d7…`). APP IIFE md5
+**`474705843fcb21f48a5fce1bf3dc9a13`** (adapter rides in via pacing.ts←IIFEApp;
+the index re-export is npm-only, so the IIFE hash is unchanged from the
+pre-export build — intentional, verified). Merged 4ed0d50 (PR #32). tsc-clean
+(6 pre-existing), 155/155. **DH:** serialize getPortfolioPacing→PacingData (via
+the adapter or directly), pass as `config.pacing.data` and/or call
+`setPacingData` on recompute, re-copy the APP bundle. Resource-leveling still later.
+
+**0.196.2 Gather vs Wired mode (2026-06-05).** The timeline now
 has two host-toggleable modes (Glen's ask): **wired** = edits run the DML as
 made; **gather** (hypothetical) = every edit buffers into the review/audit list
 as a **potential DML**, committed later through review-and-edit. Two parts:
