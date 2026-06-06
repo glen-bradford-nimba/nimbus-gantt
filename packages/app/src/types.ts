@@ -574,21 +574,25 @@ export interface MountOptions {
 export interface PendingEdit {
   taskId: string;
   kind: 'edit' | 'reorder';
-  /** Populated when kind === 'edit'. */
-  changes?: { startDate?: string; endDate?: string };
+  /** Populated when kind === 'edit'. 0.196.2 — field-generic: any changed
+   *  work-item field (title, stage, assignee, …), not just dates. The named
+   *  date fields stay for back-compat; the index signature carries the rest. */
+  changes?: { startDate?: string; endDate?: string; [key: string]: unknown };
   /** Populated when kind === 'reorder'. Mirrors TaskPatch fields. */
   reorderPayload?: {
     priorityGroup?: string;
     sortOrder?: number;
     parentId?: string | null;
   };
-  /** Pre-edit-chain snapshot — used by discardEdits to revert. */
+  /** Pre-edit-chain snapshot — used by discardEdits to revert. 0.196.2 —
+   *  field-generic (index signature) so any changed field can be reverted. */
   original: {
     startDate?: string;
     endDate?: string;
     priorityGroup?: string | null;
     sortOrder?: number;
     parentId?: string | null;
+    [key: string]: unknown;
   };
   /** 0.190 — alias of `original`. Same object reference; same shape. Hosts
    *  building "from → to" audit lists tend to reach for `before` first.
@@ -599,6 +603,7 @@ export interface PendingEdit {
     priorityGroup?: string | null;
     sortOrder?: number;
     parentId?: string | null;
+    [key: string]: unknown;
   };
   /** ms-since-epoch of the LAST coalesced edit on this taskId+kind. */
   ts: number;
