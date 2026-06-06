@@ -1407,14 +1407,33 @@ export class IIFEApp {
       if (idx === -1) return;
       const u: NormalizedTask = { ...allTasks[idx] };
       if (p.kind === 'edit') {
-        if (p.original.startDate !== undefined) u.startDate = p.original.startDate;
-        if (p.original.endDate   !== undefined) u.endDate   = p.original.endDate;
+        // 0.196.2 — field-generic revert: restore every key that was changed,
+        // not just dates. For 'edit' kind the change keys are NormalizedTask
+        // field names, so a direct restore from `original` is correct.
+        const ch = p.changes || {};
+        const ur = u as unknown as Record<string, unknown>;
+        for (const k of Object.keys(ch)) {
+          if (p.original[k] !== undefined) ur[k] = p.original[k];
+        }
       } else {
         if (p.original.priorityGroup !== undefined) u.priorityGroup    = p.original.priorityGroup;
         if (p.original.parentId      !== undefined) u.parentWorkItemId = p.original.parentId;
         if (p.original.sortOrder     !== undefined) u.sortOrder        = p.original.sortOrder;
       }
       allTasks[idx] = u;
+    }
+
+    /** 0.196.2 — friendly labels + value formatting for the field-generic
+     *  review list. Unknown keys fall back to the raw key name. */
+    const PENDING_FIELD_LABEL: Record<string, string> = {
+      startDate: 'start', endDate: 'end', title: 'title', name: 'name',
+      stage: 'status', status: 'status', assignee: 'assignee', progress: 'progress',
+      priorityGroup: 'group', sortOrder: 'sortOrder', parentId: 'parent',
+      estimatedHours: 'estimate', loggedHours: 'logged',
+    };
+    function fmtPendingVal(v: unknown): string {
+      if (v === null || v === undefined || v === '') return 'none';
+      return String(v);
     }
 
     /** Translates the internal PendingEdit buffer into AuditPanel's
@@ -1434,13 +1453,13 @@ export class IIFEApp {
           byTask.set(p.taskId, entry);
         }
         if (p.kind === 'edit' && p.changes) {
-          if (p.changes.startDate !== undefined) {
-            entry.fields.push('startDate');
-            entry.descs.push('start: ' + (p.original.startDate || '?') + ' → ' + p.changes.startDate);
-          }
-          if (p.changes.endDate !== undefined) {
-            entry.fields.push('endDate');
-            entry.descs.push('end: ' + (p.original.endDate || '?') + ' → ' + p.changes.endDate);
+          // 0.196.2 — field-generic: render EVERY changed key (title, stage,
+          // assignee, dates, …) as old → new, not just start/end. This makes
+          // the review/audit gate cover "anything that changes."
+          for (const k of Object.keys(p.changes)) {
+            if (p.changes[k] === undefined) continue;
+            entry.fields.push(k);
+            entry.descs.push((PENDING_FIELD_LABEL[k] || k) + ': ' + fmtPendingVal(p.original[k]) + ' → ' + fmtPendingVal(p.changes[k]));
           }
         }
         if (p.kind === 'reorder' && p.reorderPayload) {
