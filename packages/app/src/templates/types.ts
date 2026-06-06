@@ -12,6 +12,7 @@ import type {
   FieldDescriptor,
 } from '../types';
 import type { TaskStats } from '../pipeline';
+import type { SavedView } from '../savedViews';
 
 /* ── §1.1 Primitive enums ───────────────────────────────────────────────── */
 export type ViewMode = 'gantt' | 'list' | 'treemap' | 'bubbles' | 'calendar' | 'flow' | 'pacing';
@@ -144,6 +145,14 @@ export interface AppState {
    *  writes here via TOGGLE_FEATURE; buildGanttCols + other consumers
    *  merge with tplConfig.features so toggles take effect on rebuildView. */
   featureOverrides: Record<string, boolean>;
+  /** 0.199.0 — Saved Views. The persisted list of named layout snapshots, the
+   *  starred default's id (opens on load), and which saved view is currently
+   *  applied (null = ad-hoc, no saved view active). Hydrated from localStorage
+   *  at mount; mutated by SAVE_VIEW / APPLY_VIEW / DELETE_VIEW / SET_DEFAULT_VIEW
+   *  (handled in IIFEApp.dispatch, which owns the side-effecting persistence). */
+  savedViews: SavedView[];
+  defaultViewId: string | null;
+  activeViewId: string | null;
 }
 
 export type AppEvent =
@@ -172,7 +181,14 @@ export type AppEvent =
   // host-callback access. The reducer ignores them (no-op). See
   // docs/ng-ui-conventions.md.
   | { type: 'AUTOSCHEDULE_OPEN' }
-  | { type: 'TEAM_OPEN' };
+  | { type: 'TEAM_OPEN' }
+  // 0.199.0 — Saved Views intents. Like PATCH/AUTOSCHEDULE these carry their
+  // side effects (localStorage persistence, pacing-prefs round-trip) and are
+  // intercepted in IIFEApp.dispatch(); the pure reducer ignores them.
+  | { type: 'SAVE_VIEW'; name: string }
+  | { type: 'APPLY_VIEW'; id: string }
+  | { type: 'DELETE_VIEW'; id: string }
+  | { type: 'SET_DEFAULT_VIEW'; id: string | null };
 
 export interface PatchLogEntry {
   ts: Date;

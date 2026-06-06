@@ -23,11 +23,16 @@ export const INITIAL_STATE: AppState = {
   advisorOpen: false,
   featureOverrides: {},
   openDetailTaskIds: [],
+  savedViews: [],
+  defaultViewId: null,
+  activeViewId: null,
 };
 
 export function reduceAppState(state: AppState, event: AppEvent): AppState {
   switch (event.type) {
-    case 'SET_VIEW':       return { ...state, viewMode: event.mode };
+    // 0.199.0 — a manual view-mode switch diverges from any applied saved view,
+    // so clear activeViewId (the Views menu falls back to its "Views" label).
+    case 'SET_VIEW':       return { ...state, viewMode: event.mode, activeViewId: null };
     case 'SET_FILTER':     return { ...state, filter: event.id };
     case 'SET_SEARCH':     return { ...state, search: event.q };
     case 'SET_ZOOM':       return { ...state, zoom: event.zoom };

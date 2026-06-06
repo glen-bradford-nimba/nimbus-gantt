@@ -145,6 +145,7 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
   // (state.adminOpen, state.advisorOpen) and dispatch TOGGLE_ADMIN /
   // TOGGLE_ADVISOR events. Unpin stays a local placeholder for now.
   let unpinOn = false; // "Unpin" shown when chromeVisible (default true in v9)
+  let viewsMenuOpen = false; // 0.199.0 — Saved Views dropdown open/closed
 
   function render(p: SlotProps) {
     clear(root);
@@ -175,8 +176,18 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
         btn.addEventListener('click', () => dispatch({ type: 'SET_VIEW', mode: v.id as ViewMode }));
         rowViews.appendChild(btn);
       });
-      root.appendChild(rowViews);
     }
+
+    /* Saved Views dropdown (0.199.0). Named layout presets + ★ default +
+     * "save current". Opt out via config.viewsManager === false. Self-styled
+     * inline (small surface — no stylesheet dependency). The menu's open state
+     * lives in the closure; renderSlots rebuilds the DOM, so applying/saving a
+     * view re-renders and the handlers close the menu first. */
+    if ((config as { viewsManager?: boolean }).viewsManager !== false) {
+      rowViews.appendChild(buildViewsMenu(state, dispatch));
+    }
+
+    if (rowViews.childNodes.length > 0) root.appendChild(rowViews);
 
     /* Row 2 — brand + version + toggles + zoom + group + summary + right-side. */
 
@@ -468,6 +479,93 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
       legend.appendChild(chip);
     }
     root.appendChild(legend);
+  }
+
+  /* Saved Views menu (0.199.0). Returns the dropdown wrapper. Self-styled
+   * inline. Toggling open/close flips the closure flag and re-renders; apply /
+   * save / delete / default all dispatch (→ renderSlots re-renders the bar). */
+  function buildViewsMenu(state: SlotProps['state'], dispatch: SlotProps['dispatch']): HTMLElement {
+    const wrap = el('span', '');
+    wrap.style.cssText = 'position:relative;display:inline-block;';
+    const activeName = state.activeViewId
+      ? (state.savedViews.find((v) => v.id === state.activeViewId)?.name ?? null)
+      : null;
+    const trigger = el('button', CLS_PILL_BTN_BASE + ' ' + CLS_PILL_BTN_IDLE_VIOLET);
+    trigger.textContent = '☰ ' + (activeName || 'Views') + ' ▾';
+    trigger.title = 'Saved views';
+    trigger.addEventListener('click', () => { viewsMenuOpen = !viewsMenuOpen; render(currentProps); });
+    wrap.appendChild(trigger);
+    if (!viewsMenuOpen) return wrap;
+
+    const menu = el('div', '');
+    menu.style.cssText = [
+      'position:absolute', 'z-index:60', 'top:calc(100% + 4px)', 'left:0',
+      'min-width:248px', 'background:#ffffff', 'border:1px solid #e2e8f0',
+      'border-radius:8px', 'box-shadow:0 10px 28px rgba(15,23,42,.16)',
+      'padding:6px', 'font-size:13px', 'color:#0f172a',
+    ].join(';');
+
+    if (state.savedViews.length === 0) {
+      const empty = el('div', '');
+      empty.style.cssText = 'padding:8px 10px;color:#94a3b8;';
+      empty.textContent = 'No saved views yet — save the current layout below.';
+      menu.appendChild(empty);
+    } else {
+      state.savedViews.forEach((v) => {
+        const isDefault = state.defaultViewId === v.id;
+        const isActive = state.activeViewId === v.id;
+        const row = el('div', '');
+        row.style.cssText = 'display:flex;align-items:center;gap:2px;padding:3px 4px;border-radius:6px;';
+        const name = el('button', '');
+        name.style.cssText = 'flex:1;text-align:left;background:none;border:none;cursor:pointer;padding:4px 6px;'
+          + 'color:' + (isActive ? '#7c3aed' : '#0f172a') + ';font-weight:' + (isActive ? '600' : '400') + ';';
+        name.textContent = (isDefault ? '★ ' : '') + v.name;
+        name.title = 'Apply this view';
+        name.addEventListener('click', () => { viewsMenuOpen = false; dispatch({ type: 'APPLY_VIEW', id: v.id }); });
+        const star = el('button', '');
+        star.style.cssText = 'background:none;border:none;cursor:pointer;padding:4px 6px;color:'
+          + (isDefault ? '#f59e0b' : '#cbd5e1') + ';';
+        star.textContent = '★';
+        star.title = isDefault ? 'Default view (opens on load) — click to unset' : 'Set as default view';
+        star.addEventListener('click', () => dispatch({ type: 'SET_DEFAULT_VIEW', id: v.id }));
+        const del = el('button', '');
+        del.style.cssText = 'background:none;border:none;cursor:pointer;padding:4px 6px;color:#cbd5e1;';
+        del.textContent = '✕';
+        del.title = 'Delete view';
+        del.addEventListener('click', () => dispatch({ type: 'DELETE_VIEW', id: v.id }));
+        row.appendChild(name); row.appendChild(star); row.appendChild(del);
+        menu.appendChild(row);
+      });
+    }
+
+    const divider = el('div', '');
+    divider.style.cssText = 'border-top:1px solid #f1f5f9;margin:6px 0;';
+    menu.appendChild(divider);
+
+    const saveRow = el('div', '');
+    saveRow.style.cssText = 'display:flex;gap:4px;padding:2px 4px;';
+    const input = el('input', '') as HTMLInputElement;
+    input.type = 'text';
+    input.placeholder = 'Save current view as…';
+    input.style.cssText = 'flex:1;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;font-size:13px;outline:none;';
+    const saveBtn = el('button', '');
+    saveBtn.textContent = 'Save';
+    saveBtn.style.cssText = 'background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-weight:600;';
+    const doSave = (): void => {
+      const n = input.value.trim();
+      if (!n) { input.focus(); return; }
+      viewsMenuOpen = false;
+      dispatch({ type: 'SAVE_VIEW', name: n });
+    };
+    saveBtn.addEventListener('click', doSave);
+    input.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') doSave(); });
+    // Keep clicks inside the input from bubbling to any document dismiss handler.
+    input.addEventListener('click', (e) => e.stopPropagation());
+    saveRow.appendChild(input); saveRow.appendChild(saveBtn);
+    menu.appendChild(saveRow);
+
+    wrap.appendChild(menu);
+    return wrap;
   }
 
   render(initial);

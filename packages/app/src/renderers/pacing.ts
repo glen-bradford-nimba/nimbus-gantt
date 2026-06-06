@@ -334,6 +334,22 @@ function loadPacingPrefs(): PacingPrefs | null {
 function savePacingPrefs(p: PacingPrefs): void {
   try { if (typeof localStorage !== 'undefined') localStorage.setItem(PACING_PREFS_KEY, JSON.stringify(p)); } catch { /* LWS / no storage — ignore */ }
 }
+
+// 0.199.0 — Saved Views accessors. The views layer snapshots/restores the
+// pacing config as an opaque blob (structurally decoupled — it never sees the
+// PacingPrefs shape). Restoring writes the blob to the same localStorage key the
+// renderer reads at mount, so applying a saved view + rebuilding paints pacing in
+// the saved state. Returning `Record<string,unknown>` keeps PacingPrefs private.
+export function getPacingPrefs(): Record<string, unknown> | null {
+  return loadPacingPrefs() as Record<string, unknown> | null;
+}
+export function setPacingPrefs(p: Record<string, unknown> | null): void {
+  if (p == null) {
+    try { if (typeof localStorage !== 'undefined') localStorage.removeItem(PACING_PREFS_KEY); } catch { /* ignore */ }
+    return;
+  }
+  savePacingPrefs(p as PacingPrefs);
+}
 function keyToMs(key: string): number {
   if (key[0] === 'W') return parseISO(key.slice(1)) ?? 0;
   if (key.indexOf('Q') >= 0) { const [y, q] = key.split('-Q'); return Date.UTC(+y, (+q - 1) * 3, 1); }
