@@ -652,6 +652,14 @@ export interface AppInstance {
    *  engineOnly instances do not expose it (React already owns chrome). */
   toggleChrome?(visible?: boolean): void;
 
+  /** 0.196.2 — runtime toggle between 'wired' (edits run the DML as made) and
+   *  'gather' (edits buffer into the review/audit list as potential DMLs;
+   *  commit later). Mirrors the batchMode flag; lets the host expose the
+   *  setting. Does not auto-commit/discard pending edits on switch. */
+  setMode?(mode: 'wired' | 'gather'): 'wired' | 'gather';
+  /** 0.196.2 — current mode (mirrors batchMode). */
+  getMode?(): 'wired' | 'gather';
+
   /** 0.185 — snapshot of the current buffered-edit set. Empty when not in
    *  batch mode or the buffer is clean. Insertion order preserved. */
   getPendingEdits?(): PendingEdit[];
