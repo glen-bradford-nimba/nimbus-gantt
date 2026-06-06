@@ -118,6 +118,11 @@
         onItemClick: (id) => console.log('[pacing-demo] open item', id),
         onItemHover: (id) => { if (id) console.log('[pacing-demo] hover item', id); },
         onOpenReport: (ctx) => console.log('[pacing-demo] open report', ctx),
+        // 0.196.1 — Auto-Schedule review-before-DML hand-off. NG shows the
+        // proposed-changes diff; on Apply it hands the host this batch to stage
+        // for review (DH → its review-before-DML audit list). Nothing applied
+        // in-engine. Here we just log the proposed batch.
+        onAutoSchedule: (r) => console.log('[pacing-demo] auto-schedule proposed', r.changes.length, 'changes (review-before-DML)', r.changes),
         onPatch: async (p) => console.log('[pacing-demo] onPatch', p),
       });
       ng = handle.gantt;

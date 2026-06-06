@@ -1,6 +1,28 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.196.0 NG-owned modals + UI conventions (2026-06-05).**
+**📣 Latest cut: 0.196.1 Auto-Schedule review-before-DML (2026-06-05).**
+Auto-Schedule no longer applies silently. It now does **preview → review →
+commit**: NG computes a **preview** (new core `autoSchedule:preview` event —
+computes WITHOUT dispatching TASK_MOVE), the modal shows the **proposed
+date-change diff** (old → new per work item), and on **Apply** NG hands the
+host the batch — it does **not** write anything itself:
+- `onAutoSchedule({ changes: AutoScheduleChange[] })` (preferred) → host stages
+  the whole batch for commit/reject (**DH → its review-before-DML audit list**,
+  the 0.190 audit-pass extension). Nothing hits the org until you commit there.
+- else `onPatch` per change → same path drag edits use (host pending/audit list).
+- else (standalone/CN/demo, no host handler) → in-engine `autoSchedule:run`.
+This is the answer to Glen's "I want to review auto-schedule before DML."
+Resource-leveling (team capacity → schedule math) still the later step.
+
+**TWO-bundle cut** (core preview event + app review modal):
+- CORE `nimbus-gantt.iife.js` md5 **`39df71d7f44dec64d35134f77c8f11a7`**.
+- APP `nimbus-gantt-app.iife.js` md5 **`876bef0e4368e0b0fdb00284d27e3fe1`**.
+Branch `feat/0.196.1-autoschedule-review`, **PR open (unmerged)**. Verification:
+my code tsc-clean (6 pre-existing errors unchanged), core+app build clean,
+vitest 155/155, `autoSchedule:preview` in both bundles. Demo: Auto-Schedule in
+`pacing.html` now shows the diff + logs the proposed batch on Apply.
+
+**0.196.0 NG-owned modals + UI conventions (2026-06-05).**
 Establishes the house rule **`docs/ng-ui-conventions.md`**: in-app surfaces
 (modals/panels/tooltips/menus) are **NG-rendered + self-styled** (so they look
 identical on web / Salesforce / demo); only **hand-offs** (open record / open

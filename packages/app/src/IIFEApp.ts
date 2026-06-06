@@ -16,7 +16,7 @@
  */
 import type {
   NormalizedTask, AppInstance, MountOptions, TaskPatch, NimbusGanttEngine,
-  PendingEdit, CommitEditsResult, GanttDependency,
+  PendingEdit, CommitEditsResult, GanttDependency, AutoScheduleChange,
 } from './types';
 import type {
   TemplateOverrides, TemplateConfig, AppState, AppEvent, SlotProps, SlotData, PatchLogEntry,
@@ -2014,63 +2014,102 @@ export class IIFEApp {
     }
 
     function openAutoScheduleModal(): void {
-      // Host override — the scheduler may run server-side (DH's ETA service).
-      if (options.onAutoSchedule) { options.onAutoSchedule({ taskCount: allTasks.length }); return; }
-
+      // 0.196.1 — PREVIEW → REVIEW → COMMIT (review-before-DML). NG never
+      // silently applies: it computes a preview, shows the proposed date
+      // changes, and on Apply hands the host the batch (DH stages it in its
+      // review-before-DML audit list) — or, standalone, applies in-engine.
       const gi = ganttInst as { emit?: (e: string, ...a: unknown[]) => void } | null;
       const hasEmit = !!gi && typeof gi.emit === 'function';
-      const m = openModal({ title: 'Auto-Schedule', width: 460 });
-
-      const dated = allTasks.filter((t) => t.startDate && t.endDate);
-      const span = dated.length
-        ? {
-            start: dated.reduce((a, t) => ((t.startDate as string) < a ? (t.startDate as string) : a), dated[0].startDate as string),
-            end: dated.reduce((a, t) => ((t.endDate as string) > a ? (t.endDate as string) : a), dated[0].endDate as string),
-          }
-        : null;
-
-      m.body.appendChild(mk('div', undefined,
-        'Reflow start/end dates from dependencies (ASAP / critical-path), so the timeline and forecast line up with what actually has to happen first.'));
-      const stat = mk('div', 'ngm-stat');
-      const s1 = mk('div'); s1.appendChild(mk('b', undefined, String(allTasks.length))); s1.appendChild(document.createTextNode('work items')); stat.appendChild(s1);
-      const s2 = mk('div'); s2.appendChild(mk('b', undefined, String(dated.length))); s2.appendChild(document.createTextNode('have dates')); stat.appendChild(s2);
-      if (span) { const s3 = mk('div'); s3.appendChild(mk('b', undefined, span.start + ' → ' + span.end)); s3.appendChild(document.createTextNode('current span')); stat.appendChild(s3); }
-      m.body.appendChild(stat);
+      const m = openModal({ title: 'Auto-Schedule — review changes', width: 560 });
 
       if (!hasEmit) {
         m.body.appendChild(mk('div', 'ngm-note ngm-warn',
-          'Auto-schedule needs the core engine 0.196.0+ (the public emit trigger). Re-copy the core bundle, then reload.'));
+          'Auto-schedule needs the core engine 0.196.1+ (the preview trigger). Re-copy the core bundle, then reload.'));
         m.setFooter([{ label: 'Close', primary: true, onClick: () => m.close() }]);
         return;
       }
-      m.body.appendChild(mk('div', 'ngm-note',
-        'Applies to this session immediately; use Undo (Ctrl+Z) to revert. Dependencies drive the order — items with no dates are left as-is.'));
 
-      function showResult(result: { scheduledTasks?: Map<string, unknown>; violations?: Array<{ message: string }>; projectStart?: string; projectEnd?: string; totalDuration?: number } | null): void {
-        m.body.textContent = '';
-        const scheduled = result?.scheduledTasks ? result.scheduledTasks.size : 0;
-        const violations = result?.violations ?? [];
-        m.body.appendChild(mk('div', undefined, scheduled ? 'Schedule applied.' : 'No changes were needed.'));
-        const rs = mk('div', 'ngm-stat');
-        const a = mk('div'); a.appendChild(mk('b', undefined, String(scheduled))); a.appendChild(document.createTextNode('tasks scheduled')); rs.appendChild(a);
-        if (result?.projectStart && result?.projectEnd) { const b = mk('div'); b.appendChild(mk('b', undefined, result.projectStart + ' → ' + result.projectEnd)); b.appendChild(document.createTextNode('project span')); rs.appendChild(b); }
-        if (typeof result?.totalDuration === 'number') { const c = mk('div'); c.appendChild(mk('b', undefined, String(result.totalDuration))); c.appendChild(document.createTextNode('working days')); rs.appendChild(c); }
-        const v = mk('div'); v.appendChild(mk('b', undefined, String(violations.length))); v.appendChild(document.createTextNode('violations')); rs.appendChild(v);
-        m.body.appendChild(rs);
-        if (violations.length) {
-          const list = mk('div', 'ngm-note');
-          violations.slice(0, 8).forEach((vi) => list.appendChild(mk('div', 'ngm-warn', '• ' + vi.message)));
-          m.body.appendChild(list);
+      m.body.appendChild(mk('div', undefined,
+        'Reflow start/end dates from dependencies (ASAP / critical-path). Review the proposed changes below — nothing is committed until you Apply.'));
+      const loading = mk('div', 'ngm-note', 'Computing proposed schedule…');
+      m.body.appendChild(loading);
+
+      type Scheduled = { startDate: string; endDate: string };
+      interface PreviewResult { scheduledTasks?: Map<string, Scheduled>; violations?: Array<{ message: string }>; projectStart?: string; projectEnd?: string; totalDuration?: number }
+
+      gi!.emit!('autoSchedule:preview', (raw: unknown) => {
+        const result = (raw || {}) as PreviewResult;
+        const byId = new Map(allTasks.map((t) => [t.id, t]));
+        const changes: AutoScheduleChange[] = [];
+        if (result.scheduledTasks) {
+          for (const [taskId, sc] of result.scheduledTasks) {
+            const t = byId.get(taskId);
+            if (!t) continue;
+            if (t.startDate !== sc.startDate || t.endDate !== sc.endDate) {
+              changes.push({
+                id: taskId,
+                name: t.title || t.name || taskId,
+                startDate: sc.startDate, endDate: sc.endDate,
+                previousStartDate: t.startDate ?? undefined,
+                previousEndDate: t.endDate ?? undefined,
+              });
+            }
+          }
         }
-        m.setFooter([{ label: 'Done', primary: true, onClick: () => m.close() }]);
-      }
+        renderReview(changes, result.violations ?? []);
+      });
 
-      m.setFooter([
-        { label: 'Cancel', onClick: () => m.close() },
-        { label: 'Run schedule', primary: true, onClick: () => {
-          gi!.emit!('autoSchedule:run', (result: unknown) => showResult(result as Parameters<typeof showResult>[0]));
-        } },
-      ]);
+      function renderReview(changes: AutoScheduleChange[], violations: Array<{ message: string }>): void {
+        m.body.textContent = '';
+        if (!changes.length) {
+          m.body.appendChild(mk('div', undefined, 'No date changes proposed — the schedule already satisfies the dependencies.'));
+          m.setFooter([{ label: 'Close', primary: true, onClick: () => m.close() }]);
+          return;
+        }
+        const summary = mk('div', 'ngm-stat');
+        const a = mk('div'); a.appendChild(mk('b', undefined, String(changes.length))); a.appendChild(document.createTextNode('proposed changes')); summary.appendChild(a);
+        if (violations.length) { const v = mk('div'); v.appendChild(mk('b', undefined, String(violations.length))); v.appendChild(document.createTextNode('violations')); summary.appendChild(v); }
+        m.body.appendChild(summary);
+
+        // Proposed-changes diff table (old → new), the review surface.
+        const tbl = mk('table', 'ngm-tbl') as HTMLTableElement;
+        const hr = mk('tr');
+        ['Work item', 'Start', 'End'].forEach((h) => hr.appendChild(mk('th', undefined, h)));
+        const thd = mk('thead'); thd.appendChild(hr); tbl.appendChild(thd);
+        const tb = mk('tbody');
+        changes.slice(0, 200).forEach((c) => {
+          const tr = mk('tr');
+          tr.appendChild(mk('td', undefined, c.name || c.id));
+          const sCell = mk('td'); sCell.textContent = (c.previousStartDate || '—') + ' → ' + c.startDate; tr.appendChild(sCell);
+          const eCell = mk('td'); eCell.textContent = (c.previousEndDate || '—') + ' → ' + c.endDate; tr.appendChild(eCell);
+          tb.appendChild(tr);
+        });
+        tbl.appendChild(tb);
+        m.body.appendChild(tbl);
+
+        const usingHost = !!options.onAutoSchedule || !!options.onPatch;
+        m.body.appendChild(mk('div', 'ngm-note', usingHost
+          ? 'Apply sends these to the host to stage for review before any DML — nothing is written to the org until you commit them there.'
+          : 'Standalone: Apply updates this session only (use Undo to revert).'));
+
+        m.setFooter([
+          { label: 'Cancel', onClick: () => m.close() },
+          { label: `Apply ${changes.length} change${changes.length === 1 ? '' : 's'}`, primary: true, onClick: () => {
+            if (options.onAutoSchedule) {
+              // Preferred: hand the whole proposed batch to the host (→ DH's
+              // review-before-DML audit list). NG does NOT apply in-engine.
+              options.onAutoSchedule({ changes });
+            } else if (options.onPatch) {
+              // Same path drag edits use → host stages each as a pending patch.
+              changes.forEach((c) => options.onPatch!({ id: c.id, startDate: c.startDate, endDate: c.endDate }));
+            } else {
+              // Standalone/CN/demo: no host patch handler → apply in-engine.
+              gi!.emit!('autoSchedule:run');
+            }
+            m.close();
+          } },
+        ]);
+      }
     }
 
     function openTeamModal(): void {
