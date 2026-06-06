@@ -794,7 +794,10 @@ export class NimbusGantt {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const self = this as any;
     return {
-      version: '0.187.0',
+      // NOTE: bump this with each core release — consumers (e.g. the app's
+      // Auto-Schedule guard) feature-detect first but also surface this string
+      // for diagnostics. Stale value = false "needs newer core" reports.
+      version: '0.198.0',
       pushRemoteEvent: typeof this.pushRemoteEvent === 'function',
       timeCursor: true,
       history: !!self.history,
