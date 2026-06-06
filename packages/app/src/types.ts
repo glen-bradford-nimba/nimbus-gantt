@@ -1,3 +1,7 @@
+// Type-only import (erased at compile — no runtime cycle) so AppInstance can
+// type setPacingData against the canonical PacingData shape.
+import type { PacingData } from './renderers/pacing';
+
 export interface PriorityBucket {
   id: string;
   label: string;
@@ -659,6 +663,12 @@ export interface AppInstance {
   setMode?(mode: 'wired' | 'gather'): 'wired' | 'gather';
   /** 0.196.2 — current mode (mirrors batchMode). */
   getMode?(): 'wired' | 'gather';
+
+  /** 0.197.0 — push authoritative PacingData into the Pacing view (live, no
+   *  reload). DH calls this after a recompute (its getPortfolioPacing → adapt
+   *  via portfolioPacingToPacingData). null reverts to the task-derived
+   *  preview. Re-renders immediately if the Pacing tab is active. */
+  setPacingData?(data: PacingData | null): void;
 
   /** 0.185 — snapshot of the current buffered-edit set. Empty when not in
    *  batch mode or the buffer is clean. Insertion order preserved. */
