@@ -58,7 +58,6 @@
  */
 
 import type { NormalizedTask } from '../../../../types';
-import { DONE_STAGES } from '../../../../pipeline';
 import { el, clear } from '../shared/el';
 
 /* ── Bucket order + display labels (matches CLOUD_NIMBUS_PRIORITY_BUCKETS) ── */
@@ -221,9 +220,18 @@ function fmtDateRange(start: string | null | undefined, end: string | null | und
 function progressOf(task: NormalizedTask): number | null {
   const high = task.estimatedHours || 0;
   const logged = task.loggedHours || 0;
-  if (DONE_STAGES[task.stage || '']) return 100;
   if (!high) return null;
-  return Math.min(100, Math.round((logged / high) * 100));
+  // 0.199.6 — Budget Used = hours logged / hours estimated, period. Two earlier
+  // behaviours buried the very signal this audit exists to expose:
+  //   • `if (DONE_STAGES[stage]) return 100` forced every Done item to 100%, so a
+  //     Done task logged at 1.5h against a 47h estimate read "100%" instead of 3%
+  //     — hiding a 31x over-estimate (the sizing-accuracy gold).
+  //   • `Math.min(100, …)` capped the value, hiding OVER-runs (>100%) — the
+  //     other half of "what's mis-sized / over budget". The tree-grid column
+  //     (pipeline.ts) was already uncapped, so the two surfaces disagreed.
+  // Now it's the honest ratio (uncapped, status-independent); the colour ramp
+  // below flags >100% as over budget.
+  return Math.round((logged / high) * 100);
 }
 
 /* ── KPI pill builder ──────────────────────────────────────────────────── */
@@ -1087,7 +1095,10 @@ export function renderAuditListView(
       pctWrap.style.cssText = [
         'flex-shrink:0',
         'font-size:11px',
-        'color:' + (pct === 100 ? '#10b981' : pct > 50 ? '#d97706' : '#64748b'),
+        // 0.199.6 — budget-risk ramp: over budget (red) / approaching (amber) /
+        // comfortable (slate). Replaces the old "exactly 100 = green" which went
+        // green for Done's forced-100 and never flagged over-runs.
+        'color:' + (pct > 100 ? '#dc2626' : pct >= 75 ? '#d97706' : '#64748b'),
         'font-weight:600',
         'text-align:right',
         'white-space:nowrap',
