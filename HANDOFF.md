@@ -1,6 +1,16 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.199.5 pacing onParamsChange host callback (2026-06-07).
+**📣 Latest cut: 0.199.6 honest Audit "Budget Used %" (2026-06-07). APP-only.**
+The audit/list "Budget Used %" forced every Done item to 100% and capped at 100%,
+burying the sizing signal — a Done task logged 1.5h/47h read "100%" not 3% (a 31×
+over-estimate), and over-runs (>100%) were hidden. Now it's the honest uncapped
+`logged/est` with a budget-risk colour ramp (>100% red / ≥75% amber / else slate),
+surfacing both over-estimates and over-runs. Re-copy **app only**: app md5
+**`9ccf57b0856a1aae04ca68a924cbc6e9`** (supersedes 0.199.5's `84050d71` — this app
+bundle is CUMULATIVE: it also carries the 0.199.5 pacing `onParamsChange`
+callback). Core unchanged `aec731a9…`. PR #41, 164/164.
+
+**0.199.5 pacing onParamsChange host callback (2026-06-07).
 APP-only.** Fixes the pacing **Week-only revert** + inert range presets: NG now
 fires `onPacingParamsChange({bucket,range,customStart,customEnd})` when the user
 changes the bucket / range preset / custom window, so an authoritative host (DH)
