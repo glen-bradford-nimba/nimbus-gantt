@@ -1,6 +1,19 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.199.3 zoom centers on today (2026-06-07).** **CORE-only** —
+**📣 Latest cut: 0.199.4 LWS render-init guard — fixes the BLANK GANTT on
+Salesforce (2026-06-07). CORE-only. URGENT — gates DH 0.267.** Under LWS the
+timeline panel can have `clientWidth === 0` when `render()` first runs (Locker
+layout timing), so the canvas was sized 0-width → blank; the core ResizeObserver
+that would repaint is blocked under LWS, and the 0.198.1 one-shot guard didn't
+cover this path. Fix: `render()` now does no work + retries on the next frame
+while the panel has 0 size, until it has real dimensions (capped ~90 frames).
+Additive — laid-out panel (clamp + zoom-center) untouched. **NOT** a stale bundle
+and **NOT** fixed by re-copying 0.199.3 — needs this core. Re-copy **core only**:
+core md5 **`aec731a9ff24abc0c21485ca68c07fe8`** (app unchanged `e0a5895e…`).
+PR #39, 164/164, core tsc clean, version literal → 0.199.4. **DH: LWS-verify on
+sandbox before prod.**
+
+**0.199.3 zoom centers on today (2026-06-07).** **CORE-only** —
 completes the Month/Quarter zoom UX. The 0.199.1 clamp made zoom-out non-blank
 but landed on the timeline's right-edge tail; now `render()` re-anchors the
 viewport on **today** (centered) on a zoom-level change, so Month/Quarter land on
