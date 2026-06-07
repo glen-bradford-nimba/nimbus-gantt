@@ -216,6 +216,11 @@ const PACING_CSS = `
 .ngp-card-v{font-size:20px;font-weight:800;line-height:1.1}
 .ngp-card-l{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;margin-top:2px}
 .ngp-warn{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#92400e}
+.ngp-scope{display:flex;gap:8px;align-items:flex-start;border-radius:8px;padding:7px 12px;margin-bottom:12px;font-size:12px;line-height:1.45}
+.ngp-scope.auth{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
+.ngp-scope.preview{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}
+.ngp-scope .ngp-scope-ico{font-size:13px;line-height:1.2}
+.ngp-scope b{font-weight:700}
 .ngp-legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px}
 .ngp-leg{display:flex;align-items:center;gap:6px;border:0;background:none;cursor:pointer;font-size:12px;color:#1f2937;padding:2px 4px;font-family:${FONT}}
 .ngp-leg.off{opacity:.4}
@@ -671,6 +676,30 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
       + (useDollars ? ' · $ at ' + fmtMoney(r!) + '/hr' : '') + (cum ? ' · cumulative' : '');
     hd.appendChild(el('div', 'ngp-sub', sub));
     body.appendChild(hd);
+
+    // 0.199.2 — loud source/scope DESIGNATION. The forecast's basis must never
+    // be a silent surprise: (a) authoritative (host feed) vs preview (task-
+    // derived) can swap silently when a host only feeds some buckets, and
+    // (b) the authoritative scope (system-of-record portfolio) may not match the
+    // board's current filter/search. Banner it either way.
+    {
+      const auth = !!d.authoritative;
+      const scope = el('div', 'ngp-scope ' + (auth ? 'auth' : 'preview'));
+      scope.appendChild(el('span', 'ngp-scope-ico', auth ? 'ⓘ' : '⚠'));
+      const txt = el('span');
+      if (auth) {
+        const n = d.summary.activeItems;
+        const what = d.scopeLabel || (n + ' active item' + (n === 1 ? '' : 's'));
+        txt.appendChild(document.createTextNode('Authoritative forecast · scope: '));
+        txt.appendChild(el('b', undefined, what));
+        txt.appendChild(document.createTextNode('. From the host’s system of record — may not match the board’s current filter or search.'));
+      } else {
+        txt.appendChild(el('b', undefined, 'Preview forecast'));
+        txt.appendChild(document.createTextNode(' — derived from the board’s task dates + estimates, not an authoritative feed. Numbers can differ from the live view (e.g. this bucket/filter has no authoritative data).'));
+      }
+      scope.appendChild(txt);
+      body.appendChild(scope);
+    }
 
     const s = d.summary;
     const val = (h: number) => useDollars ? fmtMoney(h * r!) : fmtH(h);

@@ -7,6 +7,13 @@ import {
   CLS_KPI_CARD_BASE, CLS_KPI_LABEL, CLS_KPI_VALUE, CLS_KPI_HINT,
   STATS_TONE,
 } from './shared/classes';
+import { CLOUD_NIMBUS_POOL } from '../defaults';
+
+// 0.199.2 — single capacity source (matches the Team modal / FilterBar / vanilla
+// StatsPanel). Was hardcoded 120, which disagreed with the pool's 170.
+const DEFAULT_HOURS_PER_MONTH =
+  CLOUD_NIMBUS_POOL.filter((m) => m.active !== false)
+    .reduce((s, m) => s + (m.hoursPerMonth || 0), 0) || 120;
 
 function KpiCard({ label, value, tone, hint }: { label: string; value: string; tone: keyof typeof STATS_TONE; hint?: string }) {
   const t = STATS_TONE[tone] || STATS_TONE.slate;
@@ -25,7 +32,7 @@ export function StatsPanel({ state, data }: SlotProps) {
   const hrsLow  = s.estLow;
   const hrsHigh = s.est;
   const logged  = s.logged;
-  const hoursPerMonth = 120;
+  const hoursPerMonth = DEFAULT_HOURS_PER_MONTH;
   const monthsLow  = hrsLow  > 0 ? (hrsLow  / hoursPerMonth).toFixed(1) : '0';
   const monthsHigh = hrsHigh > 0 ? (hrsHigh / hoursPerMonth).toFixed(1) : '0';
   const hoursRange = hrsLow < hrsHigh && hrsLow > 0 ? (hrsLow + '–' + hrsHigh + 'h') : (hrsHigh + 'h');
