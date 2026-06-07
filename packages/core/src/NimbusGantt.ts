@@ -112,6 +112,10 @@ export class NimbusGantt {
   private eventBus: EventBus;
   private layoutEngine: LayoutEngine;
   private timeScale!: TimeScale;
+  // 0.199.3 — last zoom level we rendered, so render() can detect a zoom change
+  // and re-anchor the viewport on "today" (see the clamp block in render()).
+  // null until the first render, so the initial mount keeps its restored scroll.
+  private lastRenderedZoom: string | null = null;
   private canvasRenderer: CanvasRenderer;
   private treeGrid: DomTreeGrid;
   private scrollManager: ScrollManager;
@@ -797,7 +801,7 @@ export class NimbusGantt {
       // NOTE: bump this with each core release — consumers (e.g. the app's
       // Auto-Schedule guard) feature-detect first but also surface this string
       // for diagnostics. Stale value = false "needs newer core" reports.
-      version: '0.199.2',
+      version: '0.199.3',
       pushRemoteEvent: typeof this.pushRemoteEvent === 'function',
       timeCursor: true,
       history: !!self.history,
@@ -994,7 +998,24 @@ export class NimbusGantt {
     // re-clamps to a no-op — no loop.
     const maxScrollX = Math.max(0, totalWidth - panelWidth);
     const maxScrollY = Math.max(0, totalHeight - panelHeight);
-    const clampedX = Math.min(Math.max(0, state.scrollX), maxScrollX);
+
+    // 0.199.3 — on a zoom-level change, re-anchor the viewport on "today"
+    // (centered) rather than carrying the stale scrollX forward. The 0.199.1
+    // clamp alone makes a zoom-out non-blank, but it lands on the timeline's
+    // right-edge tail (clamped to maxScrollX); centering on today makes
+    // Month/Quarter land on a useful, demo-ready view. Only fires when the zoom
+    // actually changed — the initial mount (lastRenderedZoom === null) keeps its
+    // restored scroll/focus-date, and ordinary scroll/resize/data renders carry
+    // the user's scrollX unchanged. If today falls outside the timeline range
+    // the centered target clamps to start/end, which is the sensible fallback.
+    let desiredX = state.scrollX;
+    if (this.lastRenderedZoom !== null && this.lastRenderedZoom !== state.zoomLevel) {
+      const todayX = this.timeScale.dateToX(new Date());
+      if (Number.isFinite(todayX)) desiredX = todayX - panelWidth / 2;
+    }
+    this.lastRenderedZoom = state.zoomLevel;
+
+    const clampedX = Math.min(Math.max(0, desiredX), maxScrollX);
     const clampedY = Math.min(Math.max(0, state.scrollY), maxScrollY);
     let renderState = state;
     if (clampedX !== state.scrollX || clampedY !== state.scrollY) {
