@@ -44,6 +44,10 @@ export interface PacingBucketItem {
   assignee?: string;
   status?: string;
   group?: string;
+  /** 0.200.0 — the commitment tier (PacingSegment.id) this item belongs to, so
+   *  the drill-down can show "what's in each tier". NG fills it from priorityGroup
+   *  in the preview; hosts may set it directly. */
+  tier?: string;
 }
 
 export interface PacingBucket {
@@ -56,6 +60,27 @@ export interface PacingBucket {
   isPast: boolean;
   isCurrent: boolean;
   items: PacingBucketItem[];
+  /** 0.200.0 — stacked forecast breakdown: segmentId → hours landing in this
+   *  period for that commitment tier. When present (+ PacingData.segments
+   *  defines them), the chart stacks these instead of the flat `forecast` bar.
+   *  The values should sum to `forecast` for a consistent bar height. Hosts
+   *  (DH/CN) populate this to drive the "greenlit / predicted / ready-to-approve"
+   *  hockey stick; NG fills a default split (from priorityGroup) when omitted. */
+  segments?: Record<string, number>;
+}
+
+/** 0.200.0 — a stacked forecast tier ("segment") definition. NG owns this
+ *  contract so DH and CN drive the layered forecast uniformly; NG renders it.
+ *  A host declares its tiers (e.g. greenlit / predicted / ready-to-approve) and
+ *  feeds per-bucket hours via PacingBucket.segments. Segments stack bottom→top
+ *  by `order`; `style:'dotted'` draws a hatched/outlined cap (e.g. unapproved,
+ *  ready-to-approve upside). Each segment gets its own legend toggle. */
+export interface PacingSegment {
+  id: string;
+  label: string;
+  color?: string;                 // fill; falls back to a blue ramp by order
+  style?: 'solid' | 'dotted';     // 'dotted' → hatched outline (speculative tier)
+  order?: number;                 // stack order, low = bottom
 }
 
 export interface PacingSummary {
@@ -70,6 +95,27 @@ export interface PacingSummary {
 
 export type PacingBucketSize = 'week' | 'month' | 'quarter';
 
+// 0.200.0 — NG's DEFAULT forecast tiers, used by the task-derived preview so the
+// stacked hockey stick renders with zero host changes. Hosts (DH/CN) override by
+// feeding PacingData.segments + per-bucket PacingBucket.segments. Bottom→top:
+// committed work, then likely, then the dotted "ready to approve" upside cap.
+export const PACING_SEGMENT_DEFAULTS: PacingSegment[] = [
+  { id: 'greenlit',  label: 'Greenlit',         color: '#2563eb', style: 'solid',  order: 0 },
+  { id: 'predicted', label: 'Predicted',        color: '#7dabf5', style: 'solid',  order: 1 },
+  { id: 'ready',     label: 'Ready to approve', color: '#c3dafc', style: 'dotted', order: 2 },
+];
+// Maps NG's priority lanes → default tiers. HOLD (deferred) is intentionally
+// absent → its remaining is excluded from the forecast stack. Unknown lanes fall
+// back to 'greenlit' (committed) so no work silently vanishes.
+const PACING_LANE_TO_SEGMENT: Record<string, string> = {
+  'top-priority': 'greenlit',
+  'active': 'greenlit',
+  'follow-on': 'predicted',
+  'proposed': 'ready',
+};
+// Fallback fills for host segments that don't declare a `color`.
+const PACING_SEG_RAMP = ['#2563eb', '#7dabf5', '#c3dafc', '#1e40af', '#93c5fd', '#1d4ed8'];
+
 export interface PacingData {
   buckets: PacingBucket[];
   bucket: PacingBucketSize;
@@ -78,6 +124,12 @@ export interface PacingData {
   currency?: string;
   scopeLabel?: string;
   authoritative?: boolean;
+  /** 0.200.0 — forecast tier definitions for the stacked hockey-stick view.
+   *  When set, the chart stacks each bucket's `segments` by these (in `order`)
+   *  with per-tier legend toggles. Host-fed (DH/CN) for authoritative tiers;
+   *  NG supplies a default set (greenlit/predicted/ready) in the task-derived
+   *  preview so it renders without host changes. */
+  segments?: PacingSegment[];
 }
 
 /** 0.197.0 — DH's PortfolioPacingDTO shape
@@ -345,7 +397,7 @@ const PACING_PREFS_KEY = 'nga.pacing.prefs.v1';
 interface PacingPrefs {
   range?: string; bucket?: PacingBucketSize; customS?: string; customE?: string;
   measure?: 'hours' | 'dollars'; mode?: 'period' | 'cumulative';
-  show?: { actual: boolean; forecast: boolean; target: boolean };
+  show?: { actual: boolean; forecast: boolean; target: boolean; seg?: Record<string, boolean> };
 }
 function loadPacingPrefs(): PacingPrefs | null {
   try {
@@ -407,8 +459,9 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
     if (!it) { it = { id: t.id, name: t.title || t.name || t.id, hours: 0, ...meta }; m.set(t.id, it); }
     it.hours += hrs;
   }
-  /** Spread `amount` across buckets overlapping [a,b], adding to series + items. */
-  function spread(t: NormalizedTask, a: number, b: number, amount: number, series: 'actual' | 'forecast', meta: Partial<PacingBucketItem>): void {
+  /** Spread `amount` across buckets overlapping [a,b], adding to series + items.
+   *  For forecast, `segId` routes the hours into that commitment tier (0.200.0). */
+  function spread(t: NormalizedTask, a: number, b: number, amount: number, series: 'actual' | 'forecast', meta: Partial<PacingBucketItem>, segId?: string): void {
     const span = b - a;
     if (span <= 0 || amount <= 0) return;
     const perDay = amount / (span / DAY_MS);
@@ -421,6 +474,10 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
         if (hrs > 0.01) {
           const bkt = ensure(cur);
           bkt[series] += hrs;
+          if (series === 'forecast' && segId) {
+            if (!bkt.segments) bkt.segments = {};
+            bkt.segments[segId] = (bkt.segments[segId] || 0) + hrs;
+          }
           addItem(bkt.key, t, hrs, meta);
         }
       }
@@ -437,11 +494,18 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
     const remaining = Math.max(0, est - logged);
     const s = parseISO(t.startDate);
     const e = parseISO(t.endDate);
+    // 0.200.0 — classify this item's forecast into a commitment tier (NG default
+    // mapping; hosts override via PacingData.segments). HOLD/deferred is excluded
+    // from the forecast stack; unknown lanes fall back to 'greenlit'. The tier is
+    // also stamped on the drill-down item so the breakdown can group by it.
+    const lane = t.priorityGroup || '';
+    const segId = lane === 'deferred' ? null : (PACING_LANE_TO_SEGMENT[lane] || 'greenlit');
     const meta: Partial<PacingBucketItem> = {
       estimatedHours: round(est), loggedHours: round(logged), remainingHours: round(remaining),
       budgetUsedPct: est > 0 ? round(logged / est * 100) : 0,
       startDate: str(t.startDate), endDate: str(t.endDate),
       assignee: str(t.assignee), status: str(t.status), group: str(t.groupName) || str(t.groupId),
+      tier: segId || (lane || undefined),
     };
     if (s == null || e == null || e < s) {
       if (remaining > 0) unscheduled += remaining;
@@ -449,17 +513,24 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
     }
     // Actual: logged across the elapsed part of the span [start, min(now,end)].
     spread(t, s, Math.min(now, e), logged, 'actual', meta);
-    // Forecast: remaining across the future part [max(now,start), end].
-    const fs = Math.max(now, s);
-    if (fs < e) spread(t, fs, e, remaining, 'forecast', meta);
-    else if (remaining > 0) { // overdue: drop remaining into the current bucket
-      const bkt = ensure(now); bkt.forecast += remaining; addItem(bkt.key, t, remaining, meta);
+    // Forecast: remaining across the future part [max(now,start), end] — only for
+    // non-HOLD work, routed into its tier so the chart can stack the hockey stick.
+    if (segId) {
+      const fs = Math.max(now, s);
+      if (fs < e) spread(t, fs, e, remaining, 'forecast', meta, segId);
+      else if (remaining > 0) { // overdue: drop remaining into the current bucket
+        const bkt = ensure(now); bkt.forecast += remaining;
+        if (!bkt.segments) bkt.segments = {};
+        bkt.segments[segId] = (bkt.segments[segId] || 0) + remaining;
+        addItem(bkt.key, t, remaining, meta);
+      }
     }
   }
 
   const ordered = Array.from(buckets.values()).sort((a, b) => a.key < b.key ? -1 : 1);
   for (const b of ordered) {
     b.actual = round(b.actual); b.forecast = round(b.forecast);
+    if (b.segments) for (const k in b.segments) b.segments[k] = round(b.segments[k]);
     const items = Array.from(itemMaps.get(b.key)!.values());
     for (const it of items) {
       it.hours = round(it.hours);
@@ -478,6 +549,10 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
       activeItems: active, unscheduledHours: round(unscheduled),
     },
     authoritative: false,
+    // 0.200.0 — only advertise tiers that actually carry hours, so the legend
+    // doesn't show empty toggles on a board with no PROPOSED/PLANNED work.
+    segments: PACING_SEGMENT_DEFAULTS.filter(seg =>
+      ordered.some(b => b.segments && (b.segments[seg.id] || 0) > 0)),
   };
 }
 
@@ -532,7 +607,11 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
     actual: saved.show?.actual ?? dflt.series?.actual ?? true,
     forecast: saved.show?.forecast ?? dflt.series?.forecast ?? true,
     target: saved.show?.target ?? dflt.series?.target ?? false,
+    // 0.200.0 — per-segment visibility for the stacked forecast tiers. Absent =
+    // visible; toggled off entries persist here. Keyed by PacingSegment.id.
+    seg: { ...(saved.show?.seg ?? {}) } as Record<string, boolean>,
   };
+  const segOn = (id: string): boolean => show.seg[id] !== false;
   // Persist the full control state so the next mount restarts from here.
   function persistPrefs(): void {
     savePacingPrefs({ range, bucket, customS, customE, measure, mode, show: { ...show } });
@@ -581,16 +660,34 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
   // preview (matched by key/startMs/label). Authoritative numbers drive the
   // bars + summary; local tasks populate the drill-down — no DH change needed.
   function mergeLocalItems(d: PacingData): PacingData {
-    if (!d.buckets.some(b => !b.items || b.items.length === 0)) return d;
+    const needItems = d.buckets.some(b => !b.items || b.items.length === 0);
+    // 0.200.0 — also borrow the forecast TIER split when the host hasn't fed one,
+    // so prod renders the stacked hockey stick today. The host (DH/CN) should
+    // feed PacingData.segments + per-bucket segments for authoritative tiers;
+    // until then NG scales its own priorityGroup-derived split to the host's
+    // authoritative per-bucket forecast (total stays authoritative, split is NG's).
+    const needSegs = !d.segments || d.segments.length === 0;
+    if (!needItems && !needSegs) return d;
     const local = computeFromTasks(tasks, d.bucket);
     const byKey = new Map(local.buckets.map(b => [b.key, b] as const));
+    const matchLocal = (b: PacingBucket): PacingBucket | undefined => byKey.get(b.key)
+      || local.buckets.find(x => (b.startMs != null && x.startMs === b.startMs) || x.label === b.label);
     return {
       ...d,
+      segments: needSegs ? local.segments : d.segments,
       buckets: d.buckets.map(b => {
-        if (b.items && b.items.length) return b;
-        const lb = byKey.get(b.key)
-          || local.buckets.find(x => (b.startMs != null && x.startMs === b.startMs) || x.label === b.label);
-        return { ...b, items: lb ? lb.items : [] };
+        const lb = matchLocal(b);
+        const items = (b.items && b.items.length) ? b.items : (lb ? lb.items : []);
+        let segments = b.segments;
+        if (needSegs && !segments && lb && lb.segments) {
+          const localTot = Object.keys(lb.segments).reduce((s, k) => s + (lb.segments![k] || 0), 0);
+          if (localTot > 0) {
+            const scale = b.forecast / localTot;
+            segments = {};
+            for (const k in lb.segments) segments[k] = round(lb.segments[k] * scale);
+          }
+        }
+        return { ...b, items, segments };
       }),
     };
   }
@@ -682,10 +779,26 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
         b.addEventListener('click', () => { show[key] = !show[key]; render(); });
         return b;
       };
+      // 0.200.0 — when the data defines forecast tiers, the single "Forecast"
+      // toggle is replaced by one toggle per tier (dotted tiers get a dashed
+      // swatch). Each toggles show.seg[id]; the chart stacks accordingly.
+      const segPill = (seg: PacingSegment, i: number): HTMLElement => {
+        const b = el('button', 'ngp-leg' + (segOn(seg.id) ? '' : ' off'));
+        const c = seg.color || PACING_SEG_RAMP[i % PACING_SEG_RAMP.length];
+        b.appendChild(el('span', 'ngp-sw')).setAttribute('style', seg.style === 'dotted'
+          ? 'background:' + c + '33;border:1px dashed ' + c
+          : 'background:' + c);
+        b.appendChild(el('span', undefined, seg.label));
+        b.addEventListener('click', () => { show.seg[seg.id] = !segOn(seg.id); render(); });
+        return b;
+      };
+      const segs = d.segments && d.segments.length
+        ? [...d.segments].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : null;
       const leg = el('div', 'ngp-grp');
       leg.appendChild(el('span', 'ngp-lbl', 'Series'));
       leg.appendChild(legPill('actual', 'Actual', COL.actual));
-      leg.appendChild(legPill('forecast', 'Forecast', COL.forecast));
+      if (segs) segs.forEach((seg, i) => leg.appendChild(segPill(seg, i)));
+      else leg.appendChild(legPill('forecast', 'Forecast', COL.forecast));
       leg.appendChild(legPill('target', 'Target', COL.target));
       row2.appendChild(leg); row2n++;
     }
@@ -758,7 +871,7 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
       if (win.to != null && ms > win.to) return false;
       return true;
     });
-    body.appendChild(buildChart(visible, { show, useDollars, rate: r || 0, cum, expandedKey }, (k) => {
+    body.appendChild(buildChart(visible, { show, segments: d.segments, useDollars, rate: r || 0, cum, expandedKey }, (k) => {
       expandedKey = expandedKey === k ? null : k; render();
     }));
 
@@ -779,22 +892,40 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
 // ─── Chart ───────────────────────────────────────────────────────────────────
 
-interface ChartOpts { show: { actual: boolean; forecast: boolean; target: boolean }; useDollars: boolean; rate: number; cum: boolean; expandedKey: string | null; }
+interface ChartOpts { show: { actual: boolean; forecast: boolean; target: boolean; seg: Record<string, boolean> }; segments?: PacingSegment[]; useDollars: boolean; rate: number; cum: boolean; expandedKey: string | null; }
 
 function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: string) => void): HTMLElement {
   const wrap = el('div', 'ngp-chart');
   if (buckets.length === 0) { wrap.appendChild(el('div', 'ngp-empty', 'No periods in this range.')); return wrap; }
   const mul = o.useDollars ? (o.rate || 1) : 1;
+  // 0.200.0 — stacked forecast tiers. segDefs = host-declared (or NG-default)
+  // segments in stack order; visSegs = those toggled on. When present, the
+  // forecast bar is replaced by these stacked sub-bars (cumulative-aware).
+  const segDefs = (o.segments && o.segments.length)
+    ? [...o.segments].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : null;
+  const visSegs = segDefs ? segDefs.filter(s => o.show.seg[s.id] !== false) : null;
   let cA = 0, cF = 0, cT = 0;
+  const cSeg: Record<string, number> = {};
   const rows = buckets.map(b => {
     cA += b.actual; cF += b.forecast; cT += b.target;
-    return { b, actual: (o.cum ? cA : b.actual) * mul, forecast: (o.cum ? cF : b.forecast) * mul, target: (o.cum ? cT : b.target) * mul };
+    const segVals: Record<string, number> = {};
+    if (segDefs) for (const sd of segDefs) {
+      const v = (b.segments && b.segments[sd.id]) || 0;
+      cSeg[sd.id] = (cSeg[sd.id] || 0) + v;
+      segVals[sd.id] = (o.cum ? cSeg[sd.id] : v) * mul;
+    }
+    return { b, actual: (o.cum ? cA : b.actual) * mul, forecast: (o.cum ? cF : b.forecast) * mul, target: (o.cum ? cT : b.target) * mul, segVals };
   });
   const W = 920, H = 300, padL = 52, padB = 34, padT = 10, padR = 10;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const n = rows.length, slot = plotW / n, barW = Math.min(46, slot * 0.62);
   let maxV = 1;
-  for (const r of rows) maxV = Math.max(maxV, (o.show.actual ? r.actual : 0) + (o.show.forecast ? r.forecast : 0), o.show.target ? r.target : 0);
+  for (const r of rows) {
+    const segSum = visSegs
+      ? visSegs.reduce((s, sd) => s + (r.segVals[sd.id] || 0), 0)
+      : (o.show.forecast ? r.forecast : 0);
+    maxV = Math.max(maxV, (o.show.actual ? r.actual : 0) + segSum, o.show.target ? r.target : 0);
+  }
   const niceMax = niceCeil(maxV);
   const y = (v: number) => padT + plotH - (v / niceMax) * plotH;
   const fmtAxis = (v: number) => o.useDollars ? '$' + (v >= 1000 ? round(v / 1000) + 'k' : round(v)) : round(v) + '';
@@ -813,7 +944,24 @@ function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: st
       const h = (r.actual / niceMax) * plotH; top -= h;
       svg.appendChild(svgEl('rect', { x, y: top, width: barW, height: h, rx: 2, fill: r.actual > r.target && r.target > 0 ? COL.actualOver : COL.actual }));
     }
-    if (o.show.forecast && r.forecast > 0) {
+    if (visSegs) {
+      // Stacked tiers, bottom→top. Dotted tiers render as a hatched/outlined cap
+      // (e.g. unapproved "ready to approve" upside). Host color/style override
+      // the NG defaults; the legend toggles which tiers are disclosed here.
+      visSegs.forEach((sd, si) => {
+        const v = r.segVals[sd.id] || 0;
+        if (v <= 0) return;
+        const h = (v / niceMax) * plotH; top -= h;
+        const c = sd.color || PACING_SEG_RAMP[si % PACING_SEG_RAMP.length];
+        const attrs: Record<string, string | number> = { x, y: top, width: barW, height: h, rx: 2 };
+        if (sd.style === 'dotted') {
+          attrs.fill = c + '33'; attrs.stroke = c; attrs['stroke-width'] = 1.2; attrs['stroke-dasharray'] = '3 2';
+        } else {
+          attrs.fill = c; if (!r.b.isPast) attrs.opacity = 0.95;
+        }
+        svg.appendChild(svgEl('rect', attrs));
+      });
+    } else if (o.show.forecast && r.forecast > 0) {
       const h = (r.forecast / niceMax) * plotH; top -= h;
       const rc = svgEl('rect', { x, y: top, width: barW, height: h, rx: 2, fill: COL.forecast });
       if (!r.b.isPast) rc.setAttribute('opacity', '0.92');

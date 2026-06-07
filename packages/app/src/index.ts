@@ -56,7 +56,7 @@ export type { BubbleRenderOptions } from './renderers/bubble';
 // 0.197.0 — Pacing/Forecast contract: the DH→NG adapter + the PacingData shape
 // DH serializes to. (renderPacingView itself is mounted internally by IIFEApp;
 // hosts feed data via config.pacing.data + handle.setPacingData.)
-export { portfolioPacingToPacingData } from './renderers/pacing';
+export { portfolioPacingToPacingData, PACING_SEGMENT_DEFAULTS } from './renderers/pacing';
 export type {
   PacingData,
   PortfolioPacingDTO,
@@ -65,6 +65,7 @@ export type {
   PacingSummary,
   PacingBucketSize,
   PacingParamsChange,
+  PacingSegment,
 } from './renderers/pacing';
 
 /* ── v10 template framework ────────────────────────────────────────────── */
