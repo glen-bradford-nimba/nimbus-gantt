@@ -1,6 +1,17 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.199.4 LWS render-init guard — fixes the BLANK GANTT on
+**📣 Latest cut: 0.199.5 pacing onParamsChange host callback (2026-06-07).
+APP-only.** Fixes the pacing **Week-only revert** + inert range presets: NG now
+fires `onPacingParamsChange({bucket,range,customStart,customEnd})` when the user
+changes the bucket / range preset / custom window, so an authoritative host (DH)
+can recompute PacingData and push it back via `setPacingData` instead of NG
+silently falling back to the task-derived preview. DH adoption: wire
+`onPacingParamsChange` → `getPacing(bucket/range)` → `handle.setPacingData(result)`.
+Re-copy **app only**: app md5 **`84050d71520d93677ff9d47315969708`** (core
+unchanged `aec731a9…`, version literal stays 0.199.4 — app-only cut). PR #40,
+164/164, app tsc 6 pre-existing (zero new).
+
+**0.199.4 LWS render-init guard — fixes the BLANK GANTT on
 Salesforce (2026-06-07). CORE-only. URGENT — gates DH 0.267.** Under LWS the
 timeline panel can have `clientWidth === 0` when `render()` first runs (Locker
 layout timing), so the canvas was sized 0-width → blank; the core ResizeObserver
