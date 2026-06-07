@@ -1,6 +1,26 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.199.1 zoom-blank-canvas + Views-clip fixes (2026-06-06).**
+**📣 Latest cut: 0.199.2 ASAP anchor + capacity source + Views dismiss + Pacing
+scope banner (2026-06-07).** **TWO-bundle cut** — four NG-owned items from the
+live punch-list. Re-copy **both**: core md5
+**`a36ba781cf8eb53d4f0907d0d7c13bd3`**, app md5
+**`e0a5895e29ea757c604fe405981cf6fe`**. PR #37, 164/164, core tsc clean.
+- **Auto-Schedule no longer proposes past dates** (`computeSchedule` anchored at
+  the earliest existing start → all-past reflows; now `max(today, earliest)` ASAP;
+  hosts override via `options.projectStart`). Core version literal → 0.199.2.
+- **Capacity single-source**: StatsPanel (vanilla+react) hardcoded 120 h/mo;
+  now derives from `CLOUD_NIMBUS_POOL` (=170) like the Team modal / FilterBar.
+- **Saved Views dropdown dismisses** on outside-click + Escape (was lingering).
+- **Pacing source/scope banner**: loud designation above the cards —
+  authoritative shows scope (scopeLabel / N active, "may not match the board
+  filter"); preview warns numbers are task-derived. Kills the silent
+  authoritative↔preview swap + the board-vs-pacing scope confusion.
+- **Not NG** (routed): forecast run-rate model → DH PR #880; Month/Quarter
+  pacing-bucket preview-revert → DH LWC `onPacingBucketChange`; Month/Quarter
+  Gantt blank → already fixed at 0.199.1 (core 68953c51), **CN must re-copy** —
+  the live `f99d990` bundle predates it.
+
+**0.199.1 zoom-blank-canvas + Views-clip fixes (2026-06-06).**
 **TWO-bundle cut** (core AND app changed) — from the live v12 punch-list.
 - **Month/Quarter zoom → blank canvas (CORE, high).** Zooming out shrank the
   timeline but `scrollX` stayed stale, so `ctx.translate(-scrollX,0)` pushed all
