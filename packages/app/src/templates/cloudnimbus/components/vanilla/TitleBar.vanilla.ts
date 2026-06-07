@@ -146,6 +146,10 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
   // TOGGLE_ADVISOR events. Unpin stays a local placeholder for now.
   let unpinOn = false; // "Unpin" shown when chromeVisible (default true in v9)
   let viewsMenuOpen = false; // 0.199.0 — Saved Views dropdown open/closed
+  // 0.199.2 — teardown for the open-dropdown's document dismiss listeners
+  // (outside-click + Escape). Cleared at the top of every buildViewsMenu so a
+  // re-render never stacks listeners, and on slot destroy().
+  let viewsDismiss: (() => void) | null = null;
 
   function render(p: SlotProps) {
     clear(root);
@@ -485,6 +489,10 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
    * inline. Toggling open/close flips the closure flag and re-renders; apply /
    * save / delete / default all dispatch (→ renderSlots re-renders the bar). */
   function buildViewsMenu(state: SlotProps['state'], dispatch: SlotProps['dispatch']): HTMLElement {
+    // Tear down any dismiss listener from a prior render so they never stack
+    // (every render rebuilds this DOM; a stale capture-phase listener would
+    // reference a detached node and fire spuriously).
+    if (viewsDismiss) { viewsDismiss(); viewsDismiss = null; }
     const wrap = el('span', '');
     wrap.style.cssText = 'display:inline-block;';
     const activeName = state.activeViewId
@@ -570,6 +578,34 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     menu.appendChild(saveRow);
 
     wrap.appendChild(menu);
+
+    // 0.199.2 — dismiss on outside-click + Escape. The menu used to linger open
+    // (lingered behind every later modal). wrap contains both the trigger and
+    // the (position:fixed but DOM-child) menu, so wrap.contains() distinguishes
+    // in-menu clicks. Capture phase so we see the click even if something inside
+    // stops propagation; guarded so an in-wrap click never dismisses.
+    const closeViews = (): void => {
+      if (viewsDismiss) { viewsDismiss(); viewsDismiss = null; }
+      viewsMenuOpen = false;
+      render(currentProps);
+    };
+    const onDocDown = (e: Event): void => {
+      const tgt = e.target as Node | null;
+      if (tgt && wrap.contains(tgt)) return; // click on trigger/menu — leave to their handlers
+      closeViews();
+    };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') closeViews(); };
+    try {
+      document.addEventListener('pointerdown', onDocDown, true);
+      document.addEventListener('keydown', onKey, true);
+      viewsDismiss = () => {
+        try {
+          document.removeEventListener('pointerdown', onDocDown, true);
+          document.removeEventListener('keydown', onKey, true);
+        } catch { /* LWS / detached — ignore */ void 0; }
+      };
+    } catch { /* document access blocked (LWS edge) — menu still closes via item dispatch */ void 0; }
+
     // Anchor under the trigger once both are in the DOM. Viewport-clamped so a
     // wide menu near the right edge doesn't spill off-screen. LWS-guarded.
     const place = (): void => {
@@ -591,6 +627,6 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
   return {
     el: root,
     update(p) { currentProps = p; render(p); },
-    destroy() { clear(root); if (root.parentNode) root.parentNode.removeChild(root); void currentProps; },
+    destroy() { if (viewsDismiss) { viewsDismiss(); viewsDismiss = null; } clear(root); if (root.parentNode) root.parentNode.removeChild(root); void currentProps; },
   };
 }

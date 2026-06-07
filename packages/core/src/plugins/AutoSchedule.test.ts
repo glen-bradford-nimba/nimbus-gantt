@@ -127,13 +127,29 @@ describe('computeSchedule', () => {
     expect(result.totalDuration).toBe(0);
   });
 
-  it('preserves the dates of an independent single task', () => {
+  it('preserves the dates of an independent task when the project is anchored at its start', () => {
+    // Explicit projectStart keeps this a deterministic cascade test (the default
+    // anchor is now max(today, earliest) — see the ASAP regression test below —
+    // which would otherwise move a past-dated task to today as the clock moves).
     const tasks = taskMap([makeTask('A', '2026-05-01', '2026-05-06')]);
-    const result = computeSchedule(tasks, new Map(), DEFAULT_OPTS, cal);
+    const result = computeSchedule(tasks, new Map(), { ...DEFAULT_OPTS, projectStart: '2026-05-01' }, cal);
     const a = result.scheduledTasks.get('A');
     expect(a).toBeDefined();
     expect(a!.startDate).toBe('2026-05-01');
     expect(a!.endDate).toBe('2026-05-06');
+  });
+
+  it('anchors at today (ASAP) and never proposes a past start when no projectStart is given', () => {
+    // Regression guard: the earlier default anchored at the earliest existing
+    // start, so an old board reflowed entirely into the past (e.g. 2026-02-15).
+    // ASAP must schedule forward from today instead.
+    const tasks = taskMap([makeTask('A', '2020-01-01', '2020-01-05')]);
+    const result = computeSchedule(tasks, new Map(), DEFAULT_OPTS, cal);
+    const a = result.scheduledTasks.get('A');
+    expect(a).toBeDefined();
+    const t = new Date();
+    const todayUTC = `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+    expect(a!.startDate).toBe(todayUTC);
   });
 
   it('reports a violation for a circular FS chain', () => {
@@ -156,7 +172,7 @@ describe('computeSchedule', () => {
       makeTask('B', '2026-06-01', '2026-06-05'), // intentionally stale
     ]);
     const deps = depMap([makeDep('d1', 'A', 'B', 'FS', 3)]);
-    const result = computeSchedule(tasks, deps, DEFAULT_OPTS, cal);
+    const result = computeSchedule(tasks, deps, { ...DEFAULT_OPTS, projectStart: '2026-05-01' }, cal);
     const b = result.scheduledTasks.get('B');
     expect(b).toBeDefined();
     // A.endDate = 2026-05-06; B.start should be 2026-05-09

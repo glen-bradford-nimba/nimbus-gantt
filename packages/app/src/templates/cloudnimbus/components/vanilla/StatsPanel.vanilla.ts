@@ -16,6 +16,15 @@ import {
   STATS_TONE,
 } from '../shared/classes';
 import { el, clear } from '../shared/el';
+import { CLOUD_NIMBUS_POOL } from '../../defaults';
+
+// 0.199.2 — single source of truth for monthly capacity. The Team modal and
+// FilterBar already derive from CLOUD_NIMBUS_POOL (active members' hoursPerMonth
+// = 170); StatsPanel used to hardcode 120, so the same "h/mo" disagreed across
+// panels. Derive it here too so all three read one number.
+const DEFAULT_HOURS_PER_MONTH =
+  CLOUD_NIMBUS_POOL.filter((m) => m.active !== false)
+    .reduce((s, m) => s + (m.hoursPerMonth || 0), 0) || 120;
 
 function kpiCard(label: string, value: string, tone: keyof typeof STATS_TONE, hint?: string): HTMLElement {
   const t = STATS_TONE[tone] || STATS_TONE.slate;
@@ -42,7 +51,7 @@ export function StatsPanelVanilla(initial: SlotProps): VanillaSlotInstance {
 
   // Local closure state for the editable "hours per month" input. Persists
   // across re-renders without React; no top-level `new Map()` etc.
-  let hoursPerMonth = 120;
+  let hoursPerMonth = DEFAULT_HOURS_PER_MONTH;
 
   function render(p: SlotProps) {
     root.style.display = p.state.statsOpen ? '' : 'none';
@@ -91,7 +100,7 @@ export function StatsPanelVanilla(initial: SlotProps): VanillaSlotInstance {
     input.min = '1';
     input.value = String(hoursPerMonth);
     input.addEventListener('input', () => {
-      const n = Math.max(1, Number(input.value) || 120);
+      const n = Math.max(1, Number(input.value) || DEFAULT_HOURS_PER_MONTH);
       hoursPerMonth = n;
       const newLow  = hrsLow  > 0 ? (hrsLow  / hoursPerMonth).toFixed(1) : '0.0';
       const newHigh = hrsHigh > 0 ? (hrsHigh / hoursPerMonth).toFixed(1) : '0.0';

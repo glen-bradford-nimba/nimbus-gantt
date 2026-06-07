@@ -274,13 +274,21 @@ function computeSchedule(
   if (options.projectStart) {
     projStart = options.projectStart;
   } else {
-    // Use earliest task start date
+    // ASAP default: never anchor in the past. Use the LATER of today and the
+    // earliest existing task start, so a reflow schedules forward from now
+    // (the modal is "ASAP / critical-path") instead of packing every task onto
+    // a stale historical start. Earlier behaviour anchored at the earliest
+    // existing start, which produced all-past proposed dates (e.g. 2026-02-15)
+    // when the board's oldest task was months old. A host that wants an explicit
+    // anchor still passes options.projectStart and overrides this.
     let earliest = Infinity;
     for (const task of tasks.values()) {
       const t = parseDate(task.startDate).getTime();
-      if (t < earliest) earliest = t;
+      if (Number.isFinite(t) && t < earliest) earliest = t;
     }
-    projStart = formatDate(new Date(earliest));
+    const todayMs = Date.now();
+    const anchor = Number.isFinite(earliest) ? Math.max(earliest, todayMs) : todayMs;
+    projStart = formatDate(new Date(anchor));
   }
 
   // ── Phase 2 & 3: Forward pass with constraints ─────────────────────
