@@ -3020,6 +3020,14 @@ export class IIFEApp {
             onOpenReport: options.onOpenReport
               ? (ctx) => options.onOpenReport!(ctx)
               : undefined,
+            // 0.199.5 — bucket / range / custom-window change → host recompute.
+            // DH recomputes authoritative PacingData for the new params and pushes
+            // it back via handle.setPacingData; without this a host that fed only
+            // one granularity silently falls back to the preview on Month/Quarter
+            // or a range change (the Week-only-revert + inert-range-presets bugs).
+            onParamsChange: options.onPacingParamsChange
+              ? (p) => options.onPacingParamsChange!(p)
+              : undefined,
             rate: pc.rate,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             defaults: pacingCfg.defaults as any,

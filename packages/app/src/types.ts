@@ -1,6 +1,6 @@
 // Type-only import (erased at compile — no runtime cycle) so AppInstance can
 // type setPacingData against the canonical PacingData shape.
-import type { PacingData } from './renderers/pacing';
+import type { PacingData, PacingParamsChange } from './renderers/pacing';
 
 export interface PriorityBucket {
   id: string;
@@ -377,6 +377,14 @@ export interface MountOptions {
   /** Pacing (0.195) — fired by a bucket's "Open report ↗" action. Host owns
    *  the destination (e.g. a Salesforce report filtered to those task IDs). */
   onOpenReport?: (ctx: { bucketKey: string; taskIds: string[] }) => void;
+
+  /** Pacing (0.199.5) — fired when the user changes a pacing parameter (bucket /
+   *  range preset / custom window). An authoritative host (DH) recomputes
+   *  PacingData for the new params (e.g. getPacing(bucket)) and pushes it back
+   *  via handle.setPacingData. Without it, a host that fed only one granularity
+   *  (e.g. Week) silently reverts to the task-derived preview on Month/Quarter
+   *  or a range change. */
+  onPacingParamsChange?: (params: PacingParamsChange) => void;
 
   /** 0.196 — host-supplied team capacity pool. Overrides the template default
    *  (CLOUD_NIMBUS_POOL) for the Team modal + capacity display. DH feeds this

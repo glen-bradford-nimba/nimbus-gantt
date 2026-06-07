@@ -177,6 +177,16 @@ export interface PacingControls {
   buckets?: PacingBucketSize[] | false;
 }
 
+/** 0.199.5 — payload for PacingViewOptions.onParamsChange. The full visible-window
+ *  parameter set the host needs to recompute an authoritative PacingData. */
+export interface PacingParamsChange {
+  bucket: PacingBucketSize;
+  range: RangePreset;
+  /** ISO YYYY-MM-DD, present when range === 'custom' (or a stepper resolved it). */
+  customStart?: string;
+  customEnd?: string;
+}
+
 export interface PacingViewOptions {
   pacingData?: PacingData;
   rate?: number;
@@ -185,6 +195,13 @@ export interface PacingViewOptions {
   /** Which controls/pills are shown (DH tailors per client; MF hides $). */
   controls?: PacingControls;
   onBucketChange?: (bucket: PacingBucketSize) => void;
+  /** 0.199.5 — fired when the user changes ANY pacing parameter (bucket / range
+   *  preset / custom window). An authoritative host (DH) recomputes PacingData
+   *  for these params and pushes it back via setPacingData. Without this, a host
+   *  that fed only one granularity (e.g. Week) silently falls back to the
+   *  task-derived preview on Month/Quarter or a range change. Superset of
+   *  onBucketChange (which is kept for back-compat). */
+  onParamsChange?: (params: PacingParamsChange) => void;
   onOpenItem?: (taskId: string) => void;
   onItemHover?: (taskId: string | null, pos: { x: number; y: number }) => void;
   onOpenReport?: (ctx: { bucketKey: string; taskIds: string[] }) => void;
@@ -520,6 +537,14 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
   function persistPrefs(): void {
     savePacingPrefs({ range, bucket, customS, customE, measure, mode, show: { ...show } });
   }
+  // 0.199.5 — notify the host when a pacing PARAMETER (bucket / range / custom
+  // window) changes, so an authoritative host (DH) can recompute PacingData for
+  // the new params and push it back via setPacingData. Fired only on parameter
+  // changes — NOT on every internal re-render (drill-down expand must not
+  // refetch). Empty custom dates are passed as undefined.
+  function notifyParams(): void {
+    options.onParamsChange?.({ bucket, range, customStart: customS || undefined, customEnd: customE || undefined });
+  }
   // 0.198 — window steppers: nudge one end of the visible window by ±1 bucket.
   // First click on a preset resolves it to a concrete custom window, then nudges;
   // grows/shrinks at the start (past) or end (future). Guards start < end.
@@ -539,7 +564,7 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
       const cand = isoOf(stepBuckets(parseISO(customE) ?? Date.now(), bucket, dirBuckets));
       if ((parseISO(cand) ?? 0) > (parseISO(customS) ?? 0)) customE = cand;
     }
-    expandedKey = null; render();
+    expandedKey = null; notifyParams(); render();
   }
 
   function data(): PacingData {
@@ -600,7 +625,7 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
       const ranges = (Array.isArray(ctrl.ranges) ? ctrl.ranges
         : ['span3', 'span6', 'rest', 'thisQtr', 'ytd', 'all', 'custom']) as RangePreset[];
       row1.appendChild(grp('Range', ...ranges.map(p =>
-        pill(RANGE_LABELS[p], range === p, () => { range = p; expandedKey = null; render(); })))); row1n++;
+        pill(RANGE_LABELS[p], range === p, () => { range = p; expandedKey = null; notifyParams(); render(); })))); row1n++;
       // 0.198 — edge steppers: add/remove one bucket at each end of the window.
       const u = bucket === 'week' ? 'wk' : bucket === 'quarter' ? 'qtr' : 'mo';
       row1.appendChild(grp('Earlier',
@@ -615,7 +640,7 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
         const mk = (v: string, set: (x: string) => void) => {
           const i = document.createElement('input');
           i.type = 'date'; i.value = v; i.className = 'ngp-date';
-          i.addEventListener('change', () => { set(i.value); render(); });
+          i.addEventListener('change', () => { set(i.value); notifyParams(); render(); });
           return i;
         };
         const cw = el('div', 'ngp-grp');
@@ -630,7 +655,7 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
         : ['week', 'month', 'quarter']) as PacingBucketSize[];
       row1.appendChild(grp('Bucket', ...buckets.map(b =>
         pill(b[0].toUpperCase() + b.slice(1), bucket === b, () => {
-          bucket = b; expandedKey = null; options.onBucketChange?.(b); render();
+          bucket = b; expandedKey = null; options.onBucketChange?.(b); notifyParams(); render();
         }, true)))); row1n++;
     }
     if (row1n > 0) bar.appendChild(row1);
