@@ -1,6 +1,15 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.199.2 ASAP anchor + capacity source + Views dismiss + Pacing
+**📣 Latest cut: 0.199.3 zoom centers on today (2026-06-07).** **CORE-only** —
+completes the Month/Quarter zoom UX. The 0.199.1 clamp made zoom-out non-blank
+but landed on the timeline's right-edge tail; now `render()` re-anchors the
+viewport on **today** (centered) on a zoom-level change, so Month/Quarter land on
+a useful view. Initial mount keeps its restored scroll; ordinary scroll/resize
+unchanged; today-outside-range clamps to start/end. Re-copy **core only**: core
+md5 **`2421df9d115d6f9ccbb963d704c98f3a`** (app unchanged at `e0a5895e…`). PR #38,
+164/164, core tsc clean. Core version literal → 0.199.3.
+
+**0.199.2 ASAP anchor + capacity source + Views dismiss + Pacing
 scope banner (2026-06-07).** **TWO-bundle cut** — four NG-owned items from the
 live punch-list. Re-copy **both**: core md5
 **`a36ba781cf8eb53d4f0907d0d7c13bd3`**, app md5
