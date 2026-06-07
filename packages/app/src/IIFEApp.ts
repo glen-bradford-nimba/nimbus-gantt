@@ -2967,7 +2967,14 @@ export class IIFEApp {
         // Filters by audit field presence (owner/dates/hours), groups by
         // priority bucket, supports search + sort + section collapse.
         // Drag-to-reorder + edit/add/merge/export/submit defer to 0.183.
-        renderAuditListView(ganttHost, allTasks, {
+        // 0.199.7 — follow the board's VIEW filter + search (same applyFilter the
+        // Gantt + Stats panel use), so the Audit count matches Stats instead of
+        // always showing the full portfolio. Was raw allTasks (138) while the
+        // board was filtered to Active (93) — three contradicting counts in front
+        // of the client. hideCompleted is intentionally NOT applied (Stats doesn't
+        // either, and the audit wants Done items visible to flag mis-sizing).
+        const auditTasks = applyFilter(allTasks, state.filter as 'active', state.search);
+        renderAuditListView(ganttHost, auditTasks, {
           progressLabel: tplConfig.progressLabel,
           hideRecordIds: tplConfig.hideRecordIds,
           // 0.185.5 — forward the host's onItemReorder contract so the
