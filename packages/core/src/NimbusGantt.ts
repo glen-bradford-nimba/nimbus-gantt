@@ -116,6 +116,10 @@ export class NimbusGantt {
   // and re-anchor the viewport on "today" (see the clamp block in render()).
   // null until the first render, so the initial mount keeps its restored scroll.
   private lastRenderedZoom: string | null = null;
+  // 0.199.4 — consecutive 0-size render attempts (LWS render-init guard); reset
+  // once the panel has real dimensions. Capped so a permanently-hidden host
+  // doesn't spin the retry loop forever.
+  private renderRetries = 0;
   private canvasRenderer: CanvasRenderer;
   private treeGrid: DomTreeGrid;
   private scrollManager: ScrollManager;
@@ -801,7 +805,7 @@ export class NimbusGantt {
       // NOTE: bump this with each core release — consumers (e.g. the app's
       // Auto-Schedule guard) feature-detect first but also surface this string
       // for diagnostics. Stale value = false "needs newer core" reports.
-      version: '0.199.3',
+      version: '0.199.4',
       pushRemoteEvent: typeof this.pushRemoteEvent === 'function',
       timeCursor: true,
       history: !!self.history,
@@ -958,6 +962,28 @@ export class NimbusGantt {
     // state instead of the live store. Live state is preserved untouched
     // for resume-to-now.
     const state = this.getDisplayState();
+
+    // 0.199.4 — LWS render-init guard. Under Salesforce LWS the timeline panel
+    // can have 0 layout size when render() first runs (mount / view-switch
+    // re-mount), and ResizeObserver may be blocked there — so sizing the canvas
+    // off a 0-width panel paints a BLANK canvas that the usual resize-driven
+    // re-render never recovers (the reported "blank Gantt on prod, every zoom,
+    // survives reload, resize doesn't help"). When the panel isn't laid out yet,
+    // do NO render work and retry on the next frame until it has real dimensions.
+    // Capped (~90 frames) so a permanently-hidden host doesn't spin forever; the
+    // ResizeObserver / next interaction still covers a show-much-later case. This
+    // is additive — a laid-out panel (the normal path) is untouched.
+    if ((this.timelinePanel.clientWidth <= 0 || this.timelinePanel.clientHeight <= 0)
+        && this.renderRetries < 90) {
+      this.renderRetries++;
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => { if (!this.destroyed) this.render(); });
+      } else {
+        setTimeout(() => { if (!this.destroyed) this.render(); }, 16);
+      }
+      return;
+    }
+    this.renderRetries = 0;
 
     // Recreate TimeScale from current state
     const viewportWidth = this.timelinePanel.clientWidth;
