@@ -1,6 +1,24 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.199.6 honest Audit "Budget Used %" (2026-06-07). APP-only.**
+**📣 Latest cut: 0.200.0 stacked forecast tiers — "hockey stick" (2026-06-07).
+APP-only.** The Pacing forecast now STACKS commitment tiers (actuals → greenlit →
+predicted → ready-to-approve, dotted cap), each toggleable. **NG owns the
+contract; DH + CN feed it uniformly.** Contract (exported from `@nimbus-gantt`):
+`PacingSegment {id,label,color?,style?:'solid'|'dotted',order?}` +
+`PacingData.segments[]` (tier defs/colors/style, host-overridable) +
+`PacingBucket.segments{segId→hours}` (per-period per-tier) +
+`PacingBucketItem.tier?` + `PACING_SEGMENT_DEFAULTS`. Works with zero host
+changes: NG splits the forecast by `priorityGroup` (NOW+NEXT→greenlit,
+PLANNED→predicted, PROPOSED→ready, HOLD excluded) in preview, and SCALES that
+split onto the host's authoritative per-bucket forecast when the host hasn't fed
+segments (so prod shows the stack today). **DH/CN adoption:** feed
+`PacingData.segments` + per-bucket `segments` (+ optional `item.tier`); override
+colors/style per client. Re-copy **app only**: app md5
+**`6a2bb3f0626d061a2814c9ef8fb658ac`** (supersedes `90b04849`; cumulative —
+carries .5/.6/.7). Core unchanged `aec731a9…`. PR #43, 164/164. Follow-on:
+drill-down grouped by tier (items already carry `tier`).
+
+**0.199.6 honest Audit "Budget Used %" (2026-06-07). APP-only.**
 The audit/list "Budget Used %" forced every Done item to 100% and capped at 100%,
 burying the sizing signal — a Done task logged 1.5h/47h read "100%" not 3% (a 31×
 over-estimate), and over-runs (>100%) were hidden. Now it's the honest uncapped
