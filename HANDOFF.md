@@ -1,6 +1,18 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.201.0 configurable breakout dimension (2026-06-08). APP-only.**
+**📣 Latest cut: 0.201.1 VIEW filter field-coupling fix (2026-06-08). APP-only.**
+The **Real T-NNNN tickets** and **Workstream rollups** VIEW filters returned **0
+items on Salesforce** (MF-Prod) despite a board full of `T-0228`-style items: the
+predicate matched the `T-`/`WS-` prefix against `t.id` only, but on SF the `id` is
+a record id and the ticket number lives in the `title` (it's the `id` only on the
+scratch/CN surface). `hasTicketPrefix()` now checks `id`/`title`/`name` — only
+ADDS matches, so neither surface regresses. A CN/DH surface-asymmetry, not a
+data-linkage gap (surfaced in Cowork's MF-Prod pill sweep). Re-copy **app only**:
+app md5 **`e2414fae4fc319849046321606c2c318`** (supersedes `a6f21b9f`; cumulative
+— carries .5/.6/.7/.200.0/.1/.2/.3/.201.0). Core unchanged `aec731a9…`. PR #48,
+167/167. **DH/CN: re-vendor the app bundle to pick this up.**
+
+**0.201.0 configurable breakout dimension (2026-06-08). APP-only.**
 Completes the stacked-forecast spec (gap B): a **Breakout** control re-segments the
 pacing column + drill-down by Cohort / Epic / Owner / Item. New
 `PacingBreakoutDimension` + `PacingData.breakout?:{dimension,disclosedDepth?}`
