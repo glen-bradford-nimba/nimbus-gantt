@@ -27,6 +27,7 @@
  */
 
 import type { NormalizedTask } from '../types';
+import { DONE_STAGES } from '../pipeline';
 
 // ─── DH → NG contract ───────────────────────────────────────────────────────
 
@@ -486,7 +487,13 @@ function computeFromTasks(tasks: NormalizedTask[], size: PacingBucketSize): Paci
   }
 
   for (const t of tasks) {
-    if (t.isInactive) continue;
+    // 0.200.1 — exclude terminal-stage work (Done/Cancelled/…) from the forecast,
+    // mirroring the board's hideCompleted + the priority lanes + DH's authoritative
+    // scope. Without this, a Cancelled/Done item whose isInactive flag isn't set
+    // had its remaining spread into future bars (live: "CF 2.0 · Cancelled · 15h"
+    // polluting a forecast bucket) and mis-tiered in the stack. Wholesale exclusion
+    // (not just remaining) keeps the preview + drill-down reconciled with DH totals.
+    if (t.isInactive || DONE_STAGES[t.stage || '']) continue;
     const est = Number(t.estimatedHours) || 0;
     const logged = Number(t.loggedHours) || 0;
     if (est <= 0 && logged <= 0) continue;
@@ -999,7 +1006,10 @@ function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number 
     head.appendChild(rpt);
   }
   panel.appendChild(head);
-  if (b.items.length === 0) { panel.appendChild(el('div', 'ngp-empty', 'No itemized work in this period.')); return panel; }
+  // 0.200.1 — drop 0h-contribution rows (rounding/zero noise the live drill-down
+  // surfaced, e.g. "[RR] Confirm authoritative… · 0h"); only show real contributors.
+  const items = b.items.filter(i => (i.hours || 0) > 0);
+  if (items.length === 0) { panel.appendChild(el('div', 'ngp-empty', 'No itemized work in this period.')); return panel; }
 
   const fmtv = (h?: number) => h == null ? '—' : (o.useDollars ? fmtMoney(h * o.rate) : fmtH(h));
   const hrow = el('div', 'ngp-cols ngp-colhead');
@@ -1007,8 +1017,8 @@ function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number 
     hrow.appendChild(el('div', i === 0 ? '' : 'ngp-num', c)));
   panel.appendChild(hrow);
 
-  const maxH = Math.max(...b.items.map(i => i.hours), 1);
-  for (const it of b.items) {
+  const maxH = Math.max(...items.map(i => i.hours), 1);
+  for (const it of items) {
     const row = el('div', 'ngp-cols ngp-irow' + (options.onOpenItem ? ' click' : ''));
     const nameCell = el('div');
     const nl = el('div', 'ngp-grp');
