@@ -1,6 +1,17 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.200.2 segment style widening + palette align (2026-06-07).
+**📣 Latest cut: 0.200.3 tier-grouped pacing drill-down (2026-06-08). APP-only.**
+Clicking a forecast bucket now groups its work items BY TIER (when segments are
+declared) — each cohort under a header (style-matched swatch + label + count +
+hours subtotal), ordered by stack order; un-tiered → "Other"; no segments → flat
+list. Closes the stacked-forecast "what's in each cohort" visibility ask. Re-copy
+**app only**: app md5 **`76fae0a72e9feb54ceadd09b73942387`** (supersedes
+`a35daa28`; cumulative — carries .5/.6/.7/.200.0/.1/.2). Core unchanged
+`aec731a9…`. PR #46, 164/164. **Stacked-forecast spec gap B (breakout
+DIMENSION + in-column DISCLOSURE DEPTH) still deferred** — pending DH feeding the
+cohort split + live verification.
+
+**0.200.2 segment style widening + palette align (2026-06-07).
 APP-only.** Stacked-forecast spec gap A: `PacingSegment.style` now `solid|dotted|
 outline|hatched` + `opacity?` (host picks per series — "dotted or other formats");
 chart renders all four (hatched via SVG pattern) + legend swatch mirrors. Default
