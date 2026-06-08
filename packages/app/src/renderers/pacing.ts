@@ -100,6 +100,14 @@ export interface PacingSummary {
 
 export type PacingBucketSize = 'week' | 'month' | 'quarter';
 
+/** 0.201.0 — which dimension the stacked column is broken out by. 'cohort' uses
+ *  the declared commitment tiers (greenlit/predicted/ready); 'epic'/'owner'/
+ *  'workItem' derive segments dynamically from each bucket's items (by group/
+ *  parent, assignee, or one band per item). User-switchable via the Breakout
+ *  control; host seeds the default + can hide it via PacingData.breakout /
+ *  controls.breakout. */
+export type PacingBreakoutDimension = 'cohort' | 'workItem' | 'epic' | 'owner';
+
 // 0.200.0 — NG's DEFAULT forecast tiers, used by the task-derived preview so the
 // stacked hockey stick renders with zero host changes. Hosts (DH/CN) override by
 // feeding PacingData.segments + per-bucket PacingBucket.segments. Bottom→top:
@@ -126,6 +134,51 @@ const PACING_SEG_RAMP = ['#2563eb', '#7dabf5', '#c3dafc', '#1e40af', '#93c5fd', 
 // Page-unique id seed for hatch <pattern> defs (multiple charts can coexist).
 let pacingHatchSeq = 0;
 
+// 0.201.0 — breakout key for a non-cohort dimension (epic/owner/workItem).
+function pacingBreakoutKey(it: PacingBucketItem, dim: PacingBreakoutDimension): { id: string; label: string } | null {
+  if (dim === 'workItem') return { id: 'wi:' + it.id, label: it.name || it.id };
+  if (dim === 'epic') return { id: 'ep:' + (it.group || '__none'), label: it.group || 'No epic / group' };
+  if (dim === 'owner') return { id: 'ow:' + (it.assignee || '__none'), label: it.assignee || 'Unassigned' };
+  return null;
+}
+
+// 0.201.0 — re-segment a PacingData by a non-cohort dimension. 'cohort' returns
+// it untouched (declared-tier stack). Others derive stable segment defs from the
+// bucket items — top-N by total hours + an "Other" rollup, grouped by the chosen
+// field — and stack the WHOLE column by them (combined actual+forecast; the
+// actual/forecast split is a cohort-only concept). Items are NOT mutated; the
+// drill-down regroups via the same key (buildDrilldown).
+function applyBreakout(d: PacingData, dim: PacingBreakoutDimension): PacingData {
+  if (!dim || dim === 'cohort') return d;
+  const totals = new Map<string, { label: string; total: number }>();
+  for (const b of d.buckets) for (const it of (b.items || [])) {
+    if ((it.hours || 0) <= 0) continue;
+    const k = pacingBreakoutKey(it, dim); if (!k) continue;
+    const e = totals.get(k.id) || { label: k.label, total: 0 };
+    e.total += it.hours; totals.set(k.id, e);
+  }
+  const ranked = [...totals.entries()].sort((a, b) => b[1].total - a[1].total);
+  const CAP = 6;
+  const top = ranked.slice(0, CAP);
+  const topIds = new Set(top.map(([id]) => id));
+  const segments: PacingSegment[] = top.map(([id, v], i) =>
+    ({ id, label: v.label, color: PACING_SEG_RAMP[i % PACING_SEG_RAMP.length], style: 'solid', order: i }));
+  if (ranked.length > CAP) segments.push({ id: '__other', label: 'Other', color: '#94a3b8', style: 'solid', order: CAP });
+  const buckets = d.buckets.map(b => {
+    const seg: Record<string, number> = {};
+    for (const it of (b.items || [])) {
+      if ((it.hours || 0) <= 0) continue;
+      const k = pacingBreakoutKey(it, dim); if (!k) continue;
+      const sid = topIds.has(k.id) ? k.id : '__other';
+      seg[sid] = (seg[sid] || 0) + it.hours;
+    }
+    let sum = 0;
+    for (const k in seg) { seg[k] = round(seg[k]); sum += seg[k]; }
+    return { ...b, actual: 0, forecast: round(sum), segments: seg };
+  });
+  return { ...d, segments, buckets };
+}
+
 export interface PacingData {
   buckets: PacingBucket[];
   bucket: PacingBucketSize;
@@ -140,6 +193,10 @@ export interface PacingData {
    *  NG supplies a default set (greenlit/predicted/ready) in the task-derived
    *  preview so it renders without host changes. */
   segments?: PacingSegment[];
+  /** 0.201.0 — initial breakout dimension + how many levels to disclose in the
+   *  column (depth 1 = bands in column, items on drill-down). The user can switch
+   *  it via the Breakout control unless `controls.breakout === false`. */
+  breakout?: { dimension: PacingBreakoutDimension; disclosedDepth?: number };
 }
 
 /** 0.197.0 — DH's PortfolioPacingDTO shape
@@ -237,6 +294,8 @@ export interface PacingControls {
   ranges?: RangePreset[] | false;
   /** Restrict the Bucket sizes shown. Omit → all three. `false` hides the group. */
   buckets?: PacingBucketSize[] | false;
+  /** 0.201.0 — show the Breakout control (Cohort/Epic/Owner/Item). Default true. */
+  breakout?: boolean;
 }
 
 /** 0.199.5 — payload for PacingViewOptions.onParamsChange. The full visible-window
@@ -408,6 +467,7 @@ interface PacingPrefs {
   range?: string; bucket?: PacingBucketSize; customS?: string; customE?: string;
   measure?: 'hours' | 'dollars'; mode?: 'period' | 'cumulative';
   show?: { actual: boolean; forecast: boolean; target: boolean; seg?: Record<string, boolean> };
+  breakout?: PacingBreakoutDimension;
 }
 function loadPacingPrefs(): PacingPrefs | null {
   try {
@@ -628,9 +688,12 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
     seg: { ...(saved.show?.seg ?? {}) } as Record<string, boolean>,
   };
   const segOn = (id: string): boolean => show.seg[id] !== false;
+  // 0.201.0 — breakout dimension: saved pref > host default > 'cohort'.
+  let breakout: PacingBreakoutDimension =
+    saved.breakout || options.pacingData?.breakout?.dimension || 'cohort';
   // Persist the full control state so the next mount restarts from here.
   function persistPrefs(): void {
-    savePacingPrefs({ range, bucket, customS, customE, measure, mode, show: { ...show } });
+    savePacingPrefs({ range, bucket, customS, customE, measure, mode, show: { ...show }, breakout });
   }
   // 0.199.5 — notify the host when a pacing PARAMETER (bucket / range / custom
   // window) changes, so an authoritative host (DH) can recompute PacingData for
@@ -724,6 +787,9 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
   function render(): void {
     persistPrefs(); // 0.198 — restart-where-you-left-off
     const d = data();
+    // 0.201.0 — re-segment the column + drill-down by the active breakout
+    // dimension. 'cohort' → unchanged; epic/owner/workItem → dynamic segments.
+    const dd = applyBreakout(d, breakout);
     const r = rate(d);
     const useDollars = measure === 'dollars' && !!r;
     const cum = mode === 'cumulative';
@@ -787,6 +853,16 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
         pill('Per period', mode === 'period', () => { mode = 'period'; render(); }, true),
         pill('Cumulative', mode === 'cumulative', () => { mode = 'cumulative'; render(); }, true))); row2n++;
     }
+    // 0.201.0 — Breakout: re-segment the column + drill-down by cohort / epic /
+    // owner / work item. Persists via render()'s persistPrefs at the top.
+    if (ctrl.breakout !== false) {
+      const bset = (dim: PacingBreakoutDimension) => () => { breakout = dim; expandedKey = null; render(); };
+      row2.appendChild(grp('Breakout',
+        pill('Cohort', breakout === 'cohort', bset('cohort'), true),
+        pill('Epic', breakout === 'epic', bset('epic'), true),
+        pill('Owner', breakout === 'owner', bset('owner'), true),
+        pill('Item', breakout === 'workItem', bset('workItem'), true))); row2n++;
+    }
     if (ctrl.series !== false) {
       const legPill = (key: 'actual' | 'forecast' | 'target', label: string, color: string) => {
         const b = el('button', 'ngp-leg' + (show[key] ? '' : ' off'));
@@ -810,11 +886,12 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
         b.addEventListener('click', () => { show.seg[seg.id] = !segOn(seg.id); render(); });
         return b;
       };
-      const segs = d.segments && d.segments.length
-        ? [...d.segments].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : null;
+      const segs = dd.segments && dd.segments.length
+        ? [...dd.segments].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) : null;
       const leg = el('div', 'ngp-grp');
       leg.appendChild(el('span', 'ngp-lbl', 'Series'));
-      leg.appendChild(legPill('actual', 'Actual', COL.actual));
+      // Non-cohort breakouts fold actuals into the segments → no separate Actual band.
+      if (breakout === 'cohort') leg.appendChild(legPill('actual', 'Actual', COL.actual));
       if (segs) segs.forEach((seg, i) => leg.appendChild(segPill(seg, i)));
       else leg.appendChild(legPill('forecast', 'Forecast', COL.forecast));
       leg.appendChild(legPill('target', 'Target', COL.target));
@@ -883,19 +960,19 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
     // chart (range-filtered)
     const win = rangeWindow(range, bucket, customS, customE);
-    const visible = d.buckets.filter(b => {
+    const visible = dd.buckets.filter(b => {
       const ms = b.startMs ?? keyToMs(b.key);
       if (win.from != null && ms < win.from) return false;
       if (win.to != null && ms > win.to) return false;
       return true;
     });
-    body.appendChild(buildChart(visible, { show, segments: d.segments, useDollars, rate: r || 0, cum, expandedKey }, (k) => {
+    body.appendChild(buildChart(visible, { show, segments: dd.segments, useDollars, rate: r || 0, cum, expandedKey }, (k) => {
       expandedKey = expandedKey === k ? null : k; render();
     }));
 
     if (expandedKey) {
-      const b = visible.find(x => x.key === expandedKey) || d.buckets.find(x => x.key === expandedKey);
-      if (b) body.appendChild(buildDrilldown(b, { useDollars, rate: r || 0 }, options, d.segments));
+      const b = visible.find(x => x.key === expandedKey) || dd.buckets.find(x => x.key === expandedKey);
+      if (b) body.appendChild(buildDrilldown(b, { useDollars, rate: r || 0 }, options, dd.segments, breakout));
     } else {
       body.appendChild(el('div', 'ngp-hint', 'Click a bar to break the period down into its work items.'));
     }
@@ -1026,7 +1103,7 @@ function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: st
 
 // ─── Drill-down ──────────────────────────────────────────────────────────────
 
-function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number }, options: PacingViewOptions, segments?: PacingSegment[]): HTMLElement {
+function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number }, options: PacingViewOptions, segments?: PacingSegment[], dim?: PacingBreakoutDimension): HTMLElement {
   const panel = el('div', 'ngp-panel');
   const total = b.actual + b.forecast;
   // 0.200.1 — drop 0h-contribution rows (rounding/zero noise the live drill-down
@@ -1080,12 +1157,25 @@ function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number 
   // segments), so each cohort's composition is visible: a tier header (swatch +
   // label + item count + subtotal) above its items, ordered by the stack order.
   // Items whose tier isn't a declared segment fall into a trailing "Other" group.
-  const defs = (segments && segments.length) ? [...segments].sort((a, c) => (a.order ?? 0) - (c.order ?? 0)) : null;
+  // For 'workItem' breakout each band is a single item → grouping is pointless;
+  // fall through to the flat list. cohort groups by tier; epic/owner by the
+  // breakout key (same as the column segmentation).
+  const defs = (segments && segments.length && dim !== 'workItem')
+    ? [...segments].sort((a, c) => (a.order ?? 0) - (c.order ?? 0)) : null;
   if (defs) {
-    const groups: Array<{ seg: PacingSegment | null; rows: PacingBucketItem[] }> =
-      defs.map(seg => ({ seg, rows: items.filter(it => it.tier === seg.id) }));
     const known = new Set(defs.map(s => s.id));
-    const other = items.filter(it => !it.tier || !known.has(it.tier));
+    const keyOf = (it: PacingBucketItem): string | null => {
+      if (dim && dim !== 'cohort') {
+        const k = pacingBreakoutKey(it, dim);
+        const id = k ? k.id : null;
+        if (id && known.has(id)) return id;
+        return known.has('__other') ? '__other' : null;
+      }
+      return it.tier && known.has(it.tier) ? it.tier : null;
+    };
+    const groups: Array<{ seg: PacingSegment | null; rows: PacingBucketItem[] }> =
+      defs.map(seg => ({ seg, rows: items.filter(it => keyOf(it) === seg.id) }));
+    const other = items.filter(it => keyOf(it) === null);
     if (other.length) groups.push({ seg: null, rows: other });
     for (const g of groups) {
       if (!g.rows.length) continue;
