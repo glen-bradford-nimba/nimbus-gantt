@@ -23,6 +23,14 @@ const PROPOSAL_STAGES: Record<string, boolean> = {
 };
 
 /* ── FILTER_OPTIONS — spec order + labels ───────────────────────────────── */
+// Match a ticket-number prefix (T-, WS-) wherever the host surfaces it. The
+// human ticket number is `id` on the scratch/CN surface (id="T-0228") but the
+// `title`/`name` on Salesforce, where `id` is the SF record id. Checking all
+// three only ADDS matches — it can't regress either surface — so the Real /
+// Workstream filters stop returning 0 on prod. (MF-Prod, 2026-06-08.)
+const hasTicketPrefix = (t: NormalizedTask, prefix: string): boolean =>
+  [t.id, t.title, t.name].some((v) => !!v && String(v).indexOf(prefix) === 0);
+
 export const CLOUD_NIMBUS_FILTERS: FilterOption[] = [
   {
     id: 'active',
@@ -42,12 +50,12 @@ export const CLOUD_NIMBUS_FILTERS: FilterOption[] = [
   {
     id: 'real',
     label: 'Real T-NNNN tickets',
-    predicate: (t) => !!(t.id && String(t.id).indexOf('T-') === 0),
+    predicate: (t) => hasTicketPrefix(t, 'T-'),
   },
   {
     id: 'workstreams',
     label: 'Workstream rollups',
-    predicate: (t) => !!(t.id && String(t.id).indexOf('WS-') === 0),
+    predicate: (t) => hasTicketPrefix(t, 'WS-'),
   },
   {
     id: 'all',
