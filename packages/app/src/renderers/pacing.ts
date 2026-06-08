@@ -895,7 +895,7 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
     if (expandedKey) {
       const b = visible.find(x => x.key === expandedKey) || d.buckets.find(x => x.key === expandedKey);
-      if (b) body.appendChild(buildDrilldown(b, { useDollars, rate: r || 0 }, options));
+      if (b) body.appendChild(buildDrilldown(b, { useDollars, rate: r || 0 }, options, d.segments));
     } else {
       body.appendChild(el('div', 'ngp-hint', 'Click a bar to break the period down into its work items.'));
     }
@@ -1026,20 +1026,20 @@ function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: st
 
 // ─── Drill-down ──────────────────────────────────────────────────────────────
 
-function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number }, options: PacingViewOptions): HTMLElement {
+function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number }, options: PacingViewOptions, segments?: PacingSegment[]): HTMLElement {
   const panel = el('div', 'ngp-panel');
   const total = b.actual + b.forecast;
-  const head = el('div', 'ngp-phead');
-  head.appendChild(el('div', 'ngp-ptitle', b.label + ' — ' + (o.useDollars ? fmtMoney(total * o.rate) : fmtH(total)) + ' · ' + b.items.length + ' item' + (b.items.length === 1 ? '' : 's')));
-  if (options.onOpenReport) {
-    const rpt = el('button', 'ngp-pill', 'Open report ↗');
-    rpt.addEventListener('click', () => options.onOpenReport!({ bucketKey: b.key, taskIds: b.items.map(i => i.id) }));
-    head.appendChild(rpt);
-  }
-  panel.appendChild(head);
   // 0.200.1 — drop 0h-contribution rows (rounding/zero noise the live drill-down
   // surfaced, e.g. "[RR] Confirm authoritative… · 0h"); only show real contributors.
   const items = b.items.filter(i => (i.hours || 0) > 0);
+  const head = el('div', 'ngp-phead');
+  head.appendChild(el('div', 'ngp-ptitle', b.label + ' — ' + (o.useDollars ? fmtMoney(total * o.rate) : fmtH(total)) + ' · ' + items.length + ' item' + (items.length === 1 ? '' : 's')));
+  if (options.onOpenReport) {
+    const rpt = el('button', 'ngp-pill', 'Open report ↗');
+    rpt.addEventListener('click', () => options.onOpenReport!({ bucketKey: b.key, taskIds: items.map(i => i.id) }));
+    head.appendChild(rpt);
+  }
+  panel.appendChild(head);
   if (items.length === 0) { panel.appendChild(el('div', 'ngp-empty', 'No itemized work in this period.')); return panel; }
 
   const fmtv = (h?: number) => h == null ? '—' : (o.useDollars ? fmtMoney(h * o.rate) : fmtH(h));
@@ -1049,7 +1049,7 @@ function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number 
   panel.appendChild(hrow);
 
   const maxH = Math.max(...items.map(i => i.hours), 1);
-  for (const it of items) {
+  const makeRow = (it: PacingBucketItem): HTMLElement => {
     const row = el('div', 'ngp-cols ngp-irow' + (options.onOpenItem ? ' click' : ''));
     const nameCell = el('div');
     const nl = el('div', 'ngp-grp');
@@ -1073,7 +1073,41 @@ function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number 
       row.addEventListener('mousemove', e => options.onItemHover!(it.id, { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY }));
       row.addEventListener('mouseleave', () => options.onItemHover!(null, { x: 0, y: 0 }));
     }
-    panel.appendChild(row);
+    return row;
+  };
+
+  // 0.200.3 — group the breakdown by commitment tier (when the data declares
+  // segments), so each cohort's composition is visible: a tier header (swatch +
+  // label + item count + subtotal) above its items, ordered by the stack order.
+  // Items whose tier isn't a declared segment fall into a trailing "Other" group.
+  const defs = (segments && segments.length) ? [...segments].sort((a, c) => (a.order ?? 0) - (c.order ?? 0)) : null;
+  if (defs) {
+    const groups: Array<{ seg: PacingSegment | null; rows: PacingBucketItem[] }> =
+      defs.map(seg => ({ seg, rows: items.filter(it => it.tier === seg.id) }));
+    const known = new Set(defs.map(s => s.id));
+    const other = items.filter(it => !it.tier || !known.has(it.tier));
+    if (other.length) groups.push({ seg: null, rows: other });
+    for (const g of groups) {
+      if (!g.rows.length) continue;
+      const c = g.seg ? (g.seg.color || '#94a3b8') : '#94a3b8';
+      const st = g.seg?.style;
+      const sub = g.rows.reduce((s, it) => s + it.hours, 0);
+      const hdr = el('div', '');
+      hdr.setAttribute('style', 'display:flex;align-items:center;gap:7px;margin:11px 0 3px;font-size:11.5px;font-weight:700;color:#0f172a');
+      const sw = st === 'dotted' ? 'background:' + c + '33;border:1px dashed ' + c
+        : st === 'outline' ? 'background:' + c + '14;border:1px solid ' + c
+        : st === 'hatched' ? 'background:repeating-linear-gradient(45deg,' + c + '22 0 2px,transparent 2px 4px);border:1px solid ' + c
+        : 'background:' + c;
+      hdr.appendChild(el('span', 'ngp-sw')).setAttribute('style', sw);
+      hdr.appendChild(el('span', undefined, g.seg ? g.seg.label : 'Other'));
+      const meta = el('span', '', g.rows.length + ' item' + (g.rows.length === 1 ? '' : 's') + ' · ' + (o.useDollars ? fmtMoney(sub * o.rate) : fmtH(sub)));
+      meta.setAttribute('style', 'font-weight:400;color:#64748b');
+      hdr.appendChild(meta);
+      panel.appendChild(hdr);
+      for (const it of g.rows) panel.appendChild(makeRow(it));
+    }
+  } else {
+    for (const it of items) panel.appendChild(makeRow(it));
   }
   return panel;
 }
