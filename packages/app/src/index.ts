@@ -66,6 +66,7 @@ export type {
   PacingBucketSize,
   PacingParamsChange,
   PacingSegment,
+  PacingBreakoutDimension,
 } from './renderers/pacing';
 
 /* ── v10 template framework ────────────────────────────────────────────── */
