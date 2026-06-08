@@ -1,6 +1,17 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.200.1 exclude terminal-stage work from forecast + 0h drill-down
+**📣 Latest cut: 0.200.2 segment style widening + palette align (2026-06-07).
+APP-only.** Stacked-forecast spec gap A: `PacingSegment.style` now `solid|dotted|
+outline|hatched` + `opacity?` (host picks per series — "dotted or other formats");
+chart renders all four (hatched via SVG pattern) + legend swatch mirrors. Default
+palette aligned to the prototype (committed green / predicted blue / ready
+amber-dotted), still host-overridable. Re-copy **app only**: app md5
+**`a35daa284ea90fc0fb32403dc3877d25`** (supersedes `99c58933`; cumulative — carries
+.5/.6/.7/.200.0/.1). Core unchanged `aec731a9…`. PR #45, 164/164. **Still open
+(stacked-forecast spec gap B):** breakout DIMENSION (workItem/epic/owner) +
+in-column DISCLOSURE DEPTH, and tier-grouped drill-down — scoped as next.
+
+**0.200.1 exclude terminal-stage work from forecast + 0h drill-down
 noise (2026-06-07). APP-only.** Live-surfaced via 0.267 drill-down: Cancelled/Done
 items whose `isInactive` wasn't set were forecast (e.g. "CF 2.0 · Cancelled · 15h"
 in a bucket) — `computeFromTasks` now also skips `DONE_STAGES[t.stage]`, mirroring
