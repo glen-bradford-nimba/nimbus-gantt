@@ -1,6 +1,15 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.200.0 stacked forecast tiers — "hockey stick" (2026-06-07).
+**📣 Latest cut: 0.200.1 exclude terminal-stage work from forecast + 0h drill-down
+noise (2026-06-07). APP-only.** Live-surfaced via 0.267 drill-down: Cancelled/Done
+items whose `isInactive` wasn't set were forecast (e.g. "CF 2.0 · Cancelled · 15h"
+in a bucket) — `computeFromTasks` now also skips `DONE_STAGES[t.stage]`, mirroring
+DH's authoritative scope so preview/drill-down/tier-split reconcile. Drill-down
+drops 0h-contribution rows. Re-copy **app only**: app md5
+**`99c58933fcccf34c427639b0b634fcc6`** (supersedes `6a2bb3f0`; cumulative — carries
+.5/.6/.7/.200.0). Core unchanged `aec731a9…`. PR #44, 164/164.
+
+**0.200.0 stacked forecast tiers — "hockey stick" (2026-06-07).
 APP-only.** The Pacing forecast now STACKS commitment tiers (actuals → greenlit →
 predicted → ready-to-approve, dotted cap), each toggleable. **NG owns the
 contract; DH + CN feed it uniformly.** Contract (exported from `@nimbus-gantt`):
