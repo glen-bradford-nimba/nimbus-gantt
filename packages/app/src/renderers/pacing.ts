@@ -80,7 +80,11 @@ export interface PacingSegment {
   id: string;
   label: string;
   color?: string;                 // fill; falls back to a blue ramp by order
-  style?: 'solid' | 'dotted';     // 'dotted' → hatched outline (speculative tier)
+  /** Fill treatment. 'solid' (default); 'dotted' → light fill + dashed outline
+   *  (conditional/speculative tier); 'outline' → transparent fill + solid border;
+   *  'hatched' → diagonal-line pattern. Host-overridable per series. */
+  style?: 'solid' | 'dotted' | 'outline' | 'hatched';
+  opacity?: number;               // 0–1 fill opacity override (default 1, .92 future)
   order?: number;                 // stack order, low = bottom
 }
 
@@ -100,10 +104,13 @@ export type PacingBucketSize = 'week' | 'month' | 'quarter';
 // stacked hockey stick renders with zero host changes. Hosts (DH/CN) override by
 // feeding PacingData.segments + per-bucket PacingBucket.segments. Bottom→top:
 // committed work, then likely, then the dotted "ready to approve" upside cap.
+// Colours align to the /glen/mf-forecast-stack-0607 prototype (the agreed
+// direction): committed = green, predicted/maintenance = blue, ready = amber +
+// dotted. All host-overridable via PacingData.segments.
 export const PACING_SEGMENT_DEFAULTS: PacingSegment[] = [
-  { id: 'greenlit',  label: 'Greenlit',         color: '#2563eb', style: 'solid',  order: 0 },
-  { id: 'predicted', label: 'Predicted',        color: '#7dabf5', style: 'solid',  order: 1 },
-  { id: 'ready',     label: 'Ready to approve', color: '#c3dafc', style: 'dotted', order: 2 },
+  { id: 'greenlit',  label: 'Greenlit',         color: '#059669', style: 'solid',  order: 0 },
+  { id: 'predicted', label: 'Predicted',        color: '#2563eb', style: 'solid',  order: 1 },
+  { id: 'ready',     label: 'Ready to approve', color: '#d97706', style: 'dotted', order: 2 },
 ];
 // Maps NG's priority lanes → default tiers. HOLD (deferred) is intentionally
 // absent → its remaining is excluded from the forecast stack. Unknown lanes fall
@@ -116,6 +123,8 @@ const PACING_LANE_TO_SEGMENT: Record<string, string> = {
 };
 // Fallback fills for host segments that don't declare a `color`.
 const PACING_SEG_RAMP = ['#2563eb', '#7dabf5', '#c3dafc', '#1e40af', '#93c5fd', '#1d4ed8'];
+// Page-unique id seed for hatch <pattern> defs (multiple charts can coexist).
+let pacingHatchSeq = 0;
 
 export interface PacingData {
   buckets: PacingBucket[];
@@ -792,9 +801,11 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
       const segPill = (seg: PacingSegment, i: number): HTMLElement => {
         const b = el('button', 'ngp-leg' + (segOn(seg.id) ? '' : ' off'));
         const c = seg.color || PACING_SEG_RAMP[i % PACING_SEG_RAMP.length];
-        b.appendChild(el('span', 'ngp-sw')).setAttribute('style', seg.style === 'dotted'
-          ? 'background:' + c + '33;border:1px dashed ' + c
-          : 'background:' + c);
+        const sw = seg.style === 'dotted' ? 'background:' + c + '33;border:1px dashed ' + c
+          : seg.style === 'outline' ? 'background:' + c + '14;border:1px solid ' + c
+          : seg.style === 'hatched' ? 'background:repeating-linear-gradient(45deg,' + c + '22 0 2px,transparent 2px 4px);border:1px solid ' + c
+          : 'background:' + c;
+        b.appendChild(el('span', 'ngp-sw')).setAttribute('style', sw);
         b.appendChild(el('span', undefined, seg.label));
         b.addEventListener('click', () => { show.seg[seg.id] = !segOn(seg.id); render(); });
         return b;
@@ -937,6 +948,20 @@ function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: st
   const y = (v: number) => padT + plotH - (v / niceMax) * plotH;
   const fmtAxis = (v: number) => o.useDollars ? '$' + (v >= 1000 ? round(v / 1000) + 'k' : round(v)) : round(v) + '';
   const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: 'auto', style: 'display:block' });
+  // 0.200.2 — lazily-built diagonal hatch patterns for style:'hatched' segments.
+  const defs = svgEl('defs', {}); svg.appendChild(defs);
+  const hatchCache = new Map<string, string>();
+  const hatchUrl = (color: string): string => {
+    let id = hatchCache.get(color);
+    if (!id) {
+      id = 'ngp-hx-' + (pacingHatchSeq++);
+      const p = svgEl('pattern', { id, patternUnits: 'userSpaceOnUse', width: 5, height: 5, patternTransform: 'rotate(45)' });
+      p.appendChild(svgEl('rect', { width: 5, height: 5, fill: color, opacity: 0.12 }));
+      p.appendChild(svgEl('line', { x1: 0, y1: 0, x2: 0, y2: 5, stroke: color, 'stroke-width': 1.4 }));
+      defs.appendChild(p); hatchCache.set(color, id);
+    }
+    return 'url(#' + id + ')';
+  };
   for (let i = 0; i <= 4; i++) {
     const v = niceMax * i / 4, yy = y(v);
     svg.appendChild(svgEl('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: COL.grid, 'stroke-width': 1 }));
@@ -961,11 +986,17 @@ function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: st
         const h = (v / niceMax) * plotH; top -= h;
         const c = sd.color || PACING_SEG_RAMP[si % PACING_SEG_RAMP.length];
         const attrs: Record<string, string | number> = { x, y: top, width: barW, height: h, rx: 2 };
-        if (sd.style === 'dotted') {
+        const st = sd.style || 'solid';
+        if (st === 'dotted') {
           attrs.fill = c + '33'; attrs.stroke = c; attrs['stroke-width'] = 1.2; attrs['stroke-dasharray'] = '3 2';
+        } else if (st === 'outline') {
+          attrs.fill = c + '14'; attrs.stroke = c; attrs['stroke-width'] = 1.4;
+        } else if (st === 'hatched') {
+          attrs.fill = hatchUrl(c); attrs.stroke = c; attrs['stroke-width'] = 1;
         } else {
           attrs.fill = c; if (!r.b.isPast) attrs.opacity = 0.95;
         }
+        if (sd.opacity != null) attrs.opacity = sd.opacity;  // host override wins
         svg.appendChild(svgEl('rect', attrs));
       });
     } else if (o.show.forecast && r.forecast > 0) {
