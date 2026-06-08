@@ -1,6 +1,18 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.200.3 tier-grouped pacing drill-down (2026-06-08). APP-only.**
+**📣 Latest cut: 0.201.0 configurable breakout dimension (2026-06-08). APP-only.**
+Completes the stacked-forecast spec (gap B): a **Breakout** control re-segments the
+pacing column + drill-down by Cohort / Epic / Owner / Item. New
+`PacingBreakoutDimension` + `PacingData.breakout?:{dimension,disclosedDepth?}`
+(exported, host-seedable, `controls.breakout`-gated). Non-cohort dims derive stable
+segments from bucket items (top-6 + Other); 'cohort' = the declared-tier stack
+(unchanged). Re-copy **app only**: app md5
+**`a6f21b9f3cbf6a5f66f415fc19a10251`** (supersedes `76fae0a7`; cumulative —
+carries .5/.6/.7/.200.0/.1/.2/.3). Core unchanged `aec731a9…`. PR #47, 164/164.
+**Stacked-forecast renderer is now feature-complete; gating step = DH feeds the
+cohort `segments` + cuts a bundle re-vendoring this app.**
+
+**0.200.3 tier-grouped pacing drill-down (2026-06-08). APP-only.**
 Clicking a forecast bucket now groups its work items BY TIER (when segments are
 declared) — each cohort under a header (style-matched swatch + label + count +
 hours subtotal), ordered by stack order; un-tiered → "Other"; no segments → flat
