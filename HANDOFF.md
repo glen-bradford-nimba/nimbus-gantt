@@ -1,6 +1,24 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.201.1 VIEW filter field-coupling fix (2026-06-08). APP-only.**
+**📣 Latest cut: 0.202.0 forecast capacity-leveling + raw-id guard (2026-06-09). APP-only.**
+The forecast spread each task's remaining over its own dates, so with every proposed
+rock dated to start "today" the near buckets spiked to **~900h/week against a ~39h/wk
+team pool** (the "insane acceleration"). New `levelForecast()` re-distributes the
+FORECAST so no bucket exceeds a per-bucket ceiling, spilling overflow forward
+(extending the horizon) — spike → believable capacity-bounded **ramp**. Actuals
+untouched; tier totals + per-item drill-down preserved. A **Pace** selector
+(Off/1×/2×/3× of the team's monthly pool) reshapes the curve live; IIFE feeds the
+pool from `CLOUD_NIMBUS_POOL` (~170h/mo **total** — the real number, not 127h/wk).
+Default ON at 1× when capacity present; `controls.pace=false` opts out. Model-only,
+no DML. Also: `cleanItemName()` renders "Untitled item" instead of leaking a bare SF
+record id in the drill-down/legend when a WorkItem Name is blank (real fix = name the
+records). Re-copy **app only**: app md5 **`1fd4fed3723dbb5c8177f8af09908835`**
+(supersedes `e2414fae`; cumulative). Core unchanged `aec731a9…`. PR #49, **174/174**.
+**DH: batch this app bundle with your install. Capacity-leveling = NG's half of the
+forecast-shape fix; the spike was never a DH problem.** Still NG host-side (DH):
+wire `onItemClick` so drill-down rows open records (NG already emits it).
+
+**0.201.1 VIEW filter field-coupling fix (2026-06-08). APP-only.**
 The **Real T-NNNN tickets** and **Workstream rollups** VIEW filters returned **0
 items on Salesforce** (MF-Prod) despite a board full of `T-0228`-style items: the
 predicate matched the `T-`/`WS-` prefix against `t.id` only, but on SF the `id` is
