@@ -3036,6 +3036,15 @@ export class IIFEApp {
               ? (p) => options.onPacingParamsChange!(p)
               : undefined,
             rate: pc.rate,
+            // 0.202.0 — feed the active team pool (h/mo) so the forecast can
+            // capacity-level (spike → ramp) and expose the Pace selector. Mirrors
+            // the same CLOUD_NIMBUS_POOL the Stats/Filter bars use; host can drop
+            // it via controls.pace = false.
+            capacity: {
+              hoursPerMonth: CLOUD_NIMBUS_POOL
+                .filter((m) => m.active !== false)
+                .reduce((s, m) => s + (m.hoursPerMonth || 0), 0),
+            },
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             defaults: pacingCfg.defaults as any,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

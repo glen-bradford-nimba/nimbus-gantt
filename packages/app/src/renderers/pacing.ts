@@ -136,7 +136,7 @@ let pacingHatchSeq = 0;
 
 // 0.201.0 — breakout key for a non-cohort dimension (epic/owner/workItem).
 function pacingBreakoutKey(it: PacingBucketItem, dim: PacingBreakoutDimension): { id: string; label: string } | null {
-  if (dim === 'workItem') return { id: 'wi:' + it.id, label: it.name || it.id };
+  if (dim === 'workItem') return { id: 'wi:' + it.id, label: cleanItemName(it) };
   if (dim === 'epic') return { id: 'ep:' + (it.group || '__none'), label: it.group || 'No epic / group' };
   if (dim === 'owner') return { id: 'ow:' + (it.assignee || '__none'), label: it.assignee || 'Unassigned' };
   return null;
@@ -177,6 +177,92 @@ function applyBreakout(d: PacingData, dim: PacingBreakoutDimension): PacingData 
     return { ...b, actual: 0, forecast: round(sum), segments: seg };
   });
   return { ...d, segments, buckets };
+}
+
+// 0.202.0 — capacity-leveling. The forecast spreads each task's remaining across
+// its own dates, so when many items start at once (e.g. every proposed rock dated
+// "today") the near buckets spike far past what the team can clear — an
+// unrealistic vertical climb. levelForecast re-distributes the FORECAST so no
+// bucket exceeds `capPerBucket` total hours, spilling overflow into later buckets
+// (extending the horizon as needed). Actuals (past/logged) are untouched. Tier
+// (segment) attribution and per-item drill-down ride along on each work unit, so
+// the stacked hockey-stick and the breakdown stay consistent — just leveled into a
+// believable ramp. Pure; the pace selector picks `capPerBucket`.
+interface LevelUnit { tier: string; hours: number; item: PacingBucketItem; ord: number; }
+function levelForecast(d: PacingData, capPerBucket: number): PacingData {
+  if (!(capPerBucket > 0) || !d.buckets.length) return d;
+  const size = d.bucket;
+  const order = new Map((d.segments || []).map((s, i) => [s.id, s.order ?? i]));
+  const tierOrd = (t: string) => order.has(t) ? (order.get(t) as number) : 99;
+  const fallbackTier = (d.segments && d.segments.length) ? d.segments[0].id : '__none';
+
+  // Split each bucket: keep its ACTUAL portion in place, lift its FORECAST portion
+  // out as schedulable units. forecastShare apportions a bucket's forecast across
+  // its items proportionally to their hours (future buckets are ~all forecast).
+  const kept = new Map<string, PacingBucket>();
+  const units: LevelUnit[] = [];
+  let firstFc = Infinity;
+  for (const b of d.buckets) {
+    const startMs = b.startMs ?? keyToMs(b.key);
+    const tot = b.actual + b.forecast;
+    const fShare = tot > 0 ? b.forecast / tot : 0;
+    const keptItems: PacingBucketItem[] = [];
+    for (const it of (b.items || [])) {
+      const aH = it.hours * (1 - fShare);
+      if (aH > 0.01) keptItems.push({ ...it, hours: aH });
+    }
+    kept.set(b.key, { ...b, forecast: 0, segments: {}, items: keptItems });
+    if (b.forecast > 0.01) {
+      firstFc = Math.min(firstFc, startMs);
+      for (const it of (b.items || [])) {
+        const fH = it.hours * fShare;
+        if (fH > 0.01) units.push({ tier: it.tier || fallbackTier, hours: fH, item: it, ord: startMs });
+      }
+    }
+  }
+  if (!units.length) return d;
+  // Schedule earliest-first; within the same original time, most-committed tier first.
+  units.sort((a, b) => a.ord - b.ord || tierOrd(a.tier) - tierOrd(b.tier));
+
+  const out = new Map<string, PacingBucket>(kept);
+  const ensure = (ms: number): PacingBucket => {
+    const start = bucketStartMs(ms, size), k = bucketKey(ms, size);
+    let b = out.get(k);
+    if (!b) { b = { key: k, label: bucketLabel(start, size), startMs: start, actual: 0, forecast: 0, target: 0, isPast: false, isCurrent: false, items: [], segments: {} }; out.set(k, b); }
+    return b;
+  };
+  let cur = bucketStartMs(firstFc, size), qi = 0, guard = 0;
+  while (qi < units.length && guard++ < 5000) {
+    const b = ensure(cur);
+    let cap = capPerBucket - b.actual;       // total (actual+forecast) stays under the ceiling
+    while (qi < units.length && cap > 0.01) {
+      const u = units[qi];
+      const take = Math.min(u.hours, cap);
+      b.forecast += take;
+      b.segments![u.tier] = (b.segments![u.tier] || 0) + take;
+      const ex = b.items.find(x => x.id === u.item.id);
+      if (ex) ex.hours += take; else b.items.push({ ...u.item, hours: take });
+      cap -= take; u.hours -= take;
+      if (u.hours <= 0.01) qi++;
+    }
+    cur = nextBucketMs(cur, size);
+  }
+
+  const buckets = Array.from(out.values()).sort((a, b) => (a.startMs ?? 0) - (b.startMs ?? 0));
+  for (const b of buckets) {
+    b.actual = round(b.actual); b.forecast = round(b.forecast);
+    if (b.segments) for (const k in b.segments) b.segments[k] = round(b.segments[k]);
+    for (const it of b.items) it.hours = round(it.hours);
+    b.items.sort((x, y) => y.hours - x.hours);
+  }
+  return { ...d, buckets };
+}
+
+/** 0.202.0 — per-bucket capacity ceiling from a monthly team pool, scaled to the
+ *  bucket size and the chosen pace multiplier (the pace selector). */
+function capacityPerBucket(hoursPerMonth: number, size: PacingBucketSize, pace: number): number {
+  const factor = size === 'week' ? 12 / 52 : size === 'quarter' ? 3 : 1;
+  return hoursPerMonth * factor * pace;
 }
 
 export interface PacingData {
@@ -296,6 +382,9 @@ export interface PacingControls {
   buckets?: PacingBucketSize[] | false;
   /** 0.201.0 — show the Breakout control (Cohort/Epic/Owner/Item). Default true. */
   breakout?: boolean;
+  /** 0.202.0 — show the Pace control (forecast capacity-leveling). Default true
+   *  when options.capacity is present, hidden otherwise. */
+  pace?: boolean;
 }
 
 /** 0.199.5 — payload for PacingViewOptions.onParamsChange. The full visible-window
@@ -311,6 +400,11 @@ export interface PacingParamsChange {
 export interface PacingViewOptions {
   pacingData?: PacingData;
   rate?: number;
+  /** 0.202.0 — team capacity for forecast leveling. When set, the Pace control
+   *  appears and the forecast is leveled so no bucket exceeds the chosen pace's
+   *  per-bucket ceiling (spike → ramp). `hoursPerMonth` is the active team pool
+   *  total (DH/CN feed it; IIFE passes CLOUD_NIMBUS_POOL). Omit → no leveling. */
+  capacity?: { hoursPerMonth?: number };
   /** Initial control state on load (DH seeds per client). */
   defaults?: PacingDefaults;
   /** Which controls/pills are shown (DH tailors per client; MF hides $). */
@@ -417,6 +511,20 @@ function fmtH(n: number): string { return round(n) + 'h'; }
 function fmtMoney(n: number): string { return '$' + round(n).toLocaleString('en-US'); }
 function str(v: unknown): string | undefined { return (v == null || v === '') ? undefined : String(v); }
 
+// 0.202.0 — a raw Salesforce record id (15 or 18 case-sensitive alphanumerics).
+const SF_ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
+/** Drill-down / breakout label guard. When a host feeds (or NG falls through to)
+ *  the bare record id as an item's name — the WorkItem Name is blank — render a
+ *  neutral placeholder instead of leaking gibberish like "a42UN0000009OpWYAU".
+ *  Only triggers when the name is empty or is literally the id (the fallback
+ *  case), so real names like "T-0228" or "[CF] CF-T01" are never touched. The
+ *  authoritative fix is upstream (populate the record Name); this is the net. */
+function cleanItemName(it: { id: string; name?: string }): string {
+  const n = it.name;
+  if (!n || (n === it.id && SF_ID_RE.test(n))) return 'Untitled item';
+  return n;
+}
+
 // ─── Bucketing ───────────────────────────────────────────────────────────────
 
 function bucketKey(ms: number, size: PacingBucketSize): string {
@@ -468,6 +576,7 @@ interface PacingPrefs {
   measure?: 'hours' | 'dollars'; mode?: 'period' | 'cumulative';
   show?: { actual: boolean; forecast: boolean; target: boolean; seg?: Record<string, boolean> };
   breakout?: PacingBreakoutDimension;
+  levelPace?: number; // 0.202.0 — capacity-leveling pace multiplier; 0 = off
 }
 function loadPacingPrefs(): PacingPrefs | null {
   try {
@@ -691,9 +800,17 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
   // 0.201.0 — breakout dimension: saved pref > host default > 'cohort'.
   let breakout: PacingBreakoutDimension =
     saved.breakout || options.pacingData?.breakout?.dimension || 'cohort';
+  // 0.202.0 — capacity-leveling pace. Only meaningful when a capacity pool is fed.
+  // Pace is a multiplier of the team's monthly pool (1× = the actual team). Default
+  // ON at 1× when capacity is present (the spike is universally wrong) — host/user
+  // can drop to Off; saved pref wins so it reopens where you left it.
+  const capHpm = (options.capacity?.hoursPerMonth && options.capacity.hoursPerMonth > 0)
+    ? options.capacity.hoursPerMonth : 0;
+  const showPace = capHpm > 0 && ctrl.pace !== false;
+  let levelPace: number = saved.levelPace ?? (showPace ? 1 : 0);
   // Persist the full control state so the next mount restarts from here.
   function persistPrefs(): void {
-    savePacingPrefs({ range, bucket, customS, customE, measure, mode, show: { ...show }, breakout });
+    savePacingPrefs({ range, bucket, customS, customE, measure, mode, show: { ...show }, breakout, levelPace });
   }
   // 0.199.5 — notify the host when a pacing PARAMETER (bucket / range / custom
   // window) changes, so an authoritative host (DH) can recompute PacingData for
@@ -786,7 +903,11 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
   function render(): void {
     persistPrefs(); // 0.198 — restart-where-you-left-off
-    const d = data();
+    const raw = data();
+    // 0.202.0 — capacity-level the forecast first (spike → ramp), so the breakout
+    // + chart all see the leveled distribution. Off when pace is 0 / no capacity.
+    const ceil = (capHpm > 0 && levelPace > 0) ? capacityPerBucket(capHpm, bucket, levelPace) : 0;
+    const d = ceil > 0 ? levelForecast(raw, ceil) : raw;
     // 0.201.0 — re-segment the column + drill-down by the active breakout
     // dimension. 'cohort' → unchanged; epic/owner/workItem → dynamic segments.
     const dd = applyBreakout(d, breakout);
@@ -863,6 +984,17 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
         pill('Owner', breakout === 'owner', bset('owner'), true),
         pill('Item', breakout === 'workItem', bset('workItem'), true))); row2n++;
     }
+    // 0.202.0 — Pace: capacity-level the forecast. Off = raw spread (every item on
+    // its own dates); 1× = the team's actual monthly pool; 2×/3× = ramped capacity.
+    // Each reshapes the climb live into a ceiling-bounded ramp.
+    if (showPace) {
+      const pset = (p: number) => () => { levelPace = p; expandedKey = null; render(); };
+      row2.appendChild(grp('Pace',
+        pill('Off', levelPace === 0, pset(0), true),
+        pill('1×', levelPace === 1, pset(1), true),
+        pill('2×', levelPace === 2, pset(2), true),
+        pill('3×', levelPace === 3, pset(3), true))); row2n++;
+    }
     if (ctrl.series !== false) {
       const legPill = (key: 'actual' | 'forecast' | 'target', label: string, color: string) => {
         const b = el('button', 'ngp-leg' + (show[key] ? '' : ' off'));
@@ -906,7 +1038,10 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
     hd.appendChild(el('div', 'ngp-h1', 'Pacing & Forecast'));
     const sub = (d.authoritative ? 'Actuals · forecast · target' + (d.scopeLabel ? ' — ' + d.scopeLabel : '')
       : 'Forecast preview — actual to date, remaining spread across scheduled dates (live from the board)')
-      + (useDollars ? ' · $ at ' + fmtMoney(r!) + '/hr' : '') + (cum ? ' · cumulative' : '');
+      + (useDollars ? ' · $ at ' + fmtMoney(r!) + '/hr' : '') + (cum ? ' · cumulative' : '')
+      // 0.202.0 — make the leveling basis explicit so the ramp isn't a mystery.
+      + (ceil > 0 ? ' · leveled to ' + fmtH(capacityPerBucket(capHpm, bucket, levelPace))
+          + '/' + bucket + ' (' + levelPace + '× team)' : '');
     hd.appendChild(el('div', 'ngp-sub', sub));
     body.appendChild(hd);
 
@@ -1130,7 +1265,7 @@ function buildDrilldown(b: PacingBucket, o: { useDollars: boolean; rate: number 
     const row = el('div', 'ngp-cols ngp-irow' + (options.onOpenItem ? ' click' : ''));
     const nameCell = el('div');
     const nl = el('div', 'ngp-grp');
-    nl.appendChild(el('div', 'ngp-iname', it.name)).setAttribute('style', 'flex:1;min-width:0');
+    nl.appendChild(el('div', 'ngp-iname', cleanItemName(it))).setAttribute('style', 'flex:1;min-width:0');
     const track = el('div', 'ngp-track');
     track.appendChild(el('div')).setAttribute('style', 'width:' + round(it.hours / maxH * 100) + '%');
     nl.appendChild(track);
@@ -1207,3 +1342,7 @@ function niceCeil(v: number): number {
   const mag = Math.pow(10, Math.floor(Math.log10(v)));
   return Math.ceil(v / (mag / 2)) * (mag / 2);
 }
+
+// 0.202.0 — test-only handles for the pure capacity-leveling transforms.
+export const __levelForecastForTest = levelForecast;
+export const __capPerBucketForTest = capacityPerBucket;
