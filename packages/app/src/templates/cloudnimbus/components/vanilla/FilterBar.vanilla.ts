@@ -54,6 +54,37 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
   searchInput.addEventListener('focus', () => { searchInputFocused = true; });
   searchInput.addEventListener('blur',  () => { searchInputFocused = false; });
 
+  // 0.204.0 — the LIVE fix for the one-char-only search on Salesforce
+  // (Cowork repro 6/11: typing "CF 2.0" on MF-Prod keeps only "C").
+  // Root cause was the per-keystroke dispatch: every char fired SET_SEARCH →
+  // full slot re-render → clear(inner) detaches the input mid-typing, and
+  // under LWS the synchronous focus() restore after re-append is silently
+  // swallowed — so the second keystroke lands nowhere. Two-part fix:
+  //  (a) DEBOUNCE the dispatch (180ms) so typing never re-renders between
+  //      keystrokes — the input element simply keeps the chars; and
+  //  (b) restore focus on a deferred tick as well as synchronously (below),
+  //      so the post-debounce re-render hands focus back even where the
+  //      sync call is dropped. The input is wired ONCE here — not re-keyed
+  //      per render — `latestDispatch` carries the current dispatch ref.
+  let latestDispatch: SlotProps['dispatch'] = initial.dispatch;
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+  let searchPending = false; // a typed value not yet dispatched
+  searchInput.addEventListener('input', () => {
+    searchPending = true;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => {
+      searchPending = false;
+      latestDispatch({ type: 'SET_SEARCH', q: searchInput.value });
+    }, 180);
+  });
+  // Flush immediately on blur so a click elsewhere applies the search as-is.
+  searchInput.addEventListener('blur', () => {
+    if (!searchPending) return;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchPending = false;
+    latestDispatch({ type: 'SET_SEARCH', q: searchInput.value });
+  });
+
   function render(p: SlotProps) {
     // Preserve search-input focus across re-renders. clear(inner) detaches
     // every child, which drops DOM focus even though the input element is
@@ -86,15 +117,14 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
     const icon = el('span', CLS_SEARCH_ICON);
     icon.textContent = '🔎';
     sw.appendChild(icon);
-    // Reuse the persistent input element. Sync value only if the dispatched
-    // state has diverged (e.g. Reset changes) — never clobber while the user
-    // is actively typing with the same value in flight.
-    if (searchInput.value !== state.search) {
+    // Reuse the persistent input element. Sync value only when the user
+    // isn't mid-typing: while focused (or a debounced dispatch is pending)
+    // the INPUT is the source of truth — state.search lags it by design.
+    // Syncing here would clobber buffered keystrokes (the prod bug).
+    latestDispatch = dispatch;
+    if (!searchInputFocused && !searchPending && searchInput.value !== state.search) {
       searchInput.value = state.search;
     }
-    // Rewire listener each render to capture the latest dispatch reference.
-    searchInput.oninput = (e) =>
-      dispatch({ type: 'SET_SEARCH', q: (e.target as HTMLInputElement).value });
     sw.appendChild(searchInput);
     if (state.search) {
       const clr = el('button', CLS_SEARCH_CLEAR);
@@ -180,16 +210,21 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
       inner.appendChild(rst);
     }
 
-    // 0.185.12 — restore search-input focus + caret if the user was typing.
-    // Scheduled via microtask-ish Promise.resolve so the browser finishes
-    // attaching the input before we call focus() — avoids a silent focus-
-    // restoration failure on some browsers when the element was only just
-    // re-appended.
+    // 0.185.12 / 0.204.0 — restore search-input focus + caret if the user
+    // was typing. The synchronous call alone was SILENTLY SWALLOWED under
+    // LWS when the element had only just been re-appended (the prod
+    // one-char-search bug), so we also retry on a deferred tick after the
+    // browser finishes attaching the node. Caret restores to the saved
+    // position only if the value hasn't moved on (debounced typing).
     if (hadSearchFocus) {
-      try { searchInput.focus(); } catch (_e) { /* ok */ }
-      if (selStart !== null && selEnd !== null) {
-        try { searchInput.setSelectionRange(selStart, selEnd); } catch (_e) { /* ok */ }
-      }
+      const restore = (): void => {
+        try { searchInput.focus(); } catch (_e) { /* ok */ }
+        if (selStart !== null && selEnd !== null && !searchPending) {
+          try { searchInput.setSelectionRange(selStart, selEnd); } catch (_e) { /* ok */ }
+        }
+      };
+      restore();
+      try { setTimeout(restore, 0); } catch (_e) { /* ok */ }
     }
   }
 

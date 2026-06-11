@@ -60,6 +60,34 @@ export interface AutoScheduleOptions {
    * doesn't want silent date mutation on every dep edit. Default: true.
    */
   autoRun?: boolean;
+  /**
+   * 0.204.0 — resource-constrained scheduling (capacity-leveling). When a
+   * positive `hoursPerMonth` pool is given, the forward pass runs each
+   * task's dependency/constraint-feasible start through a capacity gate: a
+   * running per-day load ledger caps total scheduled demand at
+   * `hoursPerMonth × 12/365 × pace` hours/day (the same month→period math
+   * the pacing forecast leveler uses, so the two layers agree). A task that
+   * doesn't fit DATE-SHIFTS later until its whole span fits — durations are
+   * never stretched (v1). This is greedy serial resource-leveling: the
+   * industry-standard heuristic (RCPSP is NP-hard), deterministic given the
+   * priority order.
+   *
+   * `pace` is the dial multiplier (1 = the real team, 2 = double capacity →
+   * compressed plan; 0 disables leveling). `demandOf` supplies a task's
+   * remaining work in hours (default: `estimatedHours - loggedHours` read
+   * off the task, 0 if absent — zero-demand tasks are never shifted).
+   * `priorityOf` ranks tasks for the greedy order among dependency-ready
+   * peers (lower = scheduled first; default = existing topo order). Tasks
+   * with hard-date constraints (MSO/MFO) consume capacity but are not
+   * shifted; ALAP tasks are excluded from the ledger (their backward-pass
+   * placement happens after leveling — v1 limitation).
+   */
+  capacity?: {
+    hoursPerMonth?: number;
+    pace?: number;
+    demandOf?: (task: GanttTask) => number;
+    priorityOf?: (task: GanttTask) => number;
+  };
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -249,8 +277,68 @@ function computeSchedule(
 
   const constraints = options.constraints || new Map<string, ScheduleConstraint>();
 
+  // ── 0.204.0: Capacity-leveling setup ─────────────────────────────────
+  // dailyCeiling > 0 turns the forward pass resource-aware. The 12/365
+  // factor matches the pacing forecast's month→week math (hpm×12/52 per
+  // 7-day week) so the schedule and the forecast level identically.
+  const capCfg = options.capacity;
+  const paceMul = capCfg?.pace ?? 1;
+  const dailyCeiling = (capCfg?.hoursPerMonth && capCfg.hoursPerMonth > 0 && paceMul > 0)
+    ? capCfg.hoursPerMonth * 12 / 365 * paceMul
+    : 0;
+  const demandOf = capCfg?.demandOf ?? ((t: GanttTask): number => {
+    const r = t as unknown as Record<string, unknown>;
+    const est = typeof r['estimatedHours'] === 'number' ? (r['estimatedHours'] as number) : 0;
+    const log = typeof r['loggedHours'] === 'number' ? (r['loggedHours'] as number) : 0;
+    return Math.max(0, est - log);
+  });
+  // Per-day load ledger (UTC day index → hours already placed).
+  const dayLoad = new Map<number, number>();
+  const dayIdx = (iso: string): number => Math.floor(parseDate(iso).getTime() / MS_PER_DAY);
+  /** Record a task's per-day demand into the ledger without shifting it
+   *  (hard-date constraints consume capacity where they sit). */
+  function recordLoad(startIso: string, dur: number, demand: number): void {
+    if (dailyCeiling <= 0 || demand <= 0) return;
+    const span = Math.max(1, dur);
+    const eff = Math.min(demand / span, dailyCeiling);
+    const s = dayIdx(startIso);
+    for (let d = s; d < s + span; d++) dayLoad.set(d, (dayLoad.get(d) || 0) + eff);
+  }
+  /** Find the earliest start ≥ es where the task's whole span fits under the
+   *  ceiling, commit its load, and return the (possibly shifted) start.
+   *  A task whose per-day demand alone exceeds the ceiling is capped at the
+   *  ceiling (it must go somewhere; durations are fixed in date-shift v1). */
+  function levelStart(es: string, dur: number, demand: number): string {
+    if (dailyCeiling <= 0 || demand <= 0) return es;
+    const span = Math.max(1, dur);
+    const eff = Math.min(demand / span, dailyCeiling);
+    let start = dayIdx(es);
+    let guard = 0;
+    outer: while (guard++ < 3650) {
+      for (let d = start; d < start + span; d++) {
+        if ((dayLoad.get(d) || 0) + eff > dailyCeiling + 1e-6) { start = d + 1; continue outer; }
+      }
+      break;
+    }
+    for (let d = start; d < start + span; d++) dayLoad.set(d, (dayLoad.get(d) || 0) + eff);
+    return formatDate(new Date(start * MS_PER_DAY));
+  }
+
   // ── Phase 1: Build the dependency graph ──────────────────────────────
-  const graph = buildDependencyGraph(taskIds, dependencies);
+  // 0.204.0 — when leveling with a priority rule, seed Kahn's queue in
+  // priority order so dependency-FREE peers (the "wall of rocks all dated
+  // today") are leveled most-committed-first. Dependencies still dominate:
+  // priority only breaks ties among simultaneously-ready tasks.
+  let graphTaskIds = taskIds;
+  if (dailyCeiling > 0 && capCfg?.priorityOf) {
+    const pOf = capCfg.priorityOf;
+    graphTaskIds = new Set([...taskIds].sort((a, b) => {
+      const pa = pOf(tasks.get(a)!), pb = pOf(tasks.get(b)!);
+      if (pa !== pb) return pa - pb;
+      return tasks.get(a)!.startDate < tasks.get(b)!.startDate ? -1 : 1;
+    }));
+  }
+  const graph = buildDependencyGraph(graphTaskIds, dependencies);
 
   // Report circular dependencies as violations
   for (const taskId of graph.circularTaskIds) {
@@ -456,6 +544,21 @@ function computeSchedule(
       }
     }
 
+    // ── Step 2b (0.204.0): Capacity gate ──────────────────────────
+    // Resource-level the dependency/constraint-feasible start. Hard-date
+    // tasks (MSO/MFO) hold their date but still consume capacity; ALAP
+    // tasks skip the ledger (their placement is decided in the backward
+    // pass). Everything else date-shifts until its whole span fits.
+    if (dailyCeiling > 0 && !isALAP.has(taskId)) {
+      const demand = demandOf(task);
+      const hardDate = constraint && (constraint.type === 'MSO' || constraint.type === 'MFO');
+      if (hardDate) {
+        recordLoad(es, dur, demand);
+      } else {
+        es = levelStart(es, dur, demand);
+      }
+    }
+
     // ── Step 3: Compute end date ──────────────────────────────────
     const ef = calendar.addDays(es, dur);
 
@@ -644,12 +747,12 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
 
   // ── Schedule execution ────────────────────────────────────────────
 
-  function scheduleAll(): ScheduleResult {
+  function scheduleAll(overrides?: Partial<AutoScheduleOptions>): ScheduleResult {
     const state = host.getState();
     const result = computeSchedule(
       state.tasks,
       state.dependencies,
-      opts,
+      overrides ? { ...opts, ...overrides } : opts,
       calendar,
     );
 
@@ -677,11 +780,33 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
   // 0.196.1 — compute the schedule WITHOUT applying it. Lets a host present
   // the proposed date changes for review (review-before-DML) and decide
   // whether/when to commit. No TASK_MOVE is dispatched.
-  function previewSchedule(): ScheduleResult {
+  function previewSchedule(overrides?: Partial<AutoScheduleOptions>): ScheduleResult {
     const state = host.getState();
-    const result = computeSchedule(state.tasks, state.dependencies, opts, calendar);
+    const result = computeSchedule(
+      state.tasks,
+      state.dependencies,
+      overrides ? { ...opts, ...overrides } : opts,
+      calendar,
+    );
     lastResult = result;
     return result;
+  }
+
+  // 0.204.0 — both `autoSchedule:run` and `autoSchedule:preview` accept an
+  // optional per-call options object alongside the callback, in either
+  // order: emit('autoSchedule:preview', { capacity: {...} }, cb). Legacy
+  // callers passing only a callback are untouched.
+  function parseEventArgs(args: unknown[]): {
+    overrides?: Partial<AutoScheduleOptions>;
+    callback?: (result: ScheduleResult) => void;
+  } {
+    let overrides: Partial<AutoScheduleOptions> | undefined;
+    let callback: ((result: ScheduleResult) => void) | undefined;
+    for (const a of args) {
+      if (typeof a === 'function') callback = a as (result: ScheduleResult) => void;
+      else if (a && typeof a === 'object') overrides = a as Partial<AutoScheduleOptions>;
+    }
+    return { overrides, callback };
   }
 
   // ── Middleware: auto-reschedule on dependency changes ──────────────
@@ -712,8 +837,8 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
       // Listen for schedule requests via the event system
       unsubscribers.push(
         host.on('autoSchedule:run', (...args: unknown[]) => {
-          const callback = args[0] as ((result: ScheduleResult) => void) | undefined;
-          const result = scheduleAll();
+          const { overrides, callback } = parseEventArgs(args);
+          const result = scheduleAll(overrides);
           if (callback) callback(result);
         }),
       );
@@ -721,8 +846,8 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
       // 0.196.1 — preview (compute without applying) for review-before-commit.
       unsubscribers.push(
         host.on('autoSchedule:preview', (...args: unknown[]) => {
-          const callback = args[0] as ((result: ScheduleResult) => void) | undefined;
-          const result = previewSchedule();
+          const { overrides, callback } = parseEventArgs(args);
+          const result = previewSchedule(overrides);
           if (callback) callback(result);
         }),
       );

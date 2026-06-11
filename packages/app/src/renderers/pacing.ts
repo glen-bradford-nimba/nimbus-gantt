@@ -457,7 +457,7 @@ const PACING_CSS = `
 .ngp-leg{display:flex;align-items:center;gap:6px;border:0;background:none;cursor:pointer;font-size:12px;color:#1f2937;padding:2px 4px;font-family:${FONT}}
 .ngp-leg.off{opacity:.4}
 .ngp-sw{width:12px;height:12px;border-radius:3px;flex-shrink:0}
-.ngp-chart{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px}
+.ngp-chart{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;overflow-x:auto;max-width:100%}
 .ngp-empty{font-size:12px;color:#94a3b8;text-align:center;padding:40px 0}
 .ngp-hint{font-size:11px;color:#94a3b8;margin-top:10px;text-align:center}
 .ngp-panel{background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-top:12px;overflow:hidden}
@@ -1095,12 +1095,32 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
     // chart (range-filtered)
     const win = rangeWindow(range, bucket, customS, customE);
-    const visible = dd.buckets.filter(b => {
+    let visible = dd.buckets.filter(b => {
       const ms = b.startMs ?? keyToMs(b.key);
       if (win.from != null && ms < win.from) return false;
       if (win.to != null && ms > win.to) return false;
       return true;
     });
+    // 0.204.0 — axis-fit (Cowork repro 6/11: Month+All stretched May 2024 →
+    // Jan 2029 while every real bar sat in 2026, crushing the data into a
+    // sliver). When an end of the window is UNBOUNDED (All / YTD / Rest),
+    // fit that edge to the data: trim leading/trailing buckets that carry no
+    // signal (no actual, forecast, or target), keeping the current bucket
+    // anchored and one empty pad bucket per trimmed side. Empty edge buckets
+    // come from authoritative feeds that span eras — the user's explicit
+    // window choices are never second-guessed.
+    if ((win.from == null || win.to == null) && visible.length > 2) {
+      const live = (b: PacingBucket): boolean =>
+        b.isCurrent || b.actual > 0.5 || b.forecast > 0.5 || b.target > 0.5;
+      let first = visible.findIndex(live);
+      let last = -1;
+      for (let i = visible.length - 1; i >= 0; i--) { if (live(visible[i])) { last = i; break; } }
+      if (first >= 0 && last >= first) {
+        const from = win.from == null ? Math.max(0, first - 1) : 0;
+        const to = win.to == null ? Math.min(visible.length - 1, last + 1) : visible.length - 1;
+        visible = visible.slice(from, to + 1);
+      }
+    }
     body.appendChild(buildChart(visible, { show, segments: dd.segments, useDollars, rate: r || 0, cum, expandedKey }, (k) => {
       expandedKey = expandedKey === k ? null : k; render();
     }));
@@ -1146,9 +1166,17 @@ function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: st
     }
     return { b, actual: (o.cum ? cA : b.actual) * mul, forecast: (o.cum ? cF : b.forecast) * mul, target: (o.cum ? cT : b.target) * mul, segVals };
   });
-  const W = 920, H = 300, padL = 52, padB = 34, padT = 10, padR = 10;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
-  const n = rows.length, slot = plotW / n, barW = Math.min(46, slot * 0.62);
+  // 0.204.0 — readability floor: never squeeze a bucket below MIN_SLOT px.
+  // With many buckets (wide custom windows, era-spanning feeds) the chart
+  // grows wider than the viewBox base and the wrapper scrolls horizontally
+  // instead of crushing bars into slivers.
+  const H = 300, padL = 52, padB = 34, padT = 10, padR = 10;
+  const MIN_SLOT = 24;
+  const n = rows.length;
+  const plotW = Math.max(920 - padL - padR, n * MIN_SLOT);
+  const W = plotW + padL + padR;
+  const plotH = H - padT - padB;
+  const slot = plotW / n, barW = Math.min(46, slot * 0.62);
   let maxV = 1;
   for (const r of rows) {
     const segSum = visSegs
@@ -1159,7 +1187,16 @@ function buildChart(buckets: PacingBucket[], o: ChartOpts, onBucketClick: (k: st
   const niceMax = niceCeil(maxV);
   const y = (v: number) => padT + plotH - (v / niceMax) * plotH;
   const fmtAxis = (v: number) => o.useDollars ? '$' + (v >= 1000 ? round(v / 1000) + 'k' : round(v)) : round(v) + '';
-  const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: 'auto', style: 'display:block' });
+  // 0.204.0 — when the slot floor pushed W past the 920 base, render at
+  // explicit px so .ngp-chart's overflow-x scroll kicks in (width:100% would
+  // re-crush the bars to fit).
+  const overflowing = W > 920;
+  const svg = svgEl('svg', {
+    viewBox: '0 0 ' + W + ' ' + H,
+    width: overflowing ? W + 'px' : '100%',
+    height: 'auto',
+    style: 'display:block' + (overflowing ? ';min-width:' + W + 'px' : ''),
+  });
   // 0.200.2 — lazily-built diagonal hatch patterns for style:'hatched' segments.
   const defs = svgEl('defs', {}); svg.appendChild(defs);
   const hatchCache = new Map<string, string>();

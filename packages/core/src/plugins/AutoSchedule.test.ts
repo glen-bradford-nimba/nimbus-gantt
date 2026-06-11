@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+﻿import { describe, it, expect, vi } from 'vitest';
 import {
   AutoSchedulePlugin,
   computeSchedule,
@@ -11,7 +11,7 @@ import type {
 } from './AutoSchedulePlugin';
 import type { GanttTask, GanttDependency, PluginHost, Action } from '../model/types';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function makeTask(id: string, startDate: string, endDate: string): GanttTask {
   return { id, name: `Task ${id}`, startDate, endDate };
@@ -63,9 +63,9 @@ function calendarDayBridge(): CalendarBridge {
 
 const DEFAULT_OPTS: AutoScheduleOptions = { direction: 'forward' };
 
-// ─── Plugin factory smoke tests ──────────────────────────────────────────
+// â”€â”€â”€ Plugin factory smoke tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-describe('AutoSchedulePlugin — factory', () => {
+describe('AutoSchedulePlugin â€” factory', () => {
   it('exports a plugin with name + install + destroy + middleware', () => {
     const plugin = AutoSchedulePlugin();
     expect(plugin.name).toBe('AutoSchedulePlugin');
@@ -85,7 +85,7 @@ describe('AutoSchedulePlugin — factory', () => {
   });
 });
 
-// ─── buildDependencyGraph ─────────────────────────────────────────────────
+// â”€â”€â”€ buildDependencyGraph â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('buildDependencyGraph', () => {
   it('returns empty graph for empty task set', () => {
@@ -115,7 +115,7 @@ describe('buildDependencyGraph', () => {
   });
 });
 
-// ─── computeSchedule ──────────────────────────────────────────────────────
+// â”€â”€â”€ computeSchedule â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('computeSchedule', () => {
   const cal = calendarDayBridge();
@@ -129,7 +129,7 @@ describe('computeSchedule', () => {
 
   it('preserves the dates of an independent task when the project is anchored at its start', () => {
     // Explicit projectStart keeps this a deterministic cascade test (the default
-    // anchor is now max(today, earliest) — see the ASAP regression test below —
+    // anchor is now max(today, earliest) â€” see the ASAP regression test below â€”
     // which would otherwise move a past-dated task to today as the clock moves).
     const tasks = taskMap([makeTask('A', '2026-05-01', '2026-05-06')]);
     const result = computeSchedule(tasks, new Map(), { ...DEFAULT_OPTS, projectStart: '2026-05-01' }, cal);
@@ -166,7 +166,7 @@ describe('computeSchedule', () => {
   });
 
   it('cascades dates forward on FS chains with lag', () => {
-    // A (5d) FS+3 → B (4d)  ⇒  B starts on A.end + 3 days
+    // A (5d) FS+3 â†’ B (4d)  â‡’  B starts on A.end + 3 days
     const tasks = taskMap([
       makeTask('A', '2026-05-01', '2026-05-06'),
       makeTask('B', '2026-06-01', '2026-06-05'), // intentionally stale
@@ -202,14 +202,14 @@ describe('computeSchedule', () => {
   });
 });
 
-// ─── autoRun gate (0.192.0) ───────────────────────────────────────────────
+// â”€â”€â”€ autoRun gate (0.192.0) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // When `autoRun: false`, the middleware should pass actions through but NOT
 // trigger an automatic scheduleAll() on dependency changes. Explicit
 // `autoSchedule:run` event handling stays available so hosts that auto-install
 // the plugin dormantly (e.g. the IIFE app shell) don't get silent date
 // mutation on every ADD_DEPENDENCY / REMOVE_DEPENDENCY.
 
-describe('AutoSchedulePlugin — autoRun gate', () => {
+describe('AutoSchedulePlugin â€” autoRun gate', () => {
   function makeFakeHost(
     tasks: GanttTask[],
     deps: GanttDependency[],
@@ -244,7 +244,7 @@ describe('AutoSchedulePlugin — autoRun gate', () => {
     const next = vi.fn();
     plugin.middleware!(addDep, next);
     expect(next).toHaveBeenCalledOnce();
-    // No TASK_MOVE dispatched — B's date stays as the host had it
+    // No TASK_MOVE dispatched â€” B's date stays as the host had it
     expect(dispatched.find(a => a.type === 'TASK_MOVE')).toBeUndefined();
   });
 
@@ -269,5 +269,104 @@ describe('AutoSchedulePlugin — autoRun gate', () => {
     // A move was dispatched for B (cascaded forward to start after A.end)
     const move = dispatched.find(a => a.type === 'TASK_MOVE');
     expect(move).toBeDefined();
+  });
+});
+
+// â”€â”€â”€ 0.204.0 Capacity-leveling (resource-constrained scheduling) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+describe('computeSchedule â€” capacity leveling', () => {
+  // ceiling = hoursPerMonth * 12/365 * pace. (4*365)/12 h/mo â†’ exactly 4 h/day at 1Ã—.
+  const HPM_4H_DAY = (4 * 365) / 12;
+
+  function estTask(id: string, startDate: string, endDate: string, est: number, logged = 0): GanttTask {
+    return { id, name: `Task ${id}`, startDate, endDate, estimatedHours: est, loggedHours: logged } as unknown as GanttTask;
+  }
+  const capOpts = (pace: number, extra?: Partial<AutoScheduleOptions>): AutoScheduleOptions => ({
+    direction: 'forward',
+    projectStart: '2026-07-01',
+    capacity: { hoursPerMonth: HPM_4H_DAY, pace },
+    ...extra,
+  });
+
+  it('fans a same-day cluster into a serial ramp under the ceiling', () => {
+    // 4 independent tasks, all dated the same day, 5d Ã— 4h/day demand each.
+    // At a 4h/day ceiling exactly one fits at a time â†’ starts serialize.
+    const tasks = taskMap([
+      estTask('a', '2026-07-01', '2026-07-06', 20),
+      estTask('b', '2026-07-01', '2026-07-06', 20),
+      estTask('c', '2026-07-01', '2026-07-06', 20),
+      estTask('d', '2026-07-01', '2026-07-06', 20),
+    ]);
+    const r = computeSchedule(tasks, depMap([]), capOpts(1), calendarDayBridge());
+    const starts = ['a', 'b', 'c', 'd'].map((id) => r.scheduledTasks.get(id)!.startDate);
+    expect(starts).toEqual(['2026-07-01', '2026-07-06', '2026-07-11', '2026-07-16']);
+  });
+
+  it('pace 2Ã— doubles the ceiling and compresses the plan', () => {
+    const tasks = taskMap([
+      estTask('a', '2026-07-01', '2026-07-06', 20),
+      estTask('b', '2026-07-01', '2026-07-06', 20),
+      estTask('c', '2026-07-01', '2026-07-06', 20),
+      estTask('d', '2026-07-01', '2026-07-06', 20),
+    ]);
+    const r = computeSchedule(tasks, depMap([]), capOpts(2), calendarDayBridge());
+    const starts = ['a', 'b', 'c', 'd'].map((id) => r.scheduledTasks.get(id)!.startDate);
+    expect(starts).toEqual(['2026-07-01', '2026-07-01', '2026-07-06', '2026-07-06']);
+  });
+
+  it('dependencies still dominate: successor never starts before predecessor ends', () => {
+    const tasks = taskMap([
+      estTask('a', '2026-07-01', '2026-07-03', 8),
+      estTask('b', '2026-07-01', '2026-07-03', 8),
+    ]);
+    const r = computeSchedule(tasks, depMap([makeDep('d1', 'a', 'b')]), capOpts(1), calendarDayBridge());
+    expect(r.scheduledTasks.get('a')!.startDate).toBe('2026-07-01');
+    expect(r.scheduledTasks.get('b')!.startDate).toBe('2026-07-03');
+  });
+
+  it('priorityOf orders independent peers (most-committed first)', () => {
+    const tasks = taskMap([
+      estTask('a', '2026-07-01', '2026-07-06', 20),
+      estTask('b', '2026-07-01', '2026-07-06', 20),
+    ]);
+    const rank: Record<string, number> = { b: 0, a: 1 };
+    const r = computeSchedule(tasks, depMap([]), capOpts(1, {
+      capacity: { hoursPerMonth: HPM_4H_DAY, pace: 1, priorityOf: (t) => rank[t.id] ?? 9 },
+    }), calendarDayBridge());
+    expect(r.scheduledTasks.get('b')!.startDate).toBe('2026-07-01');
+    expect(r.scheduledTasks.get('a')!.startDate).toBe('2026-07-06');
+  });
+
+  it('zero-demand tasks are never shifted', () => {
+    const tasks = taskMap([
+      estTask('a', '2026-07-01', '2026-07-06', 20),
+      makeTask('m', '2026-07-01', '2026-07-01'), // no estimate â†’ demand 0
+    ]);
+    const r = computeSchedule(tasks, depMap([]), capOpts(1), calendarDayBridge());
+    expect(r.scheduledTasks.get('m')!.startDate).toBe('2026-07-01');
+  });
+
+  it('pace 0 / no capacity leaves the schedule identical to the plain pass', () => {
+    const mk = () => taskMap([
+      estTask('a', '2026-07-01', '2026-07-06', 20),
+      estTask('b', '2026-07-01', '2026-07-06', 20),
+    ]);
+    const base = computeSchedule(mk(), depMap([]), { direction: 'forward', projectStart: '2026-07-01' }, calendarDayBridge());
+    const off = computeSchedule(mk(), depMap([]), capOpts(0), calendarDayBridge());
+    for (const id of ['a', 'b']) {
+      expect(off.scheduledTasks.get(id)).toEqual(base.scheduledTasks.get(id));
+    }
+  });
+
+  it('logged hours reduce demand (remaining-work basis)', () => {
+    // a: 16h/5d = 3.2h/day. b: 20 est - 16 logged = 4h remaining -> 0.8h/day.
+    // 3.2 + 0.8 = 4.0 fits the 4h/day ceiling; demand off the full estimate
+    const tasks = taskMap([
+      estTask('a', '2026-07-01', '2026-07-06', 16),
+      estTask('b', '2026-07-01', '2026-07-06', 20, 16),
+    ]);
+    const r = computeSchedule(tasks, depMap([]), capOpts(1), calendarDayBridge());
+    expect(r.scheduledTasks.get('a')!.startDate).toBe('2026-07-01');
+    expect(r.scheduledTasks.get('b')!.startDate).toBe('2026-07-01');
   });
 });
