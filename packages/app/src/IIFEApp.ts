@@ -3060,6 +3060,56 @@ export class IIFEApp {
       }
     }
 
+    // 0.204.1 — empty-state for zero-result VIEW filters / search. QA gap
+    // (Cowork, MF-Prod): a filter like "Real T-NNNN tickets" returning 0
+    // items left the board silently BLANK — reads as broken, not filtered.
+    // When the portfolio has items but the current cut excludes all of
+    // them, overlay a message naming the cut + a one-click reset. Shared by
+    // the Gantt and List views; never shows on a genuinely empty board
+    // (that's the host's data problem, not a filter surprise).
+    const EMPTY_STATE_ID = 'nga-empty-state';
+    function syncEmptyState(visibleCount: number): void {
+      if (!ganttHost) return;
+      const existing = ganttHost.querySelector('#' + EMPTY_STATE_ID);
+      if (existing) existing.remove();
+      const show = visibleCount === 0 && allTasks.length > 0
+        && (state.viewMode === 'gantt' || state.viewMode === 'list');
+      if (!show) return;
+      const wrap = document.createElement('div');
+      wrap.id = EMPTY_STATE_ID;
+      wrap.setAttribute('data-testid', 'gantt-empty-state');
+      wrap.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(248,250,252,0.92);z-index:20;text-align:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+      const filterDef = (tplConfig.filters || []).find((f) => f.id === state.filter);
+      const cut = [
+        filterDef && filterDef.id !== 'all' ? 'the "' + filterDef.label + '" view' : '',
+        state.search ? 'search "' + state.search + '"' : '',
+      ].filter(Boolean).join(' + ');
+      const h = document.createElement('div');
+      h.style.cssText = 'font-size:15px;font-weight:700;color:#334155';
+      h.textContent = 'No items match ' + (cut || 'this view');
+      wrap.appendChild(h);
+      const p = document.createElement('div');
+      p.style.cssText = 'font-size:12px;color:#64748b;max-width:400px';
+      p.textContent = 'All ' + allTasks.length + ' board item' + (allTasks.length === 1 ? '' : 's')
+        + ' are excluded by the current cut — nothing is missing or broken.';
+      wrap.appendChild(p);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Show everything';
+      btn.setAttribute('data-testid', 'gantt-empty-state-reset');
+      btn.style.cssText = 'margin-top:4px;font-size:12px;font-weight:600;padding:6px 16px;border-radius:999px;border:1px solid #2563eb;background:#2563eb;color:#fff;cursor:pointer;font-family:inherit';
+      btn.addEventListener('click', () => {
+        dispatch({ type: 'SET_SEARCH', q: '' });
+        dispatch({ type: 'SET_FILTER', id: 'all' });
+      });
+      wrap.appendChild(btn);
+      // LWS: property READS can throw — fall through to setting relative.
+      try {
+        if (getComputedStyle(ganttHost).position === 'static') ganttHost.style.position = 'relative';
+      } catch (_e) { ganttHost.style.position = 'relative'; }
+      ganttHost.appendChild(wrap);
+    }
+
     function refreshGantt(): void {
       if (!ganttHost) return;
       if (state.viewMode === 'gantt' && ganttInst) {
@@ -3087,6 +3137,7 @@ export class IIFEApp {
           gi.setData(gtasks, allDependencies);
           try { gi.expandAll(); } catch (_e) { /* ok */ void 0; }
         }
+        syncEmptyState(maybeHide.length);
       } else {
         rebuildView();
       }
@@ -3109,6 +3160,7 @@ export class IIFEApp {
       // renderComingSoon — honest placeholder, full ports in 0.183.
       if (state.viewMode === 'gantt') {
         initGantt(ganttHost);
+        syncEmptyState(applyFilter(allTasks, state.filter as 'active', state.search).length);
       } else if (state.viewMode === 'list') {
         // AuditListView v0 — vanilla port of v9's AuditListView.tsx core.
         // Filters by audit field presence (owner/dates/hours), groups by
@@ -3136,6 +3188,7 @@ export class IIFEApp {
             ? (taskId, payload) => { void options.onItemReorder!(taskId, payload); }
             : undefined,
         });
+        syncEmptyState(auditTasks.length);
       } else if (state.viewMode === 'treemap' || state.viewMode === 'bubbles') {
         // 0.185.7 — wire the treemap + bubble canvas renderers that have
         // been sitting unreferenced in packages/app/src/renderers/. Each
