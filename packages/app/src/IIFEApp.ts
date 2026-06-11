@@ -2215,40 +2215,141 @@ export class IIFEApp {
         return;
       }
 
-      m.body.appendChild(mk('div', undefined,
-        'Reflow start/end dates from dependencies (ASAP / critical-path). Review the proposed changes below — nothing is committed until you Apply.'));
-      const loading = mk('div', 'ngm-note', 'Computing proposed schedule…');
-      m.body.appendChild(loading);
-
       type Scheduled = { startDate: string; endDate: string };
       interface PreviewResult { scheduledTasks?: Map<string, Scheduled>; violations?: Array<{ message: string }>; projectStart?: string; projectEnd?: string; totalDuration?: number }
 
-      gi!.emit!('autoSchedule:preview', (raw: unknown) => {
-        const result = (raw || {}) as PreviewResult;
-        const byId = new Map(allTasks.map((t) => [t.id, t]));
-        const changes: AutoScheduleChange[] = [];
-        if (result.scheduledTasks) {
-          for (const [taskId, sc] of result.scheduledTasks) {
-            const t = byId.get(taskId);
-            if (!t) continue;
-            if (t.startDate !== sc.startDate || t.endDate !== sc.endDate) {
-              changes.push({
-                id: taskId,
-                name: t.title || t.name || taskId,
-                startDate: sc.startDate, endDate: sc.endDate,
-                previousStartDate: t.startDate ?? undefined,
-                previousEndDate: t.endDate ?? undefined,
-              });
+      // 0.204.0 — Pace: capacity-aware scheduling (GATE 2). The dial levels
+      // the proposed plan against the team's monthly pool — the core engine
+      // date-shifts tasks so no day exceeds pool×12/365×pace hours (same
+      // month→period math the pacing forecast leveler uses, so the forecast
+      // curve and the Gantt re-layout agree). Off = pure dependency reflow
+      // (pre-0.204 behaviour). The dial SHARES the pacing view's persisted
+      // levelPace pref — forecast dial and schedule dial are one dial.
+      const poolHpm = (options.team && options.team.length ? options.team : CLOUD_NIMBUS_POOL)
+        .filter((p) => p.active !== false)
+        .reduce((s, p) => s + (p.hoursPerMonth || 0), 0);
+      let pace = ((): number => {
+        try {
+          const saved = getPacingPrefs();
+          const lp = saved && typeof saved['levelPace'] === 'number' ? (saved['levelPace'] as number) : 1;
+          return lp >= 0 && lp <= 3 ? lp : 1;
+        } catch (_e) { return 1; }
+      })();
+      const byId = new Map(allTasks.map((t) => [t.id, t]));
+      // 0.204.0 — capacity overrides ride as an extra emit arg, which only a
+      // 0.204+ core parses (older handlers treat args[0] as the callback and
+      // would throw). Known failure mode: core re-copy lags app re-copy on
+      // SF — so feature-detect the core version and fall back to a plain
+      // dependency reflow (+ a visible note) on stale cores.
+      const coreSupportsCapacity = ((): boolean => {
+        try {
+          const caps = (ganttInst as unknown as { capabilities?: () => Record<string, unknown> }).capabilities?.();
+          const v = caps && typeof caps['version'] === 'string' ? (caps['version'] as string) : '0';
+          const [maj, min] = v.split('.').map((x) => parseInt(x, 10) || 0);
+          return maj > 0 || min >= 204;
+        } catch (_e) { return false; }
+      })();
+      // Lane → greedy-order rank: most-committed work levels first, so a
+      // capacity squeeze pushes PROPOSED out, not the committed plan.
+      const LANE_RANK: Record<string, number> = { 'top-priority': 0, 'active': 0, 'follow-on': 1, 'proposed': 2, 'deferred': 3 };
+      function capacityOverrides(): Record<string, unknown> | null {
+        if (!coreSupportsCapacity || !(pace > 0) || !(poolHpm > 0)) return null;
+        return {
+          capacity: {
+            hoursPerMonth: poolHpm,
+            pace,
+            // Demand = remaining hours, read from NG's own normalized rows
+            // (engine task objects don't reliably carry estimate fields).
+            demandOf: (t: { id: string }) => {
+              const n = byId.get(t.id) as unknown as Record<string, unknown> | undefined;
+              if (!n) return 0;
+              const est = readNum(n, ['estimatedHours', 'estimateHours', 'hours', 'hoursHigh']);
+              const log = readNum(n, ['loggedHours', 'actualHours', 'hoursLogged']);
+              return Math.max(0, est - log);
+            },
+            priorityOf: (t: { id: string }) => {
+              const lane = byId.get(t.id)?.priorityGroup || '';
+              return lane in LANE_RANK ? LANE_RANK[lane] : 1;
+            },
+          },
+        };
+      }
+      function buildIntro(): HTMLElement {
+        const w = mk('div');
+        w.appendChild(mk('div', undefined,
+          'Reflow start/end dates from dependencies (ASAP / critical-path)'
+          + (pace > 0 && poolHpm > 0 ? ' + team capacity' : '')
+          + '. Review the proposed changes below — nothing is committed until you Apply.'));
+        const row = mk('div');
+        row.setAttribute('style', 'display:flex;align-items:center;gap:6px;margin:10px 0;flex-wrap:wrap');
+        const lbl = mk('span', undefined, 'Pace');
+        lbl.setAttribute('style', 'font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em');
+        row.appendChild(lbl);
+        ([0, 1, 2, 3] as number[]).forEach((p) => {
+          const on = pace === p;
+          const b = mk('button', undefined, p === 0 ? 'Off' : p + '×');
+          b.setAttribute('style', 'font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;cursor:pointer;font-family:inherit;border:1px solid '
+            + (on ? '#1e293b' : '#e2e8f0') + ';background:' + (on ? '#1e293b' : '#fff') + ';color:' + (on ? '#fff' : '#475569'));
+          b.addEventListener('click', () => {
+            if (pace === p) return;
+            pace = p;
+            // One dial: persist into the pacing prefs blob so the forecast
+            // view reopens leveled at the same pace.
+            try { setPacingPrefs({ ...(getPacingPrefs() || {}), levelPace: p }); } catch (_e) { /* ok */ }
+            runPreview();
+          });
+          row.appendChild(b);
+        });
+        const note = mk('span', undefined, pace > 0 && poolHpm > 0
+          ? (coreSupportsCapacity
+            ? 'leveled to ~' + Math.round(poolHpm * 12 / 365 * pace) + 'h/day (' + pace + '× of ' + poolHpm + 'h/mo team pool)'
+            : 'Pace needs core 0.204+ — re-copy the core bundle. Showing dependency-only reflow.')
+          : 'dependency-only reflow — no capacity ceiling');
+        note.setAttribute('style', 'font-size:11px;color:#94a3b8;margin-left:4px');
+        row.appendChild(note);
+        w.appendChild(row);
+        return w;
+      }
+
+      function runPreview(): void {
+        m.body.textContent = '';
+        m.body.appendChild(buildIntro());
+        m.body.appendChild(mk('div', 'ngm-note', 'Computing proposed schedule…'));
+        m.setFooter([{ label: 'Cancel', onClick: () => m.close() }]);
+        const ov = capacityOverrides();
+        const cb = (raw: unknown): void => {
+          const result = (raw || {}) as PreviewResult;
+          const changes: AutoScheduleChange[] = [];
+          if (result.scheduledTasks) {
+            for (const [taskId, sc] of result.scheduledTasks) {
+              const t = byId.get(taskId);
+              if (!t) continue;
+              if (t.startDate !== sc.startDate || t.endDate !== sc.endDate) {
+                changes.push({
+                  id: taskId,
+                  name: t.title || t.name || taskId,
+                  startDate: sc.startDate, endDate: sc.endDate,
+                  previousStartDate: t.startDate ?? undefined,
+                  previousEndDate: t.endDate ?? undefined,
+                });
+              }
             }
           }
-        }
-        renderReview(changes, result.violations ?? []);
-      });
+          renderReview(changes, result.violations ?? []);
+        };
+        if (ov) gi!.emit!('autoSchedule:preview', ov, cb);
+        else gi!.emit!('autoSchedule:preview', cb);
+      }
+      runPreview();
 
       function renderReview(changes: AutoScheduleChange[], violations: Array<{ message: string }>): void {
         m.body.textContent = '';
+        // Keep the Pace dial visible on every state so the user can re-level
+        // without reopening the modal.
+        m.body.appendChild(buildIntro());
         if (!changes.length) {
-          m.body.appendChild(mk('div', undefined, 'No date changes proposed — the schedule already satisfies the dependencies.'));
+          m.body.appendChild(mk('div', undefined, 'No date changes proposed — the schedule already satisfies the dependencies'
+            + (pace > 0 && poolHpm > 0 && coreSupportsCapacity ? ' and the capacity ceiling' : '') + '.'));
           m.setFooter([{ label: 'Close', primary: true, onClick: () => m.close() }]);
           return;
         }
@@ -2315,7 +2416,11 @@ export class IIFEApp {
               changes.forEach((c) => options.onPatch!({ id: c.id, startDate: c.startDate, endDate: c.endDate }));
             } else {
               // Standalone/CN/demo: no host patch handler → apply in-engine.
-              gi!.emit!('autoSchedule:run');
+              // Pass the same capacity overrides the preview used so the
+              // applied schedule matches the reviewed one exactly.
+              const ov = capacityOverrides();
+              if (ov) gi!.emit!('autoSchedule:run', ov);
+              else gi!.emit!('autoSchedule:run');
             }
             m.close();
           } },
@@ -3019,6 +3124,11 @@ export class IIFEApp {
         renderAuditListView(ganttHost, auditTasks, {
           progressLabel: tplConfig.progressLabel,
           hideRecordIds: tplConfig.hideRecordIds,
+          // 0.204.0 — list-row title click fires the same canonical id-only
+          // open contract bars + pacing drill-down rows use. Host navigates.
+          onTaskClick: options.onItemClick
+            ? (taskId: string) => options.onItemClick!(taskId)
+            : undefined,
           // 0.185.5 — forward the host's onItemReorder contract so the
           // list-view 3-dot handle persists drops through the same path
           // the gantt sidebar uses.
