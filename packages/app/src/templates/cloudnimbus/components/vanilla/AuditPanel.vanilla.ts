@@ -117,6 +117,10 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
             return latestProps.config.pendingChanges ?? [];
           }
         : undefined,
+      // 0.203.0 — subset commit: per-row skip checkboxes. The modal passes
+      // the UNCHECKED taskIds here before Confirm so the IIFE's commitEdits
+      // leaves them staged.
+      p.config.onSkipPendingChanges,
     );
   }
 
@@ -161,11 +165,17 @@ function openPreviewModal(
    *  the modal re-renders against the live buffer state. When the
    *  returned list is empty the modal auto-closes. */
   onReject?: (taskId: string) => { id: string; title?: string; fields: string[]; descs: string[] }[],
+  /** 0.203.0 \u2014 subset-commit selection. When present, each row renders a
+   *  checkbox (checked = include). Confirm passes the UNCHECKED taskIds
+   *  here first, so the commit path leaves them staged for later \u2014 unlike
+   *  \u2717 reject, which reverts the row entirely. */
+  onSkip?: (taskIds: string[]) => void,
 ): void {
   const existing = document.getElementById('ng-audit-preview-modal');
   if (existing) existing.remove();
 
   let currentItems = items.slice();
+  const skipped = new Set<string>();
 
   const backdrop = document.createElement('div');
   backdrop.id = 'ng-audit-preview-modal';
@@ -205,6 +215,24 @@ function openPreviewModal(
       const li = document.createElement('li');
       li.style.cssText = 'padding:8px 0;border-bottom:1px solid #f1f5f9;display:flex;gap:8px;align-items:flex-start';
 
+      if (onSkip) {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !skipped.has(it.id);
+        cb.setAttribute('data-testid', 'audit-preview-include');
+        cb.setAttribute('data-task-id', it.id);
+        cb.setAttribute('aria-label', 'Include ' + (it.title || it.id) + ' in this commit');
+        cb.title = 'Unchecked rows stay staged for a later commit (not sent this round)';
+        cb.style.cssText = 'flex:0 0 auto;margin-top:3px;cursor:pointer;accent-color:#a21caf';
+        cb.addEventListener('change', () => {
+          if (cb.checked) skipped.delete(it.id); else skipped.add(it.id);
+          li.style.opacity = cb.checked ? '' : '0.45';
+          updateConfirmLabel();
+        });
+        li.appendChild(cb);
+        if (skipped.has(it.id)) li.style.opacity = '0.45';
+      }
+
       const main = document.createElement('div');
       main.style.cssText = 'flex:1;min-width:0';
       const head = document.createElement('div');
@@ -239,8 +267,10 @@ function openPreviewModal(
         rejectBtn.addEventListener('click', () => {
           const next = onReject(it.id);
           currentItems = next;
+          skipped.delete(it.id); // rejected row is gone — drop any stale skip
           if (currentItems.length === 0) { cleanup(); return; }
           renderRows();
+          if (onSkip) updateConfirmLabel();
         });
         li.appendChild(rejectBtn);
       }
@@ -259,13 +289,32 @@ function openPreviewModal(
   cancel.addEventListener('click', cleanup);
   const confirmBtn = document.createElement('button');
   confirmBtn.type = 'button';
-  confirmBtn.textContent = '\ud83d\udce4 Confirm + commit';
   confirmBtn.setAttribute('data-testid', 'audit-preview-confirm');
   confirmBtn.style.cssText = 'padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid #a21caf;background:#a21caf;color:#fff;cursor:pointer;font-weight:500';
+  // 0.203.0 \u2014 selection-aware label: "commit N of M" when rows are skipped.
+  // Zero selected disables Confirm (nothing to send).
+  function selectedCount(): number {
+    return currentItems.filter((it) => !skipped.has(it.id)).length;
+  }
+  function updateConfirmLabel(): void {
+    const sel = selectedCount();
+    confirmBtn.textContent = onSkip && sel < currentItems.length
+      ? '\ud83d\udce4 Confirm + commit ' + sel + ' of ' + currentItems.length
+      : '\ud83d\udce4 Confirm + commit';
+    confirmBtn.disabled = sel === 0;
+    confirmBtn.style.opacity = sel === 0 ? '0.5' : '';
+  }
+  updateConfirmLabel();
   confirmBtn.addEventListener('click', async () => {
     confirmBtn.disabled = true;
     cancel.disabled = true;
     confirmBtn.textContent = 'Committing...';
+    // Record the skipped rows BEFORE the commit runs \u2014 only ids still in the
+    // list count (a row rejected after being unchecked is already gone).
+    if (onSkip) {
+      const live = new Set(currentItems.map((it) => it.id));
+      onSkip(Array.from(skipped).filter((id) => live.has(id)));
+    }
     try {
       await onConfirm();
     } finally {

@@ -374,6 +374,14 @@ export interface TemplateConfig {
    *  flow. When absent, rows render without the per-row reject affordance —
    *  legacy bulk-only flow. */
   onRejectPendingChange?: (taskId: string) => void;
+  /** 0.203.0 — subset-commit selection. When present, the AuditPanel preview
+   *  modal renders a per-row checkbox (checked = include in this commit;
+   *  unchecked = SKIP — the row stays staged for a later commit, unlike the
+   *  ✗ reject which reverts it). On Confirm, the modal passes the UNCHECKED
+   *  taskIds here BEFORE onAuditSubmit fires; the IIFE chrome path records
+   *  them so the following commitEdits() call excludes those rows. Absent →
+   *  no checkboxes (legacy all-or-nothing flow). */
+  onSkipPendingChanges?: (taskIds: string[]) => void;
   /** Optional runtime override for the AuditPanel dirty flag. When present,
    *  this wins over state.pendingPatchCount. Consumers with their own state
    *  store (e.g. useProFormaState) should pipe their isDirty here so the
