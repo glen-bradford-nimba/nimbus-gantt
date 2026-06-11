@@ -1,6 +1,16 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.204.0 GATE 2 — pace-aware auto-schedule + open-item clicks + search/axis fixes (2026-06-11). ⚠ TWO-BUNDLE cut — re-copy BOTH.**
+**📣 Latest cut: 0.204.1 empty-state for zero-result VIEW filters (2026-06-11). APP-only.**
+A filter/search cut that excludes every board item left the Gantt/List views
+silently BLANK (QA: "Real T-NNNN tickets" → 0 items, no message — reads as broken,
+not filtered). Both views now overlay the cut by name + excluded-item count + a
+one-click **Show everything** reset. Never shows on a genuinely empty board.
+Re-copy **app only**: app md5 **`6543f69e53ff040c8bcbe54a87756d3d`** (supersedes
+`5cf53ce1`; cumulative — carries 0.204.0). Core unchanged `138e2698…`. PR #52,
+181/181. **Batch with the 0.204.0 two-bundle re-copy below — one deploy, both
+banners.**
+
+**0.204.0 GATE 2 — pace-aware auto-schedule + open-item clicks + search/axis fixes (2026-06-11). ⚠ TWO-BUNDLE cut — re-copy BOTH.**
 The four Gate-2 items from the-machine-0610, in one cut. **(4.1) The Gantt obeys
 the pace dial:** core `AutoScheduleOptions.capacity` adds a per-day load ledger to
 the forward pass — ceiling = pool×12/365×pace, the SAME month math as the forecast
