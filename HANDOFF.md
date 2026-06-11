@@ -1,6 +1,31 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.203.0 gather-mode auto-schedule staging + subset commit (2026-06-10). APP-only.**
+**📣 Latest cut: 0.204.0 GATE 2 — pace-aware auto-schedule + open-item clicks + search/axis fixes (2026-06-11). ⚠ TWO-BUNDLE cut — re-copy BOTH.**
+The four Gate-2 items from the-machine-0610, in one cut. **(4.1) The Gantt obeys
+the pace dial:** core `AutoScheduleOptions.capacity` adds a per-day load ledger to
+the forward pass — ceiling = pool×12/365×pace, the SAME month math as the forecast
+leveler, so the curve and the bars agree. Date-shift resource leveling (durations
+never stretch, v1); priority rule levels committed work first so a squeeze pushes
+PROPOSED out. The Auto-Schedule modal gains a **Pace dial (Off/1×/2×/3×)** sharing
+the pacing view's persisted `levelPace` pref — one dial, two surfaces. Preview
+recomputes live; Apply stages (gather) / forwards (host) / applies (standalone) the
+same leveled dates. **Stale-core guard:** capacity rides only when
+`capabilities().version ≥ 0.204`; on an old core the modal shows "re-copy the core
+bundle" and falls back to dependency-only reflow. **(4.2)** list-view row titles now
+fire `onItemClick` — bars + pacing drill-down already did; one id-only open contract
+on every surface. **DH's last mile: wire `onItemClick` → NavigationMixin** (flagged
+since 0.202.0). **(4.3a)** the one-char-only search on SF (Cowork repro: "CF 2.0"
+kept "C") is fixed: 180ms debounced SET_SEARCH + focus-guarded value sync + deferred
+focus restore (LWS swallows the synchronous one). **(4.3b)** Month/All axis sprawl
+fixed: unbounded window edges fit to data extent (trim zero-signal edge buckets,
+keep today + a pad) + 24px min slot width with horizontal scroll. Re-copy **BOTH**:
+core md5 **`138e2698226144eff782ec7da1a0792f`** (supersedes `aec731a9`; version
+string now reports 0.204.0) + app md5 **`5cf53ce1f32809b4ca24bff94a9c9380`**
+(supersedes `b0dcebf4`; cumulative). PR #51, **181/181**. Cowork verifies live:
+retype "CF 2.0", check Month/All bounds, click a row/bar, flip the Pace dial in
+Auto-Schedule and watch the proposed dates compress/extend.
+
+**0.203.0 gather-mode auto-schedule staging + subset commit (2026-06-10). APP-only.**
 First two pieces of the **session-wide DML staging cart** (Glen's 6/10 vision: stage
 every change across Gantt/list/pacing, keep working the records, then choose which
 to commit). **(1)** In gather mode (`batchMode`/`setMode('gather')`), Auto-Schedule
