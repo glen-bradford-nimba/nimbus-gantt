@@ -1,6 +1,27 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.202.0 forecast capacity-leveling + raw-id guard (2026-06-09). APP-only.**
+**📣 Latest cut: 0.203.0 gather-mode auto-schedule staging + subset commit (2026-06-10). APP-only.**
+First two pieces of the **session-wide DML staging cart** (Glen's 6/10 vision: stage
+every change across Gantt/list/pacing, keep working the records, then choose which
+to commit). **(1)** In gather mode (`batchMode`/`setMode('gather')`), Auto-Schedule
+**Apply now stages its proposed dates into the SAME pending buffer drag edits use**
+(optimistic apply + dirty dim + audit rows) instead of calling the host per-change —
+nothing fires until `commitEdits`. **(2) Subset commit:** `commitEdits({ only })`
+commits a chosen subset (rest **stays staged**, not reverted); the audit preview
+modal (vanilla + React twins) gains per-row **include checkboxes** — unchecked =
+skip this round, distinct from ✗ reject (= revert/drop). Confirm shows "commit N of
+M"; 0 selected disables. `tplConfig.isDirty` now tracks the buffer so the pill stays
+honest after a partial commit. New `TemplateConfig.onSkipPendingChanges` +
+`CommitEditsOptions` (both additive; legacy all-or-nothing untouched). Re-copy
+**app only**: app md5 **`b0dcebf4d4d6b44b029e4e658d4f2ec6`** (supersedes
+`1fd4fed3`; cumulative). Core unchanged `aec731a9…`. PR #50, **174/174**.
+**Design docs for the rest of the arc:** `docs/design-dml-staging-layer.md` (the
+cart; **DH dependency: per-record ✓/✗ needs a bulk `allOrNone=false` Apex save
+returning per-record results — the fail-fast per-item callback can't**) +
+`docs/design-gap2-capacity-aware-autoschedule.md` (capacity-aware scheduling: the
+pace dial moves the **Gantt**, not just the forecast — ~2-week build, P0–P1 next).
+
+**0.202.0 forecast capacity-leveling + raw-id guard (2026-06-09). APP-only.**
 The forecast spread each task's remaining over its own dates, so with every proposed
 rock dated to start "today" the near buckets spiked to **~900h/week against a ~39h/wk
 team pool** (the "insane acceleration"). New `levelForecast()` re-distributes the
