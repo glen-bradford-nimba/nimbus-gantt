@@ -112,11 +112,12 @@ export type PacingBreakoutDimension = 'cohort' | 'workItem' | 'epic' | 'owner';
 // stacked hockey stick renders with zero host changes. Hosts (DH/CN) override by
 // feeding PacingData.segments + per-bucket PacingBucket.segments. Bottom→top:
 // committed work, then likely, then the dotted "ready to approve" upside cap.
-// Colours align to the /glen/mf-forecast-stack-0607 prototype (the agreed
-// direction): committed = green, predicted/maintenance = blue, ready = amber +
-// dotted. All host-overridable via PacingData.segments.
+// 0.204.2 — Greenlit moved off green (#059669) to a teal-leaning cyan: stacked
+// directly on the Actual series' green (#10b981) the two were nearly
+// indistinguishable (DH de-clutter dispatch item 5.1). Predicted = blue,
+// ready = amber + dotted. All host-overridable via PacingData.segments.
 export const PACING_SEGMENT_DEFAULTS: PacingSegment[] = [
-  { id: 'greenlit',  label: 'Greenlit',         color: '#059669', style: 'solid',  order: 0 },
+  { id: 'greenlit',  label: 'Greenlit',         color: '#0e7490', style: 'solid',  order: 0 },
   { id: 'predicted', label: 'Predicted',        color: '#2563eb', style: 'solid',  order: 1 },
   { id: 'ready',     label: 'Ready to approve', color: '#d97706', style: 'dotted', order: 2 },
 ];
@@ -385,6 +386,11 @@ export interface PacingControls {
   /** 0.202.0 — show the Pace control (forecast capacity-leveling). Default true
    *  when options.capacity is present, hidden otherwise. */
   pace?: boolean;
+  /** 0.204.2 — which KPI summary cards render (DH de-clutter item 5.3). Omit →
+   *  all (legacy). An array shows only the listed cards, in the default order;
+   *  `false` hides the card row entirely. The host trims restatement — e.g.
+   *  MF's curated view passes ['pacing','remaining']. */
+  cards?: Array<'logged' | 'estimated' | 'remaining' | 'projected' | 'pacing' | 'active' | 'unscheduled'> | false;
 }
 
 /** 0.199.5 — payload for PacingViewOptions.onParamsChange. The full visible-window
@@ -448,11 +454,12 @@ const PACING_CSS = `
 .ngp-card-v{font-size:20px;font-weight:800;line-height:1.1}
 .ngp-card-l{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;margin-top:2px}
 .ngp-warn{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#92400e}
-.ngp-scope{display:flex;gap:8px;align-items:flex-start;border-radius:8px;padding:7px 12px;margin-bottom:12px;font-size:12px;line-height:1.45}
-.ngp-scope.auth{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af}
-.ngp-scope.preview{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}
-.ngp-scope .ngp-scope-ico{font-size:13px;line-height:1.2}
-.ngp-scope b{font-weight:700}
+.ngp-scope{display:flex;gap:6px;align-items:baseline;padding:0 2px;margin:-6px 0 10px;font-size:11px;line-height:1.5;color:#94a3b8}
+.ngp-scope.auth{color:#94a3b8}
+.ngp-scope.preview{color:#a16207}
+.ngp-scope .ngp-scope-ico{font-size:11px;line-height:1.2}
+.ngp-scope b{font-weight:600;color:#64748b}
+.ngp-scope.preview b{color:#a16207}
 .ngp-legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px}
 .ngp-leg{display:flex;align-items:center;gap:6px;border:0;background:none;cursor:pointer;font-size:12px;color:#1f2937;padding:2px 4px;font-family:${FONT}}
 .ngp-leg.off{opacity:.4}
@@ -1045,11 +1052,13 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
     hd.appendChild(el('div', 'ngp-sub', sub));
     body.appendChild(hd);
 
-    // 0.199.2 — loud source/scope DESIGNATION. The forecast's basis must never
+    // 0.199.2 — source/scope DESIGNATION. The forecast's basis must never
     // be a silent surprise: (a) authoritative (host feed) vs preview (task-
     // derived) can swap silently when a host only feeds some buckets, and
     // (b) the authoritative scope (system-of-record portfolio) may not match the
-    // board's current filter/search. Banner it either way.
+    // board's current filter/search. 0.204.2 — restyled from an alert-looking
+    // bordered box to a quiet caption (DH de-clutter item 5.2): the info must
+    // be present, not loud. Preview keeps a muted amber tint as the only cue.
     {
       const auth = !!d.authoritative;
       const scope = el('div', 'ngp-scope ' + (auth ? 'auth' : 'preview'));
@@ -1071,22 +1080,28 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
     const s = d.summary;
     const val = (h: number) => useDollars ? fmtMoney(h * r!) : fmtH(h);
-    const cards = el('div', 'ngp-cards');
-    const stat = (label: string, value: string, tone?: string) => {
-      const c = el('div', 'ngp-card');
-      const v = el('div', 'ngp-card-v', value);
-      if (tone) v.setAttribute('style', 'color:' + tone);
-      c.appendChild(v); c.appendChild(el('div', 'ngp-card-l', label));
-      return c;
-    };
-    cards.appendChild(stat('Logged', val(s.loggedHours)));
-    cards.appendChild(stat('Estimated', val(s.estimatedHours)));
-    cards.appendChild(stat('Remaining', val(s.remainingHours), '#2563eb'));
-    cards.appendChild(stat('Projected final', val(s.projectedFinalHours)));
-    cards.appendChild(stat('Pacing', s.pacingPct + '%', s.pacingPct > 100 ? COL.actualOver : '#10b981'));
-    cards.appendChild(stat('Active items', String(s.activeItems)));
-    if (s.unscheduledHours > 0) cards.appendChild(stat('Unscheduled', val(s.unscheduledHours), '#d97706'));
-    body.appendChild(cards);
+    // 0.204.2 — host-trimmable KPI cards (DH de-clutter item 5.3). Omitted →
+    // all render (legacy); an array whitelists; false drops the whole row.
+    const cardSet = Array.isArray(ctrl.cards) ? new Set<string>(ctrl.cards) : null;
+    const wantCard = (k: string): boolean => ctrl.cards !== false && (!cardSet || cardSet.has(k));
+    if (ctrl.cards !== false) {
+      const cards = el('div', 'ngp-cards');
+      const stat = (label: string, value: string, tone?: string) => {
+        const c = el('div', 'ngp-card');
+        const v = el('div', 'ngp-card-v', value);
+        if (tone) v.setAttribute('style', 'color:' + tone);
+        c.appendChild(v); c.appendChild(el('div', 'ngp-card-l', label));
+        return c;
+      };
+      if (wantCard('logged'))      cards.appendChild(stat('Logged', val(s.loggedHours)));
+      if (wantCard('estimated'))   cards.appendChild(stat('Estimated', val(s.estimatedHours)));
+      if (wantCard('remaining'))   cards.appendChild(stat('Remaining', val(s.remainingHours), '#2563eb'));
+      if (wantCard('projected'))   cards.appendChild(stat('Projected final', val(s.projectedFinalHours)));
+      if (wantCard('pacing'))      cards.appendChild(stat('Pacing', s.pacingPct + '%', s.pacingPct > 100 ? COL.actualOver : '#10b981'));
+      if (wantCard('active'))      cards.appendChild(stat('Active items', String(s.activeItems)));
+      if (wantCard('unscheduled') && s.unscheduledHours > 0) cards.appendChild(stat('Unscheduled', val(s.unscheduledHours), '#d97706'));
+      if (cards.childNodes.length > 0) body.appendChild(cards);
+    }
 
     if (s.unscheduledHours > 0) {
       body.appendChild(el('div', 'ngp-warn',
