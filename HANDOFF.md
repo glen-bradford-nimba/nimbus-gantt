@@ -1,6 +1,18 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.204.1 empty-state for zero-result VIEW filters (2026-06-11). APP-only.**
+**📣 Latest cut: 0.204.2 pacing de-clutter substrate (2026-06-11). APP-only.**
+The renderer half of the "pacing view is overwhelming" diagnosis (DH shipped its
+config half as DH PR #897). **(1)** Greenlit tier moves off green → teal-cyan
+`#0e7490` — stacked on Actual's green the two were nearly indistinguishable.
+**(2)** The authoritative/preview scope banner restyles from an alert-looking
+box to a quiet caption (preview keeps a muted amber tint). **(3)** New
+`controls.cards` — host whitelists KPI cards (e.g. `['pacing','remaining']`) or
+drops the row with `false`; omit = all (legacy). Re-copy **app only**: app md5
+**`56be61049fe2a6c79e25444289fa062e`** (supersedes `6543f69e`; cumulative —
+carries 0.204.0 + 0.204.1). Core unchanged `138e2698…`. PR #53, 181/181.
+**DH: this missed the 0.274 cut — vendor on the next train.**
+
+**0.204.1 empty-state for zero-result VIEW filters (2026-06-11). APP-only.**
 A filter/search cut that excludes every board item left the Gantt/List views
 silently BLANK (QA: "Real T-NNNN tickets" → 0 items, no message — reads as broken,
 not filtered). Both views now overlay the cut by name + excluded-item count + a
