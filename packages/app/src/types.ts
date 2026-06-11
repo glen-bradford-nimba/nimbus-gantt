@@ -642,6 +642,21 @@ export interface CommitEditsFailure {
   error: unknown;
 }
 
+/**
+ * 0.203.0 — subset selector for `handle.commitEdits(opts)`.
+ *
+ * `only` restricts the commit to the listed entries; everything else stays
+ * staged in the buffer (untouched — not reverted, not forwarded) for a later
+ * commit. Omitting `kind` on a selector matches BOTH the 'edit' and 'reorder'
+ * entries for that taskId. No `opts` (or no `only`) = commit everything,
+ * minus any rows the user unchecked in the audit preview modal (the IIFE
+ * records those via TemplateConfig.onSkipPendingChanges; the skip-set is
+ * one-shot and clears after each commitEdits call).
+ */
+export interface CommitEditsOptions {
+  only?: Array<{ taskId: string; kind?: 'edit' | 'reorder' }>;
+}
+
 export interface AppInstance {
   setTasks(tasks: NormalizedTask[]): void;
   /** 0.185.27 — full replace of tasks AND dependencies. Use this when the
@@ -682,13 +697,15 @@ export interface AppInstance {
    *  batch mode or the buffer is clean. Insertion order preserved. */
   getPendingEdits?(): PendingEdit[];
 
-  /** 0.185 — flush every buffered edit to the host by calling onItemEdit
+  /** 0.185 — flush buffered edits to the host by calling onItemEdit
    *  (date edits first) then onItemReorder (structural reorders second —
    *  edits-before-reorders avoids DH's Apex sortOrder neighbor-shift race).
    *  Resolves with `{ committed }` on full success. Throws
    *  `{ failedAt, successful, error }` on first failure; failed + remaining
-   *  stay in the buffer so the host can retry or discard. */
-  commitEdits?(): Promise<CommitEditsResult>;
+   *  stay in the buffer so the host can retry or discard.
+   *  0.203.0 — accepts `{ only }` to commit a SUBSET; unselected entries
+   *  stay staged (see CommitEditsOptions). */
+  commitEdits?(opts?: CommitEditsOptions): Promise<CommitEditsResult>;
 
   /** 0.185 — visual-only revert: restores the pre-edit originals on every
    *  buffered task and clears the buffer. The host never sees any

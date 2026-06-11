@@ -108,6 +108,7 @@ export function AuditPanel({ state, dispatch, config }: SlotProps) {
         <AuditPreviewModal
           items={pending}
           onReject={config.onRejectPendingChange}
+          onSkip={config.onSkipPendingChanges}
           onCancel={() => setPreviewOpen(false)}
           onConfirm={async () => {
             setPreviewOpen(false);
@@ -124,6 +125,7 @@ function AuditPreviewModal({
   onCancel,
   onConfirm,
   onReject,
+  onSkip,
 }: {
   items: AuditPreviewItem[];
   onCancel: () => void;
@@ -132,8 +134,15 @@ function AuditPreviewModal({
    *  buffered changes for that taskId. Auto-closes the modal when the
    *  last row is rejected. */
   onReject?: (taskId: string) => void;
+  /** 0.203.0 — subset-commit selection. When present, each row renders a
+   *  checkbox (checked = include). Confirm passes the UNCHECKED taskIds
+   *  here first, so the commit leaves them staged for later — unlike ✗
+   *  reject, which reverts the row entirely. */
+  onSkip?: (taskIds: string[]) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [skipped, setSkipped] = useState<Set<string>>(() => new Set());
+  const selected = items.length - items.filter((it) => skipped.has(it.id)).length;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !confirming) onCancel();
@@ -183,7 +192,26 @@ function AuditPreviewModal({
             {items.map((it) => {
               const descs = it.descs && it.descs.length ? it.descs : it.fields.map((f) => `${f} edited`);
               return (
-                <li key={it.id} style={{ padding: '8px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <li key={it.id} style={{ padding: '8px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 8, alignItems: 'flex-start', opacity: skipped.has(it.id) ? 0.45 : 1 }}>
+                  {onSkip && (
+                    <input
+                      type="checkbox"
+                      data-testid="audit-preview-include"
+                      data-task-id={it.id}
+                      aria-label={`Include ${it.title || it.id} in this commit`}
+                      title="Unchecked rows stay staged for a later commit (not sent this round)"
+                      checked={!skipped.has(it.id)}
+                      disabled={confirming}
+                      onChange={(e) => {
+                        setSkipped((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.delete(it.id); else next.add(it.id);
+                          return next;
+                        });
+                      }}
+                      style={{ flex: '0 0 auto', marginTop: 3, cursor: 'pointer', accentColor: '#a21caf' }}
+                    />
+                  )}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                       <code style={{ fontFamily: 'ui-monospace,monospace', background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, fontSize: 11.5, color: '#0f172a' }}>
@@ -228,11 +256,20 @@ function AuditPreviewModal({
           <button
             type="button"
             data-testid="audit-preview-confirm"
-            disabled={confirming}
-            onClick={async () => { setConfirming(true); try { await onConfirm(); } finally { setConfirming(false); } }}
-            style={{ padding: '6px 14px', fontSize: 13, borderRadius: 6, border: '1px solid #a21caf', background: '#a21caf', color: '#fff', cursor: 'pointer', fontWeight: 500 }}
+            disabled={confirming || selected === 0}
+            onClick={async () => {
+              setConfirming(true);
+              // 0.203.0 — record skipped rows BEFORE the commit runs; only
+              // ids still present in the list count.
+              if (onSkip) {
+                const live = new Set(items.map((it) => it.id));
+                onSkip(Array.from(skipped).filter((id) => live.has(id)));
+              }
+              try { await onConfirm(); } finally { setConfirming(false); }
+            }}
+            style={{ padding: '6px 14px', fontSize: 13, borderRadius: 6, border: '1px solid #a21caf', background: '#a21caf', color: '#fff', cursor: 'pointer', fontWeight: 500, opacity: selected === 0 ? 0.5 : 1 }}
           >
-            {confirming ? 'Committing…' : '📤 Confirm + commit'}
+            {confirming ? 'Committing…' : onSkip && selected < items.length ? `📤 Confirm + commit ${selected} of ${items.length}` : '📤 Confirm + commit'}
           </button>
         </div>
       </div>

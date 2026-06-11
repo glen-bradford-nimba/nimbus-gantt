@@ -16,7 +16,7 @@
  */
 import type {
   NormalizedTask, AppInstance, MountOptions, TaskPatch, NimbusGanttEngine,
-  PendingEdit, CommitEditsResult, GanttDependency, AutoScheduleChange,
+  PendingEdit, CommitEditsResult, CommitEditsOptions, GanttDependency, AutoScheduleChange,
 } from './types';
 import type {
   TemplateOverrides, TemplateConfig, AppState, AppEvent, SlotProps, SlotData, PatchLogEntry,
@@ -1384,6 +1384,12 @@ export class IIFEApp {
      * commitEdits both clear from this set. */
     const pendingBuffer = new Map<string, PendingEdit>();
     const dirtyTaskIds = new Set<string>();
+    /* 0.203.0 — one-shot skip-set for subset commit. The audit preview
+     * modal records the taskIds the user UNCHECKED here (via
+     * tplConfig.onSkipPendingChanges) right before Confirm fires; the next
+     * commitEdits() excludes them (they stay staged) and clears the set.
+     * Explicit commitEdits({ only }) takes precedence over this. */
+    let skippedCommitTaskIds = new Set<string>();
 
     function bufferEdit(
       taskId: string,
@@ -1512,6 +1518,11 @@ export class IIFEApp {
     function syncPendingChanges(): void {
       if (!options.batchMode) return;
       tplConfig.pendingChanges = buildPendingChangesFromBuffer();
+      // 0.203.0 — in batch mode the buffer is the dirty-state truth. Keeps
+      // the "unsaved changes" pill honest after a SUBSET commit: skipped rows
+      // remain staged, so the strip must stay dirty even though the template's
+      // pendingPatchCount was reset by the post-commit RESET_PATCHES.
+      tplConfig.isDirty = pendingBuffer.size > 0;
       renderSlots();
     }
 
@@ -1536,6 +1547,12 @@ export class IIFEApp {
         if (!stillBuffered) dirtyTaskIds.delete(taskId);
         syncPendingChanges();
         refreshGantt();
+      };
+      /* 0.203.0 — wire the audit-list skip checkboxes. The modal hands us
+       * the unchecked taskIds on Confirm; commitEdits() reads + clears the
+       * set so skipped rows stay staged for a later commit. */
+      tplConfig.onSkipPendingChanges = (taskIds: string[]) => {
+        skippedCommitTaskIds = new Set(taskIds);
       };
     }
 
@@ -2257,13 +2274,38 @@ export class IIFEApp {
         m.body.appendChild(tbl);
 
         const usingHost = !!options.onAutoSchedule || !!options.onPatch;
-        m.body.appendChild(mk('div', 'ngm-note', usingHost
-          ? 'Apply sends these to the host to stage for review before any DML — nothing is written to the org until you commit them there.'
-          : 'Standalone: Apply updates this session only (use Undo to revert).'));
+        m.body.appendChild(mk('div', 'ngm-note', options.batchMode
+          ? 'Gather mode: Apply stages these changes into the audit list (no DML). Review, skip, or reject them there — nothing is written until you commit.'
+          : usingHost
+            ? 'Apply sends these to the host to stage for review before any DML — nothing is written to the org until you commit them there.'
+            : 'Standalone: Apply updates this session only (use Undo to revert).'));
 
         m.setFooter([
           { label: 'Cancel', onClick: () => m.close() },
           { label: `Apply ${changes.length} change${changes.length === 1 ? '' : 's'}`, primary: true, onClick: () => {
+            if (options.batchMode) {
+              // 0.203.0 — gather mode: stage the proposed dates into the SAME
+              // pending buffer drag edits use (optimistic apply + dirty dim +
+              // audit list) instead of handing them to the host per-change.
+              // The auto-schedule result becomes reviewable/skippable rows in
+              // the audit pass; nothing fires until commitEdits. bufferEdit
+              // preserves the FIRST original snapshot, so a task already
+              // staged by a manual drag keeps its truly-persisted revert
+              // point — the scheduler's dates simply become the latest change.
+              for (const c of changes) {
+                const idx = allTasks.findIndex((t) => t.id === c.id);
+                if (idx === -1) continue;
+                bufferEdit(c.id, 'edit',
+                  { startDate: c.startDate, endDate: c.endDate },
+                  { startDate: allTasks[idx].startDate ?? undefined, endDate: allTasks[idx].endDate ?? undefined });
+                allTasks[idx] = { ...allTasks[idx], startDate: c.startDate, endDate: c.endDate };
+                dirtyTaskIds.add(c.id);
+              }
+              syncPendingChanges();
+              refreshGantt();
+              m.close();
+              return;
+            }
             if (options.onAutoSchedule) {
               // Preferred: hand the whole proposed batch to the host (→ DH's
               // review-before-DML audit list). NG does NOT apply in-engine.
@@ -3352,10 +3394,28 @@ export class IIFEApp {
        *  `{ committed }` on full success. On first failure, throws
        *  `{ failedAt, successful, error }`; failed + remaining stay in
        *  the buffer so the host can retry or discardEdits(). */
-      async commitEdits(): Promise<CommitEditsResult> {
+      async commitEdits(opts?: CommitEditsOptions): Promise<CommitEditsResult> {
         const all = Array.from(pendingBuffer.values());
-        const edits = all.filter((p) => p.kind === 'edit');
-        const reorders = all.filter((p) => p.kind === 'reorder');
+        // 0.203.0 — subset commit. Explicit opts.only wins; otherwise exclude
+        // the rows the user unchecked in the audit preview modal (skip-set).
+        // Unselected/skipped entries stay STAGED — not reverted, not
+        // forwarded — for a later commit. The skip-set is one-shot.
+        let scoped = all;
+        if (opts?.only && opts.only.length) {
+          const wantBoth = new Set<string>();
+          const wantExact = new Set<string>();
+          for (const s of opts.only) {
+            if (s.kind) wantExact.add(s.taskId + '::' + s.kind);
+            else wantBoth.add(s.taskId);
+          }
+          scoped = all.filter((p) => wantBoth.has(p.taskId) || wantExact.has(p.taskId + '::' + p.kind));
+        } else if (skippedCommitTaskIds.size) {
+          const skip = skippedCommitTaskIds;
+          scoped = all.filter((p) => !skip.has(p.taskId));
+        }
+        skippedCommitTaskIds = new Set();
+        const edits = scoped.filter((p) => p.kind === 'edit');
+        const reorders = scoped.filter((p) => p.kind === 'reorder');
         const ordered = [...edits, ...reorders];
         const committed: PendingEdit[] = [];
         for (const p of ordered) {
