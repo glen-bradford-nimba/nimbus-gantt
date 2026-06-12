@@ -77,12 +77,20 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
       latestDispatch({ type: 'SET_SEARCH', q: searchInput.value });
     }, 180);
   });
-  // Flush immediately on blur so a click elsewhere applies the search as-is.
+  // Flush on blur so a click elsewhere applies the search — but DEFERRED a
+  // tick (0.205.0): a synchronous flush re-rendered the whole bar between
+  // the target's mousedown and mouseup, destroying the clicked element so
+  // its click never fired (nastiest case: the × clear button — the pending
+  // text got applied INSTEAD of cleared). One tick lets the click land on
+  // the intact DOM first; the flush follows immediately after.
   searchInput.addEventListener('blur', () => {
     if (!searchPending) return;
     if (searchDebounce) clearTimeout(searchDebounce);
-    searchPending = false;
-    latestDispatch({ type: 'SET_SEARCH', q: searchInput.value });
+    searchDebounce = setTimeout(() => {
+      if (!searchPending) return; // a focus+keystroke re-armed in between
+      searchPending = false;
+      latestDispatch({ type: 'SET_SEARCH', q: searchInput.value });
+    }, 0);
   });
 
   function render(p: SlotProps) {
@@ -131,7 +139,14 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
       clr.textContent = '×';
       clr.title = 'Clear search';
       clr.setAttribute('aria-label', 'Clear search');
-      clr.addEventListener('click', () => dispatch({ type: 'SET_SEARCH', q: '' }));
+      clr.addEventListener('click', () => {
+        // 0.205.0 — cancel any pending debounce/blur flush, or it would
+        // re-apply the text the user just cleared one tick later.
+        if (searchDebounce) clearTimeout(searchDebounce);
+        searchPending = false;
+        searchInput.value = '';
+        dispatch({ type: 'SET_SEARCH', q: '' });
+      });
       sw.appendChild(clr);
     }
     inner.appendChild(sw);
@@ -232,6 +247,12 @@ export function FilterBarVanilla(initial: SlotProps): VanillaSlotInstance {
   return {
     el: root,
     update: render,
-    destroy() { clear(root); if (root.parentNode) root.parentNode.removeChild(root); },
+    destroy() {
+      // 0.205.0 — a pending debounce flush must not dispatch into a
+      // torn-down slot tree ~180ms after unmount.
+      if (searchDebounce) clearTimeout(searchDebounce);
+      searchPending = false;
+      clear(root); if (root.parentNode) root.parentNode.removeChild(root);
+    },
   };
 }

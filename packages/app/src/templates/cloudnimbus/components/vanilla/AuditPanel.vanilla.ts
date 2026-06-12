@@ -159,12 +159,12 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
 }
 
 function openPreviewModal(
-  items: { id: string; title?: string; fields: string[]; descs: string[] }[],
+  items: { id: string; title?: string; error?: string; fields: string[]; descs: string[] }[],
   onConfirm: () => void | Promise<void>,
   /** 0.190 \u2014 per-row \u2717 rejector. Returns the post-reject items list so
    *  the modal re-renders against the live buffer state. When the
    *  returned list is empty the modal auto-closes. */
-  onReject?: (taskId: string) => { id: string; title?: string; fields: string[]; descs: string[] }[],
+  onReject?: (taskId: string) => { id: string; title?: string; error?: string; fields: string[]; descs: string[] }[],
   /** 0.203.0 \u2014 subset-commit selection. When present, each row renders a
    *  checkbox (checked = include). Confirm passes the UNCHECKED taskIds
    *  here first, so the commit path leaves them staged for later \u2014 unlike
@@ -253,6 +253,15 @@ function openPreviewModal(
       descList.style.cssText = 'margin-top:3px;color:#475569;font-size:12px;line-height:1.45';
       descList.textContent = descs.join(' \u00b7 ');
       main.appendChild(descList);
+      // 0.205.0 \u2014 continue-on-error: a row whose last commit attempt failed
+      // shows the failure inline so the user can retry or reject it.
+      if (it.error) {
+        const errLine = document.createElement('div');
+        errLine.setAttribute('data-testid', 'audit-preview-error');
+        errLine.style.cssText = 'margin-top:3px;color:#dc2626;font-size:11.5px;line-height:1.4;font-weight:500';
+        errLine.textContent = '\u2717 last commit failed: ' + it.error;
+        main.appendChild(errLine);
+      }
       li.appendChild(main);
 
       if (onReject) {
@@ -331,29 +340,41 @@ function openPreviewModal(
   backdrop.addEventListener('click', (e) => {
     if (e.target === backdrop) cleanup();
   });
+  // 0.205.0 — Escape listener moved from document to the backdrop:
+  // document.addEventListener silently no-ops under Salesforce LWS, so
+  // Escape was dead on SF. Key events from focused descendants (checkboxes,
+  // buttons) bubble to the backdrop; focusing it on open (deferred — the
+  // house pattern, synchronous focus after append is swallowed under LWS)
+  // makes Escape work before any interaction too.
+  backdrop.tabIndex = -1;
+  backdrop.style.outline = 'none';
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') cleanup();
   };
-  document.addEventListener('keydown', onKey);
+  backdrop.addEventListener('keydown', onKey);
+  try { setTimeout(() => { try { backdrop.focus(); } catch (_e) { /* ok */ } }, 0); } catch (_e) { /* ok */ }
 
   function cleanup() {
-    document.removeEventListener('keydown', onKey);
     if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
   }
 }
 
+// 0.205.0 — batchMode pushes RAW field keys (startDate/endDate/priorityGroup)
+// while the legacy host path pushes short names (start/end/group); normalize
+// so a pure date-drag commit reads "3 date", not "3 field".
+const KIND_ALIAS: Record<string, string> = { startDate: 'start', endDate: 'end', priorityGroup: 'group' };
 function summarizeKinds(
   items: { fields: string[] }[],
 ): string {
   const counts = { dates: 0, group: 0, reorder: 0, parent: 0, other: 0 };
   const covered = new Set(['start', 'end', 'group', 'sortOrder', 'parentId']);
   for (const it of items) {
-    const f = new Set(it.fields);
+    const f = new Set(it.fields.map((k) => KIND_ALIAS[k] || k));
     if (f.has('start') || f.has('end')) counts.dates++;
     if (f.has('group')) counts.group++;
     if (f.has('sortOrder') && !f.has('start') && !f.has('end') && !f.has('group')) counts.reorder++;
     if (f.has('parentId')) counts.parent++;
-    if (it.fields.some((k) => !covered.has(k))) counts.other++;
+    if ([...f].some((k) => !covered.has(k))) counts.other++;
   }
   const parts: string[] = [];
   if (counts.dates) parts.push(counts.dates + ' date');

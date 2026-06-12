@@ -727,7 +727,12 @@ export interface AppInstance {
   setPacingData?(data: PacingData | null): void;
 
   /** 0.185 — snapshot of the current buffered-edit set. Empty when not in
-   *  batch mode or the buffer is clean. Insertion order preserved. */
+   *  batch mode or the buffer is clean. Insertion order preserved.
+   *  ⚠ engineOnly mounts: ALL batch-buffer methods (getPendingEdits,
+   *  commitEdits, discardEdits, removePendingPatch, setMode/getMode,
+   *  setPacingData) are no-op stubs — the React driver path doesn't buffer
+   *  edits yet. Don't enable batchMode on an engineOnly mount and expect
+   *  the cart; it forwards per-edit callbacks directly. */
   getPendingEdits?(): PendingEdit[];
 
   /** 0.185 — flush buffered edits to the host by calling onItemEdit

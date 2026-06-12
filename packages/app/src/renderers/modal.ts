@@ -129,7 +129,7 @@ export function openModal(opts: ModalOptions): ModalHandle {
   function close(): void {
     if (closed) return;
     closed = true;
-    document.removeEventListener('keydown', onKey, true);
+    try { document.removeEventListener('keydown', onKey, true); } catch (_e) { /* LWS */ }
     overlay.remove();
     opts.onClose?.();
   }
@@ -139,7 +139,16 @@ export function openModal(opts: ModalOptions): ModalHandle {
 
   x.addEventListener('click', close);
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', onKey, true);
+  // 0.205.0 — document.addEventListener silently no-ops under Salesforce
+  // LWS, so Escape was dead on SF. Listen on the overlay too (key events
+  // from focused descendants bubble to it) and focus it deferred so Escape
+  // works before any interaction. The document listener stays for non-SF
+  // surfaces where focus may sit outside the overlay.
+  overlay.tabIndex = -1;
+  overlay.style.outline = 'none';
+  overlay.addEventListener('keydown', onKey);
+  try { document.addEventListener('keydown', onKey, true); } catch (_e) { /* LWS */ }
+  try { setTimeout(() => { try { if (!closed) overlay.focus(); } catch (_e) { /* ok */ } }, 0); } catch (_e) { /* ok */ }
 
   function setFooter(buttons: FooterButton[]): void {
     foot.textContent = '';
