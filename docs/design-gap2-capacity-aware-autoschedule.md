@@ -1,6 +1,12 @@
 # Design — Capacity-Aware Auto-Schedule (GAP 2) + Preview-Before-Commit
 
-**Status:** design / pre-build · **Owner:** NG · **Drafted:** 2026-06-10
+**Status (2026-06-11):** v1 SHIPPED as NG 0.204.0 (PR #51) — P0–P4 all landed
+in one cut (shared ceiling math, capacity ledger + date-shift forward pass,
+preview/commit via the gather cart, Pace dial in the Auto-Schedule modal
+sharing the pacing `levelPace` pref). Verified live on MF-Prod (DH 0.273) by
+Cowork 6/11 PM. Remaining = §6 deferred items (per-assignee pools,
+duration-stretch, calendar-aware ceilings, backward leveling).
+**Owner:** NG · **Drafted:** 2026-06-10
 **Targets:** NG core (`AutoSchedulePlugin`) + app (`pacing.ts`, modal apply path)
 **Decided last session (2026-06-09):** pursue **option (a)** — extend the
 auto-scheduler to resource-constrained scheduling. Explicitly **reject option

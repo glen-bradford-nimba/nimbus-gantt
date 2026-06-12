@@ -16,7 +16,7 @@
  */
 import type {
   NormalizedTask, AppInstance, MountOptions, TaskPatch, NimbusGanttEngine,
-  PendingEdit, CommitEditsResult, CommitEditsOptions, GanttDependency, AutoScheduleChange,
+  PendingEdit, CommitEditsResult, CommitEditsOptions, CommitOutcome, GanttDependency, AutoScheduleChange,
 } from './types';
 import type {
   TemplateOverrides, TemplateConfig, AppState, AppEvent, SlotProps, SlotData, PatchLogEntry,
@@ -1483,6 +1483,8 @@ export class IIFEApp {
           entry = { id: p.taskId, title, fields: [], descs: [] };
           byTask.set(p.taskId, entry);
         }
+        // 0.205.0 — surface a continue-on-error failure on the row (✗ + msg).
+        if (p.lastError && !entry.error) entry.error = p.lastError;
         if (p.kind === 'edit' && p.changes) {
           // 0.196.2 — field-generic: render EVERY changed key (title, stage,
           // assignee, dates, …) as old → new, not just start/end. This makes
@@ -2208,9 +2210,23 @@ export class IIFEApp {
       const hasEmit = !!gi && typeof gi.emit === 'function';
       const m = openModal({ title: 'Auto-Schedule — review changes', width: 560 });
 
-      if (!hasEmit) {
-        m.body.appendChild(mk('div', 'ngm-note ngm-warn',
-          'Auto-schedule needs the core engine 0.196.1+ (the preview trigger). Re-copy the core bundle, then reload.'));
+      // 0.205.0 (B3) — hasEmit alone isn't enough: if AutoSchedulePlugin
+      // isn't installed (host opt-out / custom build), the preview emit has
+      // no listener and its callback never fires — the modal would hang on
+      // "Computing…" forever. Probe capabilities().pluginsInstalled.
+      const pluginInstalled = ((): boolean => {
+        try {
+          const caps = (ganttInst as unknown as { capabilities?: () => Record<string, unknown> }).capabilities?.();
+          const list = caps && typeof caps['pluginsInstalled'] === 'string' ? (caps['pluginsInstalled'] as string) : '';
+          // Old cores predate the capabilities surface — fall through to
+          // hasEmit behaviour rather than false-blocking a working setup.
+          return !caps || list.indexOf('AutoSchedulePlugin') >= 0;
+        } catch (_e) { return true; }
+      })();
+      if (!hasEmit || !pluginInstalled) {
+        m.body.appendChild(mk('div', 'ngm-note ngm-warn', !hasEmit
+          ? 'Auto-schedule needs the core engine 0.196.1+ (the preview trigger). Re-copy the core bundle, then reload.'
+          : 'AutoSchedulePlugin is not installed in this build (host opt-out). Enable it in mountConfig.autoSchedule, then reload.'));
         m.setFooter([{ label: 'Close', primary: true, onClick: () => m.close() }]);
         return;
       }
@@ -2280,6 +2296,23 @@ export class IIFEApp {
           'Reflow start/end dates from dependencies (ASAP / critical-path)'
           + (pace > 0 && poolHpm > 0 ? ' + team capacity' : '')
           + '. Review the proposed changes below — nothing is committed until you Apply.'));
+        // 0.205.0 (B1) — the engine schedules over its CURRENT data = the
+        // board's filtered subset. Under a lane filter / search /
+        // hideCompleted, hidden tasks' dependencies are dropped and their
+        // demand never enters the capacity ledger — the plan double-books
+        // the team against invisible work. Say so loudly instead of
+        // pretending the preview covers the portfolio. (Full fix — schedule
+        // the whole board regardless of view — is a follow-up; it changes
+        // what setData feeds the engine.)
+        const cutActive = (state.filter && state.filter !== 'all') || !!state.search || !!state.hideCompleted;
+        if (cutActive) {
+          const visN = applyFilter(allTasks, state.filter as 'active', state.search)
+            .filter((t) => !state.hideCompleted || !DONE_STAGES[t.stage || '']).length;
+          w.appendChild(mk('div', 'ngm-note ngm-warn',
+            '⚠ A view filter is active: this preview schedules ONLY the ' + visN + ' visible item'
+            + (visN === 1 ? '' : 's') + ' of ' + allTasks.length + ' on the board. Hidden items’ dependencies and '
+            + 'capacity demand are not considered. Switch the view to Everything for a full-board schedule.'));
+        }
         const row = mk('div');
         row.setAttribute('style', 'display:flex;align-items:center;gap:6px;margin:10px 0;flex-wrap:wrap');
         const lbl = mk('span', undefined, 'Pace');
@@ -2371,6 +2404,16 @@ export class IIFEApp {
           const eCell = mk('td'); eCell.textContent = (c.previousEndDate || '—') + ' → ' + c.endDate; tr.appendChild(eCell);
           tb.appendChild(tr);
         });
+        // 0.205.0 (B5) — this is a review gate: never let the user confirm
+        // rows they were never shown without saying so.
+        if (changes.length > 200) {
+          const tr = mk('tr');
+          const td = mk('td', undefined, '…and ' + (changes.length - 200) + ' more (all included in Apply)');
+          td.setAttribute('colspan', '3');
+          td.setAttribute('style', 'color:#94a3b8;font-style:italic');
+          tr.appendChild(td);
+          tb.appendChild(tr);
+        }
         tbl.appendChild(tb);
         m.body.appendChild(tbl);
 
@@ -2421,6 +2464,16 @@ export class IIFEApp {
               const ov = capacityOverrides();
               if (ov) gi!.emit!('autoSchedule:run', ov);
               else gi!.emit!('autoSchedule:run');
+              // 0.205.0 (B2) — also persist to allTasks: autoSchedule:run
+              // TASK_MOVEs the ENGINE only, and the next refreshGantt/
+              // rebuildView re-feeds setData(buildTasks(allTasks)) — without
+              // this, every applied date silently reverts on the next filter
+              // toggle / view switch. "Session only" must mean the session.
+              for (const c of changes) {
+                const idx = allTasks.findIndex((t) => t.id === c.id);
+                if (idx === -1) continue;
+                allTasks[idx] = { ...allTasks[idx], startDate: c.startDate, endDate: c.endDate };
+              }
             }
             m.close();
           } },
@@ -3083,6 +3136,7 @@ export class IIFEApp {
       const cut = [
         filterDef && filterDef.id !== 'all' ? 'the "' + filterDef.label + '" view' : '',
         state.search ? 'search "' + state.search + '"' : '',
+        state.hideCompleted ? 'hide-completed' : '',
       ].filter(Boolean).join(' + ');
       const h = document.createElement('div');
       h.style.cssText = 'font-size:15px;font-weight:700;color:#334155';
@@ -3101,6 +3155,9 @@ export class IIFEApp {
       btn.addEventListener('click', () => {
         dispatch({ type: 'SET_SEARCH', q: '' });
         dispatch({ type: 'SET_FILTER', id: 'all' });
+        // 0.205.0 (E1) — hideCompleted can be the thing hiding everything;
+        // "Show everything" must mean everything.
+        if (state.hideCompleted) dispatch({ type: 'TOGGLE_HIDE_COMPLETED' });
       });
       wrap.appendChild(btn);
       // LWS: property READS can throw — fall through to setting relative.
@@ -3160,7 +3217,11 @@ export class IIFEApp {
       // renderComingSoon — honest placeholder, full ports in 0.183.
       if (state.viewMode === 'gantt') {
         initGantt(ganttHost);
-        syncEmptyState(applyFilter(allTasks, state.filter as 'active', state.search).length);
+        // 0.205.0 (E1) — count with the SAME hideCompleted trim initGantt
+        // renders with, or an all-Done view under hideCompleted re-blanks
+        // the board with no overlay (the exact bug this overlay fixes).
+        syncEmptyState(applyFilter(allTasks, state.filter as 'active', state.search)
+          .filter((t) => !state.hideCompleted || !DONE_STAGES[t.stage || '']).length);
       } else if (state.viewMode === 'list') {
         // AuditListView v0 — vanilla port of v9's AuditListView.tsx core.
         // Filters by audit field presence (owner/dates/hours), groups by
@@ -3576,68 +3637,113 @@ export class IIFEApp {
           const skip = skippedCommitTaskIds;
           scoped = all.filter((p) => !skip.has(p.taskId));
         }
+        // 0.205.0 (C1) — capture before clearing so failure paths can re-arm
+        // the user's exclusions instead of forgetting them mid-commit.
+        const armedSkips = skippedCommitTaskIds;
         skippedCommitTaskIds = new Set();
         const edits = scoped.filter((p) => p.kind === 'edit');
         const reorders = scoped.filter((p) => p.kind === 'reorder');
         const ordered = [...edits, ...reorders];
         const committed: PendingEdit[] = [];
+
+        /** Forward ONE buffered entry to the host (no bookkeeping). */
+        const commitOne = async (p: PendingEdit): Promise<void> => {
+          if (p.kind === 'edit' && p.changes) {
+            if (options.onItemEdit) {
+              await options.onItemEdit(p.taskId, p.changes);
+            } else if (options.onPatch) {
+              await Promise.resolve(options.onPatch({
+                id: p.taskId,
+                startDate: p.changes.startDate,
+                endDate: p.changes.endDate,
+              }));
+            }
+          } else if (p.kind === 'reorder' && p.reorderPayload) {
+            if (options.onItemReorder) {
+              const newIndex = typeof p.reorderPayload.sortOrder === 'number'
+                ? p.reorderPayload.sortOrder
+                : 0;
+              const payload: {
+                newIndex: number;
+                newParentId?: string | null;
+                newPriorityGroup?: string;
+                position?: 'above-all' | 'below-all' | 'between';
+                beforeTaskId?: string | null;
+                afterTaskId?: string | null;
+              } = { newIndex };
+              if (p.reorderPayload.parentId !== undefined) payload.newParentId = p.reorderPayload.parentId;
+              if (p.reorderPayload.priorityGroup !== undefined) payload.newPriorityGroup = p.reorderPayload.priorityGroup;
+              // 0.185.35 — positional semantics forwarded through batch
+              // commit path too. Cast via unknown because PendingEdit
+              // type is in a sibling file and extending it would churn
+              // more callsites than necessary for this additive pass.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const rp = p.reorderPayload as any;
+              if (rp.position !== undefined) payload.position = rp.position;
+              if (rp.beforeTaskId !== undefined) payload.beforeTaskId = rp.beforeTaskId;
+              if (rp.afterTaskId !== undefined) payload.afterTaskId = rp.afterTaskId;
+              await options.onItemReorder(p.taskId, payload);
+            } else if (options.onPatch) {
+              await Promise.resolve(options.onPatch({
+                id: p.taskId,
+                parentId: p.reorderPayload.parentId,
+                priorityGroup: p.reorderPayload.priorityGroup,
+                sortOrder: p.reorderPayload.sortOrder,
+              }));
+            }
+          }
+        };
+        /** Success bookkeeping: drop from buffer + clear the dirty dim. */
+        const settleSuccess = (p: PendingEdit): void => {
+          pendingBuffer.delete(p.taskId + '::' + p.kind);
+          // Only clear dirtyTaskIds when no other buffered entry still
+          // references this taskId (a task could have BOTH edit + reorder).
+          const stillBuffered = pendingBuffer.has(p.taskId + '::edit') || pendingBuffer.has(p.taskId + '::reorder');
+          if (!stillBuffered) dirtyTaskIds.delete(p.taskId);
+          committed.push(p);
+        };
+
+        // 0.205.0 — continue-on-error: attempt EVERY entry, never throw.
+        // Failures stay staged with lastError set (the audit list paints
+        // ✗ + message per row); successes clear. Glen's "track the
+        // success/failure on each one" — per-record fidelity tightens
+        // further once DH's bulk allOrNone=false save lands (GAP C).
+        if (opts?.continueOnError) {
+          const results: CommitOutcome[] = [];
+          const failed: PendingEdit[] = [];
+          for (const p of ordered) {
+            try {
+              await commitOne(p);
+              settleSuccess(p);
+              delete p.lastError;
+              results.push({ taskId: p.taskId, kind: p.kind, ok: true });
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              p.lastError = msg;
+              failed.push(p);
+              results.push({ taskId: p.taskId, kind: p.kind, ok: false, error: msg });
+            }
+          }
+          // C1 — failures keep the user's skip exclusions armed, so a blind
+          // host retry can't write rows the user explicitly excluded.
+          if (failed.length) skippedCommitTaskIds = armedSkips;
+          syncPendingChanges();
+          refreshGantt();
+          return { committed, failed, results };
+        }
+
         for (const p of ordered) {
           try {
-            if (p.kind === 'edit' && p.changes) {
-              if (options.onItemEdit) {
-                await options.onItemEdit(p.taskId, p.changes);
-              } else if (options.onPatch) {
-                await Promise.resolve(options.onPatch({
-                  id: p.taskId,
-                  startDate: p.changes.startDate,
-                  endDate: p.changes.endDate,
-                }));
-              }
-            } else if (p.kind === 'reorder' && p.reorderPayload) {
-              if (options.onItemReorder) {
-                const newIndex = typeof p.reorderPayload.sortOrder === 'number'
-                  ? p.reorderPayload.sortOrder
-                  : 0;
-                const payload: {
-                  newIndex: number;
-                  newParentId?: string | null;
-                  newPriorityGroup?: string;
-                  position?: 'above-all' | 'below-all' | 'between';
-                  beforeTaskId?: string | null;
-                  afterTaskId?: string | null;
-                } = { newIndex };
-                if (p.reorderPayload.parentId !== undefined) payload.newParentId = p.reorderPayload.parentId;
-                if (p.reorderPayload.priorityGroup !== undefined) payload.newPriorityGroup = p.reorderPayload.priorityGroup;
-                // 0.185.35 — positional semantics forwarded through batch
-                // commit path too. Cast via unknown because PendingEdit
-                // type is in a sibling file and extending it would churn
-                // more callsites than necessary for this additive pass.
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const rp = p.reorderPayload as any;
-                if (rp.position !== undefined) payload.position = rp.position;
-                if (rp.beforeTaskId !== undefined) payload.beforeTaskId = rp.beforeTaskId;
-                if (rp.afterTaskId !== undefined) payload.afterTaskId = rp.afterTaskId;
-                await options.onItemReorder(p.taskId, payload);
-              } else if (options.onPatch) {
-                await Promise.resolve(options.onPatch({
-                  id: p.taskId,
-                  parentId: p.reorderPayload.parentId,
-                  priorityGroup: p.reorderPayload.priorityGroup,
-                  sortOrder: p.reorderPayload.sortOrder,
-                }));
-              }
-            }
-            // Success — remove from buffer + clear dim.
-            pendingBuffer.delete(p.taskId + '::' + p.kind);
-            // Only clear dirtyTaskIds when no other buffered entry still
-            // references this taskId (a task could have BOTH edit + reorder).
-            const stillBuffered = pendingBuffer.has(p.taskId + '::edit') || pendingBuffer.has(p.taskId + '::reorder');
-            if (!stillBuffered) dirtyTaskIds.delete(p.taskId);
-            committed.push(p);
+            await commitOne(p);
+            settleSuccess(p);
           } catch (err) {
             // Partial-rollback per Glen's locked decision: failed + remaining
             // stay in the buffer; already-committed cleared above. Modal stays
             // open with "committed N of M, failed on X — retry or discard?"
+            // 0.205.0 (C1) — re-arm the user's skip set: without this, a
+            // mid-commit throw forgot the exclusions and the host's retry
+            // committed rows the user explicitly unchecked.
+            skippedCommitTaskIds = armedSkips;
             syncPendingChanges();
             refreshGantt();
             throw { failedAt: p, successful: committed, error: err };
@@ -3684,6 +3790,10 @@ export class IIFEApp {
         }
         pendingBuffer.clear();
         dirtyTaskIds.clear();
+        // 0.205.0 (C2) — an armed-but-unconsumed skip set (host's
+        // onAuditSubmit bailed before calling commitEdits) must not leak
+        // into some unrelated future commit.
+        skippedCommitTaskIds = new Set();
         syncPendingChanges();
         refreshGantt();
       },

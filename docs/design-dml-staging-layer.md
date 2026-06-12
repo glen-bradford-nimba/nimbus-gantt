@@ -1,6 +1,12 @@
 # Design — Session-Wide DML Staging Layer ("change cart")
 
-**Status:** design / pre-build · **Owner:** NG + DH (it takes two) · **Drafted:** 2026-06-10
+**Status (2026-06-11):** P0–P2 SHIPPED (NG 0.203.0, PR #50 — auto-schedule
+stages into the gather buffer; `commitEdits({only})` + skip checkboxes).
+P3 NG-side SHIPPING (NG 0.205.0 — continue-on-error + per-entry outcomes +
+✗-per-row; full per-record fidelity still gated on DH's GAP-C bulk save).
+P4 = DH. P5 partially superseded: the Pace dial drives the SCHEDULER directly
+(0.204.0) rather than staging via the forecast overlay.
+**Owner:** NG + DH (it takes two) · **Drafted:** 2026-06-10
 **Targets:** NG app (`IIFEApp.ts` pending buffer, AuditPanel, handle API) +
 DH Apex (bulk save). Capacity-aware AutoSchedule
 ([design-gap2-capacity-aware-autoschedule.md](./design-gap2-capacity-aware-autoschedule.md))

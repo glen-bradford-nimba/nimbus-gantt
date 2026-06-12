@@ -1110,32 +1110,13 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
     // chart (range-filtered)
     const win = rangeWindow(range, bucket, customS, customE);
-    let visible = dd.buckets.filter(b => {
+    const inWindow = dd.buckets.filter(b => {
       const ms = b.startMs ?? keyToMs(b.key);
       if (win.from != null && ms < win.from) return false;
       if (win.to != null && ms > win.to) return false;
       return true;
     });
-    // 0.204.0 — axis-fit (Cowork repro 6/11: Month+All stretched May 2024 →
-    // Jan 2029 while every real bar sat in 2026, crushing the data into a
-    // sliver). When an end of the window is UNBOUNDED (All / YTD / Rest),
-    // fit that edge to the data: trim leading/trailing buckets that carry no
-    // signal (no actual, forecast, or target), keeping the current bucket
-    // anchored and one empty pad bucket per trimmed side. Empty edge buckets
-    // come from authoritative feeds that span eras — the user's explicit
-    // window choices are never second-guessed.
-    if ((win.from == null || win.to == null) && visible.length > 2) {
-      const live = (b: PacingBucket): boolean =>
-        b.isCurrent || b.actual > 0.5 || b.forecast > 0.5 || b.target > 0.5;
-      let first = visible.findIndex(live);
-      let last = -1;
-      for (let i = visible.length - 1; i >= 0; i--) { if (live(visible[i])) { last = i; break; } }
-      if (first >= 0 && last >= first) {
-        const from = win.from == null ? Math.max(0, first - 1) : 0;
-        const to = win.to == null ? Math.min(visible.length - 1, last + 1) : visible.length - 1;
-        visible = visible.slice(from, to + 1);
-      }
-    }
+    const visible = fitBucketsToData(inWindow, win);
     body.appendChild(buildChart(visible, { show, segments: dd.segments, useDollars, rate: r || 0, cum, expandedKey }, (k) => {
       expandedKey = expandedKey === k ? null : k; render();
     }));
@@ -1153,6 +1134,32 @@ export function renderPacingView(host: HTMLElement, tasks: NormalizedTask[], opt
 
   render();
   return () => { try { options.onItemHover?.(null, { x: 0, y: 0 }); } catch { /* ignore */ } host.innerHTML = ''; };
+}
+
+// ─── Axis-fit ────────────────────────────────────────────────────────────────
+
+/** 0.204.0/0.205.0 — axis-fit (Cowork repro 6/11: Month+All stretched May 2024
+ *  → Jan 2029 while every real bar sat in 2026, crushing the data into a
+ *  sliver). When an end of the window is UNBOUNDED (All / YTD / Rest), fit
+ *  that edge to the data: trim leading/trailing buckets that carry no signal
+ *  (no actual, forecast, or target), keeping the current bucket anchored and
+ *  one empty pad bucket per trimmed side. Empty edge buckets come from
+ *  authoritative feeds that span eras — the user's explicit window choices
+ *  (bounded edges) are never second-guessed. Pure; extracted for tests. */
+export function fitBucketsToData(
+  visible: PacingBucket[],
+  win: { from: number | null; to: number | null },
+): PacingBucket[] {
+  if (!(win.from == null || win.to == null) || visible.length <= 2) return visible;
+  const live = (b: PacingBucket): boolean =>
+    b.isCurrent || b.actual > 0.5 || b.forecast > 0.5 || b.target > 0.5;
+  let first = visible.findIndex(live);
+  let last = -1;
+  for (let i = visible.length - 1; i >= 0; i--) { if (live(visible[i])) { last = i; break; } }
+  if (first < 0 || last < first) return visible;
+  const from = win.from == null ? Math.max(0, first - 1) : 0;
+  const to = win.to == null ? Math.min(visible.length - 1, last + 1) : visible.length - 1;
+  return visible.slice(from, to + 1);
 }
 
 // ─── Chart ───────────────────────────────────────────────────────────────────

@@ -596,6 +596,11 @@ export interface PendingEdit {
     sortOrder?: number;
     parentId?: string | null;
   };
+  /** 0.205.0 — last commit failure for THIS entry (continue-on-error mode).
+   *  Set when a commitEdits({ continueOnError:true }) attempt fails for this
+   *  row; surfaced in the audit preview as a per-row ✗ + message. Cleared
+   *  implicitly when the entry later commits (it leaves the buffer). */
+  lastError?: string;
   /** Pre-edit-chain snapshot — used by discardEdits to revert. 0.196.2 —
    *  field-generic (index signature) so any changed field can be reverted. */
   original: {
@@ -635,11 +640,32 @@ export interface PendingEdit {
  */
 export interface CommitEditsResult {
   committed: PendingEdit[];
+  /** 0.205.0 — present in continue-on-error mode: one outcome per attempted
+   *  entry, in attempt order. Successes are cleared from the buffer; failures
+   *  STAY STAGED with `lastError` set, ready for a retry
+   *  (`commitEdits({ continueOnError:true })` again, or
+   *  `{ only: failed-entries }`). */
+  results?: CommitOutcome[];
+  /** 0.205.0 — continue-on-error mode: the entries that failed (still in the
+   *  buffer). Convenience subset of `results`. */
+  failed?: PendingEdit[];
 }
 export interface CommitEditsFailure {
   failedAt: PendingEdit;
   successful: PendingEdit[];
   error: unknown;
+}
+
+/** 0.205.0 — per-entry outcome from a continue-on-error commit. The full
+ *  per-record ✓/✗ story needs the host to save with allOrNone=false and
+ *  per-record results (see docs/design-dml-staging-layer.md GAP C) — until
+ *  then each entry's outcome reflects its own host-callback success/throw,
+ *  which is per-record already when the host commits per item. */
+export interface CommitOutcome {
+  taskId: string;
+  kind: 'edit' | 'reorder';
+  ok: boolean;
+  error?: string;
 }
 
 /**
@@ -655,6 +681,13 @@ export interface CommitEditsFailure {
  */
 export interface CommitEditsOptions {
   only?: Array<{ taskId: string; kind?: 'edit' | 'reorder' }>;
+  /** 0.205.0 — continue-on-error: attempt EVERY scoped entry instead of
+   *  stopping at the first failure. Never throws; resolves with
+   *  `{ committed, failed, results }`. Failures stay staged with
+   *  `lastError` set so the audit list can paint ✗ + message per row and
+   *  offer retry. Default false = legacy fail-fast (throws
+   *  CommitEditsFailure at the first error). */
+  continueOnError?: boolean;
 }
 
 export interface AppInstance {
@@ -694,7 +727,12 @@ export interface AppInstance {
   setPacingData?(data: PacingData | null): void;
 
   /** 0.185 — snapshot of the current buffered-edit set. Empty when not in
-   *  batch mode or the buffer is clean. Insertion order preserved. */
+   *  batch mode or the buffer is clean. Insertion order preserved.
+   *  ⚠ engineOnly mounts: ALL batch-buffer methods (getPendingEdits,
+   *  commitEdits, discardEdits, removePendingPatch, setMode/getMode,
+   *  setPacingData) are no-op stubs — the React driver path doesn't buffer
+   *  edits yet. Don't enable batchMode on an engineOnly mount and expect
+   *  the cart; it forwards per-edit callbacks directly. */
   getPendingEdits?(): PendingEdit[];
 
   /** 0.185 — flush buffered edits to the host by calling onItemEdit

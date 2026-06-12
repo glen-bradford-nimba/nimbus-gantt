@@ -224,6 +224,11 @@ function AuditPreviewModal({
                     <div style={{ marginTop: 3, color: '#475569', fontSize: 12, lineHeight: 1.45 }}>
                       {descs.join(' · ')}
                     </div>
+                    {it.error && (
+                      <div data-testid="audit-preview-error" style={{ marginTop: 3, color: '#dc2626', fontSize: 11.5, lineHeight: 1.4, fontWeight: 500 }}>
+                        ✗ last commit failed: {it.error}
+                      </div>
+                    )}
                   </div>
                   {onReject && (
                     <button
@@ -277,16 +282,19 @@ function AuditPreviewModal({
   );
 }
 
+// 0.205.0 — batchMode pushes RAW field keys (startDate/endDate/priorityGroup);
+// normalize so a pure date-drag commit reads "3 date", not "3 field".
+const KIND_ALIAS: Record<string, string> = { startDate: 'start', endDate: 'end', priorityGroup: 'group' };
 function summarizeKinds(items: AuditPreviewItem[]): string {
   const counts = { dates: 0, group: 0, reorder: 0, parent: 0, other: 0 };
   const covered = new Set(['start', 'end', 'group', 'sortOrder', 'parentId']);
   for (const it of items) {
-    const f = new Set(it.fields);
+    const f = new Set(it.fields.map((k) => KIND_ALIAS[k] || k));
     if (f.has('start') || f.has('end')) counts.dates++;
     if (f.has('group')) counts.group++;
     if (f.has('sortOrder') && !f.has('start') && !f.has('end') && !f.has('group')) counts.reorder++;
     if (f.has('parentId')) counts.parent++;
-    if (it.fields.some((k) => !covered.has(k))) counts.other++;
+    if ([...f].some((k) => !covered.has(k))) counts.other++;
   }
   const parts: string[] = [];
   if (counts.dates) parts.push(`${counts.dates} date`);
