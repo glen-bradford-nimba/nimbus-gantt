@@ -1,6 +1,22 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.205.0 per-record commit outcomes + heavy-agent fix batch (2026-06-12). ⚠ TWO-BUNDLE cut.**
+**📣 Latest cut: 0.206.0 full-board auto-schedule (2026-06-12). ⚠ TWO-BUNDLE cut — vendor THIS pair.**
+Closes 0.205.0's B1 warning for real: the Auto-Schedule preview/apply now plans
+the **FULL board regardless of the active view filter** — hidden items'
+dependencies + capacity demand are back in the ledger (they were silently
+dropped, double-booking the team whenever a lane filter/search was active).
+Completed/inactive work is excluded from the schedule set (history never
+re-dates; exclusion frees dependents). Core: `autoSchedule:preview/:run`
+accept per-call `{ tasks, dependencies }` data overrides. Version-gated: on a
+stale core the modal keeps the filtered-subset warning instead of lying.
+Re-copy **BOTH**: core md5 **`81f6c48520e429b3ddf99bf835c91bad`** (version →
+0.206.0; supersedes `844f418e`) + app md5
+**`0de02235f74450051051e6304541f17e`** (supersedes `bf0653c2`; cumulative —
+carries 0.204.1/.2 + 0.205.0). PR #55, **194/194**. ⚠ B4 note from 0.205.0
+still stands: **pass MF's real `options.team`** or the Pace dial quotes
+CLOUD_NIMBUS_POOL (170h/mo, named CN staff) to the client.
+
+**0.205.0 per-record commit outcomes + heavy-agent fix batch (2026-06-12). ⚠ TWO-BUNDLE cut.**
 Staging-cart P3 NG-side: `commitEdits({continueOnError:true})` attempts every
 entry, never throws, returns per-entry `{ok,error}` results; failures stay
 staged with the error painted on the audit row (**✗ last commit failed: …**) —
