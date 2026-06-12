@@ -1,5 +1,5 @@
-/**
- * templates/state.ts — AppState reducer (AppEvent → new AppState).
+﻿/**
+ * templates/state.ts â€” AppState reducer (AppEvent â†’ new AppState).
  */
 import type { AppState, AppEvent } from './types';
 
@@ -14,8 +14,8 @@ export const INITIAL_STATE: AppState = {
   statsOpen: false,
   detailOpen: false,
   detailMode: 'view',
-  auditPanelOpen: false, // default collapsed — Audit toggle in TitleBar opens it
-  hrsWkStripOpen: false, // default collapsed — Hrs/Wk toggle in TitleBar opens it
+  auditPanelOpen: false, // default collapsed â€” Audit toggle in TitleBar opens it
+  hrsWkStripOpen: false, // default collapsed â€” Hrs/Wk toggle in TitleBar opens it
   fullscreen: false,
   selectedTaskId: null,
   pendingPatchCount: 0,
@@ -30,11 +30,16 @@ export const INITIAL_STATE: AppState = {
 
 export function reduceAppState(state: AppState, event: AppEvent): AppState {
   switch (event.type) {
-    // 0.199.0 — a manual view-mode switch diverges from any applied saved view,
+    // 0.199.0 â€” a manual view-mode switch diverges from any applied saved view,
     // so clear activeViewId (the Views menu falls back to its "Views" label).
     case 'SET_VIEW':       return { ...state, viewMode: event.mode, activeViewId: null };
-    case 'SET_FILTER':     return { ...state, filter: event.id };
-    case 'SET_SEARCH':     return { ...state, search: event.q };
+    // 0.205.0 - same-value short-circuit: SET_FILTER/SET_SEARCH with an
+    // unchanged value return the SAME state object, so the IIFE's
+    // stateChanged check skips the full renderSlots + gantt rebuild. The
+    // FilterBar blur-flush made redundant SET_SEARCH dispatches common
+    // (type a char, delete it, blur) - each cost a complete gantt teardown.
+    case 'SET_FILTER':     return event.id === state.filter ? state : { ...state, filter: event.id };
+    case 'SET_SEARCH':     return event.q === state.search ? state : { ...state, search: event.q };
     case 'SET_ZOOM':       return { ...state, zoom: event.zoom };
     case 'SET_GROUP_BY':   return { ...state, groupBy: event.groupBy };
     case 'TOGGLE_HIDE_COMPLETED':
@@ -43,10 +48,10 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
     case 'TOGGLE_STATS':   return { ...state, statsOpen: !state.statsOpen };
     case 'TOGGLE_DETAIL': {
       const opening = event.taskId !== undefined;
-      // 0.185.18 — multi-instance: opening with a taskId appends to
+      // 0.185.18 â€” multi-instance: opening with a taskId appends to
       // openDetailTaskIds (or moves it to the end if already open, so
       // repeat-click brings the panel to the top of the stack). Closing
-      // with no taskId clears all open panels (keeps legacy "× clears
+      // with no taskId clears all open panels (keeps legacy "Ã— clears
       // the detail" semantics when the host hasn't wired per-panel
       // closes). Per-panel close goes through CLOSE_DETAIL.
       if (opening) {
@@ -69,7 +74,7 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
       };
     }
     case 'CLOSE_DETAIL': {
-      // 0.185.18 — remove a single panel by taskId, leave others open.
+      // 0.185.18 â€” remove a single panel by taskId, leave others open.
       const next = state.openDetailTaskIds.filter((id) => id !== event.taskId);
       const nextSelected = next.length > 0 ? next[next.length - 1] : null;
       return {
@@ -99,7 +104,7 @@ export function reduceAppState(state: AppState, event: AppEvent): AppState {
       return { ...state, advisorOpen: !state.advisorOpen };
     case 'TOGGLE_FEATURE': {
       const current = state.featureOverrides[event.key];
-      // First toggle: flip the tplConfig default (unknown → false, since we
+      // First toggle: flip the tplConfig default (unknown â†’ false, since we
       // don't see the default here). Subsequent toggles flip the override.
       // Consumers merge overrides ON TOP of tplConfig.features, so an
       // override of `false` masks a true default and vice versa.
