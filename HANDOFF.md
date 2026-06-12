@@ -1,6 +1,28 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.204.2 pacing de-clutter substrate (2026-06-11). APP-only.**
+**📣 Latest cut: 0.205.0 per-record commit outcomes + heavy-agent fix batch (2026-06-12). ⚠ TWO-BUNDLE cut.**
+Staging-cart P3 NG-side: `commitEdits({continueOnError:true})` attempts every
+entry, never throws, returns per-entry `{ok,error}` results; failures stay
+staged with the error painted on the audit row (**✗ last commit failed: …**) —
+retry-ready. Plus every real finding from the 6/11 overnight agent sweep
+(adversarial + LWS + export audit): the Auto-Schedule modal now **warns when a
+view filter is active** (it schedules only the visible subset — hidden deps +
+demand are invisible to the capacity ledger); the user's skip-set survives a
+mid-commit failure (was: blind retry could write explicitly-excluded rows);
+empty-state is hideCompleted-consistent and "Show everything" clears it too;
+core priority holds at every Kahn wave (committed work can't lose its slot to
+dep-free proposed peers), hard-date loads pre-record, `'resource'` violations
+fire instead of staying silent; **Escape works on Salesforce** in both modals;
+the FilterBar blur-flush no longer swallows the first click after typing
+(× clear applied text instead of clearing). `fitBucketsToData` extracted pure
++7 tests. Re-copy **BOTH**: core md5 **`844f418ebe863ee2eab7ade78882e907`**
+(version → 0.205.0; supersedes `138e2698`) + app md5
+**`bf0653c21ae735ab307b803631f6f52a`** (supersedes `56be6104`; cumulative).
+PR #54, **192/192**. **⚠ DH deploy note (B4): the Pace dial's pool falls back
+to CLOUD_NIMBUS_POOL (170h/mo, named CN staff) — pass MF's real `options.team`
+on the MF org or the modal quotes the wrong team to the client.**
+
+**0.204.2 pacing de-clutter substrate (2026-06-11). APP-only.**
 The renderer half of the "pacing view is overwhelming" diagnosis (DH shipped its
 config half as DH PR #897). **(1)** Greenlit tier moves off green → teal-cyan
 `#0e7490` — stacked on Actual's green the two were nearly indistinguishable.
