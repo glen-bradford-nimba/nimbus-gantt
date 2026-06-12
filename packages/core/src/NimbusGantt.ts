@@ -805,7 +805,7 @@ export class NimbusGantt {
       // NOTE: bump this with each core release — consumers (e.g. the app's
       // Auto-Schedule guard) feature-detect first but also surface this string
       // for diagnostics. Stale value = false "needs newer core" reports.
-      version: '0.204.0',
+      version: '0.205.0',
       pushRemoteEvent: typeof this.pushRemoteEvent === 'function',
       timeCursor: true,
       history: !!self.history,

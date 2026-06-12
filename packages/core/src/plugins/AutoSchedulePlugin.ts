@@ -79,8 +79,12 @@ export interface AutoScheduleOptions {
    * `priorityOf` ranks tasks for the greedy order among dependency-ready
    * peers (lower = scheduled first; default = existing topo order). Tasks
    * with hard-date constraints (MSO/MFO) consume capacity but are not
-   * shifted; ALAP tasks are excluded from the ledger (their backward-pass
-   * placement happens after leveling — v1 limitation).
+   * shifted (their load is pre-recorded so soft work routes around them);
+   * ALAP tasks are excluded from the ledger (their backward-pass placement
+   * happens after leveling — v1 limitation). Known v1 caveat: with
+   * `respectWorkCalendar`, the ledger iterates CALENDAR days while
+   * durations are working days, so demand spreads across excluded days —
+   * acceptable approximation, fix alongside calendar-aware ceilings (v2).
    */
   capacity?: {
     hoursPerMonth?: number;
@@ -186,6 +190,11 @@ interface DependencyGraph {
 function buildDependencyGraph(
   taskIds: Set<string>,
   dependencies: Map<string, GanttDependency>,
+  /** 0.205.0 — when present, the Kahn ready-queue is kept in this order at
+   *  EVERY wave, not just the seeds. Without it, a task freed mid-run was
+   *  appended FIFO, so low-priority dep-free work could grab capacity ahead
+   *  of committed work that became ready one wave later. */
+  readyOrder?: (a: string, b: string) => number,
 ): DependencyGraph {
   const successors = new Map<string, DependencyEdge[]>();
   const predecessors = new Map<string, DependencyEdge[]>();
@@ -230,6 +239,7 @@ function buildDependencyGraph(
   }
 
   while (queue.length > 0) {
+    if (readyOrder && queue.length > 1) queue.sort(readyOrder);
     const current = queue.shift()!;
     topoOrder.push(current);
 
@@ -286,59 +296,82 @@ function computeSchedule(
   const dailyCeiling = (capCfg?.hoursPerMonth && capCfg.hoursPerMonth > 0 && paceMul > 0)
     ? capCfg.hoursPerMonth * 12 / 365 * paceMul
     : 0;
-  const demandOf = capCfg?.demandOf ?? ((t: GanttTask): number => {
+  const rawDemandOf = capCfg?.demandOf ?? ((t: GanttTask): number => {
     const r = t as unknown as Record<string, unknown>;
     const est = typeof r['estimatedHours'] === 'number' ? (r['estimatedHours'] as number) : 0;
     const log = typeof r['loggedHours'] === 'number' ? (r['loggedHours'] as number) : 0;
     return Math.max(0, est - log);
   });
+  // 0.205.0 — host-supplied callbacks are guarded: a throwing demandOf/
+  // priorityOf (agents drive emit('autoSchedule:preview', {...}) directly)
+  // must not unwind through the event emitter and freeze the caller's UI.
+  const demandOf = (t: GanttTask): number => { try { return rawDemandOf(t); } catch (_e) { return 0; } };
+  const rawPriorityOf = capCfg?.priorityOf;
+  const priorityOf = rawPriorityOf
+    ? (t: GanttTask): number => { try { return rawPriorityOf(t); } catch (_e) { return 1; } }
+    : null;
   // Per-day load ledger (UTC day index → hours already placed).
   const dayLoad = new Map<number, number>();
   const dayIdx = (iso: string): number => Math.floor(parseDate(iso).getTime() / MS_PER_DAY);
   /** Record a task's per-day demand into the ledger without shifting it
-   *  (hard-date constraints consume capacity where they sit). */
-  function recordLoad(startIso: string, dur: number, demand: number): void {
-    if (dailyCeiling <= 0 || demand <= 0) return;
+   *  (hard-date constraints consume capacity where they sit). Returns true
+   *  when the placement pushed any day past the ceiling — the caller turns
+   *  that into a 'resource' violation instead of staying silent. */
+  function recordLoad(startIso: string, dur: number, demand: number): boolean {
+    if (dailyCeiling <= 0 || demand <= 0) return false;
     const span = Math.max(1, dur);
     const eff = Math.min(demand / span, dailyCeiling);
     const s = dayIdx(startIso);
-    for (let d = s; d < s + span; d++) dayLoad.set(d, (dayLoad.get(d) || 0) + eff);
+    let overloaded = false;
+    for (let d = s; d < s + span; d++) {
+      const next = (dayLoad.get(d) || 0) + eff;
+      if (next > dailyCeiling + 1e-6) overloaded = true;
+      dayLoad.set(d, next);
+    }
+    return overloaded;
   }
   /** Find the earliest start ≥ es where the task's whole span fits under the
    *  ceiling, commit its load, and return the (possibly shifted) start.
    *  A task whose per-day demand alone exceeds the ceiling is capped at the
-   *  ceiling (it must go somewhere; durations are fixed in date-shift v1). */
-  function levelStart(es: string, dur: number, demand: number): string {
-    if (dailyCeiling <= 0 || demand <= 0) return es;
+   *  ceiling (it must go somewhere; durations are fixed in date-shift v1).
+   *  `exhausted` = the ~10-year search guard ran out and the load was placed
+   *  overloaded — the caller reports a 'resource' violation. */
+  function levelStart(es: string, dur: number, demand: number): { start: string; exhausted: boolean } {
+    if (dailyCeiling <= 0 || demand <= 0) return { start: es, exhausted: false };
     const span = Math.max(1, dur);
     const eff = Math.min(demand / span, dailyCeiling);
     let start = dayIdx(es);
     let guard = 0;
+    let fitted = false;
     outer: while (guard++ < 3650) {
       for (let d = start; d < start + span; d++) {
         if ((dayLoad.get(d) || 0) + eff > dailyCeiling + 1e-6) { start = d + 1; continue outer; }
       }
+      fitted = true;
       break;
     }
     for (let d = start; d < start + span; d++) dayLoad.set(d, (dayLoad.get(d) || 0) + eff);
-    return formatDate(new Date(start * MS_PER_DAY));
+    return { start: formatDate(new Date(start * MS_PER_DAY)), exhausted: !fitted };
   }
 
   // ── Phase 1: Build the dependency graph ──────────────────────────────
-  // 0.204.0 — when leveling with a priority rule, seed Kahn's queue in
-  // priority order so dependency-FREE peers (the "wall of rocks all dated
-  // today") are leveled most-committed-first. Dependencies still dominate:
-  // priority only breaks ties among simultaneously-ready tasks.
-  let graphTaskIds = taskIds;
-  if (dailyCeiling > 0 && capCfg?.priorityOf) {
-    const pOf = capCfg.priorityOf;
-    graphTaskIds = new Set([...taskIds].sort((a, b) => {
-      const pa = pOf(tasks.get(a)!), pb = pOf(tasks.get(b)!);
+  // 0.204.0/0.205.0 — when leveling with a priority rule, the Kahn ready-
+  // queue is kept priority-ordered at EVERY wave (not just the seeds), so
+  // committed work freed mid-run still levels ahead of lower-priority
+  // dep-free peers. Dependencies dominate: priority only breaks ties among
+  // simultaneously-ready tasks. Stable three-way comparator (id tiebreak)
+  // so equal-priority equal-date peers order deterministically everywhere.
+  let readyOrder: ((a: string, b: string) => number) | undefined;
+  if (dailyCeiling > 0 && priorityOf) {
+    readyOrder = (a, b) => {
+      const pa = priorityOf(tasks.get(a)!), pb = priorityOf(tasks.get(b)!);
       if (pa !== pb) return pa - pb;
-      return tasks.get(a)!.startDate < tasks.get(b)!.startDate ? -1 : 1;
-    }));
+      const sa = tasks.get(a)!.startDate, sb = tasks.get(b)!.startDate;
+      if (sa !== sb) return sa < sb ? -1 : 1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    };
   }
-  const graph = buildDependencyGraph(graphTaskIds, dependencies);
+  const graph = buildDependencyGraph(taskIds, dependencies, readyOrder);
 
   // Report circular dependencies as violations
   for (const taskId of graph.circularTaskIds) {
@@ -355,6 +388,31 @@ function computeSchedule(
   for (const [id, task] of tasks) {
     const d = calendar.daysBetween(task.startDate, task.endDate);
     duration.set(id, Math.max(d, 0));
+  }
+
+  // ── 0.205.0: Pre-record hard-date loads ─────────────────────────────
+  // MSO/MFO tasks consume capacity exactly where they sit, so their load
+  // must be in the ledger BEFORE the forward pass levels anything — else a
+  // soft task processed earlier fills those days to the ceiling and the
+  // hard commitment silently double-books the team. Overload here (e.g.
+  // every task hard-dated past the pool) is reported, not swallowed.
+  const preRecorded = new Set<string>();
+  if (dailyCeiling > 0) {
+    for (const [taskId, c] of constraints) {
+      if ((c.type !== 'MSO' && c.type !== 'MFO') || !c.date) continue;
+      const t = tasks.get(taskId);
+      if (!t) continue;
+      const dur = duration.get(taskId)!;
+      const startIso = c.type === 'MSO' ? c.date : calendar.addDays(c.date, -dur);
+      if (recordLoad(startIso, dur, demandOf(t))) {
+        violations.push({
+          taskId,
+          type: 'resource',
+          message: `Task "${t.name}" (${c.type} ${c.date}) exceeds the capacity ceiling on its fixed dates.`,
+        });
+      }
+      preRecorded.add(taskId);
+    }
   }
 
   // ── Determine project start date ───────────────────────────────────
@@ -544,18 +602,35 @@ function computeSchedule(
       }
     }
 
-    // ── Step 2b (0.204.0): Capacity gate ──────────────────────────
+    // ── Step 2b (0.204.0/0.205.0): Capacity gate ──────────────────
     // Resource-level the dependency/constraint-feasible start. Hard-date
-    // tasks (MSO/MFO) hold their date but still consume capacity; ALAP
-    // tasks skip the ledger (their placement is decided in the backward
-    // pass). Everything else date-shifts until its whole span fits.
-    if (dailyCeiling > 0 && !isALAP.has(taskId)) {
+    // tasks (MSO/MFO) hold their date and were pre-recorded into the
+    // ledger before the pass; ALAP tasks skip the ledger (their placement
+    // is decided in the backward pass). Everything else date-shifts until
+    // its whole span fits; an exhausted search (~10y) is reported as a
+    // 'resource' violation instead of failing silently.
+    if (dailyCeiling > 0 && !isALAP.has(taskId) && !preRecorded.has(taskId)) {
       const demand = demandOf(task);
       const hardDate = constraint && (constraint.type === 'MSO' || constraint.type === 'MFO');
       if (hardDate) {
-        recordLoad(es, dur, demand);
+        // Hard-date without a date (malformed) — consume where it sits.
+        if (recordLoad(es, dur, demand)) {
+          violations.push({
+            taskId,
+            type: 'resource',
+            message: `Task "${task.name}" exceeds the capacity ceiling on its fixed dates.`,
+          });
+        }
       } else {
-        es = levelStart(es, dur, demand);
+        const leveled = levelStart(es, dur, demand);
+        es = leveled.start;
+        if (leveled.exhausted) {
+          violations.push({
+            taskId,
+            type: 'resource',
+            message: `Task "${task.name}" could not be capacity-leveled within ~10 years — placed overloaded at ${es}. Raise the pace or reduce scope.`,
+          });
+        }
       }
     }
 

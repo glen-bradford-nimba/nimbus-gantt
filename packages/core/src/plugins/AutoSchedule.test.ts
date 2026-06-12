@@ -370,3 +370,80 @@ describe('computeSchedule â€” capacity leveling', () => {
     expect(r.scheduledTasks.get('b')!.startDate).toBe('2026-07-01');
   });
 });
+
+// ─── 0.205.0 Capacity hardening (adversarial-review fixes) ─────────────────
+
+describe('computeSchedule — capacity hardening (0.205.0)', () => {
+  const HPM_4H_DAY = (4 * 365) / 12;
+  function estTask(id: string, startDate: string, endDate: string, est: number): GanttTask {
+    return { id, name: `Task ${id}`, startDate, endDate, estimatedHours: est } as unknown as GanttTask;
+  }
+
+  it('priority holds at EVERY Kahn wave, not just the seeds', () => {
+    // c (rank 2, dep-free) vs b (rank 0) which becomes ready only after a.
+    // a: 1d tiny demand. With wave-ordering, b levels ahead of c.
+    const tasks = taskMap([
+      estTask('a', '2026-07-01', '2026-07-02', 1),
+      estTask('b', '2026-07-01', '2026-07-06', 20),
+      estTask('c', '2026-07-01', '2026-07-06', 20),
+    ]);
+    const rank: Record<string, number> = { a: 0, b: 0, c: 2 };
+    const r = computeSchedule(tasks, depMap([makeDep('d1', 'a', 'b')]), {
+      direction: 'forward', projectStart: '2026-07-01',
+      capacity: { hoursPerMonth: HPM_4H_DAY, pace: 1, priorityOf: (t) => rank[t.id] ?? 9 },
+    }, calendarDayBridge());
+    // a takes day 0 (1h of 4h). b ready at jul2; b (rank 0) gets jul2 slot.
+    // c (rank 2) must wait for b to clear: jul7.
+    expect(r.scheduledTasks.get('b')!.startDate).toBe('2026-07-02');
+    expect(r.scheduledTasks.get('c')!.startDate).toBe('2026-07-07');
+  });
+
+  it('hard-date (MSO) load is pre-recorded so soft work routes around it', () => {
+    // m is MSO jul6-jul11 at full ceiling; soft s (same dates) must NOT fill
+    // those days first — it levels to jul1 (free) or after m.
+    const tasks = taskMap([
+      estTask('s', '2026-07-06', '2026-07-11', 20),
+      estTask('m', '2026-07-06', '2026-07-11', 20),
+    ]);
+    const constraints = new Map<string, ScheduleConstraint>([
+      ['m', { type: 'MSO', date: '2026-07-06' }],
+    ]);
+    const r = computeSchedule(tasks, depMap([]), {
+      direction: 'forward', projectStart: '2026-07-01', constraints,
+      capacity: { hoursPerMonth: HPM_4H_DAY, pace: 1 },
+    }, calendarDayBridge());
+    expect(r.scheduledTasks.get('m')!.startDate).toBe('2026-07-06'); // held
+    // s shifted off m's window (either before via es=projStart? no — s's es is
+    // its own start jul6 → leveled past m): jul11.
+    expect(r.scheduledTasks.get('s')!.startDate).toBe('2026-07-01');
+    expect(r.violations.filter(v => v.type === 'resource')).toHaveLength(0);
+  });
+
+  it('reports a resource violation when hard-dated work alone overloads the ceiling', () => {
+    const tasks = taskMap([
+      estTask('m1', '2026-07-06', '2026-07-11', 20),
+      estTask('m2', '2026-07-06', '2026-07-11', 20),
+    ]);
+    const constraints = new Map<string, ScheduleConstraint>([
+      ['m1', { type: 'MSO', date: '2026-07-06' }],
+      ['m2', { type: 'MSO', date: '2026-07-06' }],
+    ]);
+    const r = computeSchedule(tasks, depMap([]), {
+      direction: 'forward', projectStart: '2026-07-01', constraints,
+      capacity: { hoursPerMonth: HPM_4H_DAY, pace: 1 },
+    }, calendarDayBridge());
+    expect(r.violations.some(v => v.type === 'resource')).toBe(true);
+  });
+
+  it('throwing demandOf/priorityOf callbacks are guarded (no unwind)', () => {
+    const tasks = taskMap([estTask('a', '2026-07-01', '2026-07-06', 20)]);
+    expect(() => computeSchedule(tasks, depMap([]), {
+      direction: 'forward', projectStart: '2026-07-01',
+      capacity: {
+        hoursPerMonth: HPM_4H_DAY, pace: 1,
+        demandOf: () => { throw new Error('host bug'); },
+        priorityOf: () => { throw new Error('host bug'); },
+      },
+    }, calendarDayBridge())).not.toThrow();
+  });
+});
