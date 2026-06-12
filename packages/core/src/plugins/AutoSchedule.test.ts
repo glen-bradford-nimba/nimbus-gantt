@@ -447,3 +447,50 @@ describe('computeSchedule — capacity hardening (0.205.0)', () => {
     }, calendarDayBridge())).not.toThrow();
   });
 });
+
+// ─── 0.206.0 Per-call data overrides (full-board scheduling) ───────────────
+
+describe('AutoSchedulePlugin — data overrides via events', () => {
+  function mockHost(stateTasks: GanttTask[]) {
+    const handlers = new Map<string, (...args: unknown[]) => void>();
+    const dispatched: Action[] = [];
+    const host = {
+      getState: () => ({ tasks: taskMap(stateTasks), dependencies: depMap([]) }),
+      dispatch: (a: Action) => { dispatched.push(a); },
+      on: (e: string, h: (...args: unknown[]) => void) => { handlers.set(e, h); return () => handlers.delete(e); },
+      getConfig: () => ({}),
+    } as unknown as PluginHost;
+    return { host, handlers, dispatched };
+  }
+
+  it('preview schedules the OVERRIDE task set, not engine state', () => {
+    // Engine state holds only "visible"; the override hands the full board.
+    const visible = makeTask('visible', '2026-07-01', '2026-07-03');
+    const hidden = makeTask('hidden', '2026-07-01', '2026-07-03');
+    const { host, handlers } = mockHost([visible]);
+    const plugin = AutoSchedulePlugin({ projectStart: '2026-07-01' });
+    plugin.install!(host);
+
+    let result: { scheduledTasks?: Map<string, unknown> } | null = null;
+    handlers.get('autoSchedule:preview')!(
+      { tasks: [visible, hidden] },
+      (r: { scheduledTasks?: Map<string, unknown> }) => { result = r; },
+    );
+    expect(result).not.toBeNull();
+    expect(result!.scheduledTasks!.has('hidden')).toBe(true);
+    expect(result!.scheduledTasks!.has('visible')).toBe(true);
+  });
+
+  it('preview never dispatches; run dispatches TASK_MOVE only for changed dates', () => {
+    const a = makeTask('a', '2026-07-05', '2026-07-07'); // will pull to projStart
+    const { host, handlers, dispatched } = mockHost([a]);
+    const plugin = AutoSchedulePlugin({ projectStart: '2026-07-01' });
+    plugin.install!(host);
+
+    handlers.get('autoSchedule:preview')!({ tasks: [a] }, () => { /* noop */ });
+    expect(dispatched).toHaveLength(0);
+
+    handlers.get('autoSchedule:run')!({ tasks: [a] });
+    expect(dispatched.some((d) => (d as { type: string }).type === 'TASK_MOVE')).toBe(true);
+  });
+});

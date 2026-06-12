@@ -822,20 +822,59 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
 
   // ── Schedule execution ────────────────────────────────────────────
 
-  function scheduleAll(overrides?: Partial<AutoScheduleOptions>): ScheduleResult {
+  // 0.206.0 — per-call DATA overrides. The engine's state is whatever the
+  // host last fed it — on the IIFE that's the board's FILTERED subset, which
+  // made auto-schedule plan around invisible work (dropped cross-filter
+  // dependencies, missing capacity demand). A caller can now hand the FULL
+  // task/dependency set for one run: emit('autoSchedule:preview',
+  // { tasks, dependencies, capacity }, cb). Arrays or Maps accepted.
+  type DataOverride = {
+    tasks?: GanttTask[] | Map<string, GanttTask>;
+    dependencies?: GanttDependency[] | Map<string, GanttDependency>;
+  };
+  function resolveData(overrides?: Partial<AutoScheduleOptions> & DataOverride): {
+    tasks: Map<string, GanttTask>; dependencies: Map<string, GanttDependency>;
+  } {
     const state = host.getState();
+    let tasks = state.tasks;
+    let dependencies = state.dependencies;
+    if (overrides?.tasks) {
+      tasks = Array.isArray(overrides.tasks)
+        ? new Map(overrides.tasks.map((t) => [t.id, t] as const))
+        : overrides.tasks;
+    }
+    if (overrides?.dependencies) {
+      dependencies = Array.isArray(overrides.dependencies)
+        ? new Map(overrides.dependencies.map((d) => [d.id, d] as const))
+        : overrides.dependencies;
+    }
+    return { tasks, dependencies };
+  }
+  function mergeOpts(overrides?: Partial<AutoScheduleOptions> & DataOverride): AutoScheduleOptions {
+    if (!overrides) return opts;
+    // Strip the data keys — they're not scheduler options.
+    const { tasks: _t, dependencies: _d, ...optOverrides } = overrides;
+    return { ...opts, ...optOverrides };
+  }
+
+  function scheduleAll(overrides?: Partial<AutoScheduleOptions> & DataOverride): ScheduleResult {
+    const data = resolveData(overrides);
     const result = computeSchedule(
-      state.tasks,
-      state.dependencies,
-      overrides ? { ...opts, ...overrides } : opts,
+      data.tasks,
+      data.dependencies,
+      mergeOpts(overrides),
       calendar,
     );
 
     lastResult = result;
 
-    // Apply results — dispatch TASK_MOVE for each task whose dates changed
+    // Apply results — dispatch TASK_MOVE for each task whose dates changed.
+    // Change-compare against the SCHEDULED data set (which may be a per-call
+    // override wider than the engine state); the engine's reducer ignores
+    // TASK_MOVE for ids it doesn't hold, so overridden-but-hidden tasks are
+    // safe to dispatch.
     for (const [taskId, scheduled] of result.scheduledTasks) {
-      const task = state.tasks.get(taskId);
+      const task = data.tasks.get(taskId);
       if (!task) continue;
 
       // Only dispatch if dates actually changed
@@ -855,12 +894,12 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
   // 0.196.1 — compute the schedule WITHOUT applying it. Lets a host present
   // the proposed date changes for review (review-before-DML) and decide
   // whether/when to commit. No TASK_MOVE is dispatched.
-  function previewSchedule(overrides?: Partial<AutoScheduleOptions>): ScheduleResult {
-    const state = host.getState();
+  function previewSchedule(overrides?: Partial<AutoScheduleOptions> & DataOverride): ScheduleResult {
+    const data = resolveData(overrides);
     const result = computeSchedule(
-      state.tasks,
-      state.dependencies,
-      overrides ? { ...opts, ...overrides } : opts,
+      data.tasks,
+      data.dependencies,
+      mergeOpts(overrides),
       calendar,
     );
     lastResult = result;
@@ -872,14 +911,14 @@ export function AutoSchedulePlugin(options?: AutoScheduleOptions): NimbusGanttPl
   // order: emit('autoSchedule:preview', { capacity: {...} }, cb). Legacy
   // callers passing only a callback are untouched.
   function parseEventArgs(args: unknown[]): {
-    overrides?: Partial<AutoScheduleOptions>;
+    overrides?: Partial<AutoScheduleOptions> & DataOverride;
     callback?: (result: ScheduleResult) => void;
   } {
-    let overrides: Partial<AutoScheduleOptions> | undefined;
+    let overrides: (Partial<AutoScheduleOptions> & DataOverride) | undefined;
     let callback: ((result: ScheduleResult) => void) | undefined;
     for (const a of args) {
       if (typeof a === 'function') callback = a as (result: ScheduleResult) => void;
-      else if (a && typeof a === 'object') overrides = a as Partial<AutoScheduleOptions>;
+      else if (a && typeof a === 'object') overrides = a as Partial<AutoScheduleOptions> & DataOverride;
     }
     return { overrides, callback };
   }

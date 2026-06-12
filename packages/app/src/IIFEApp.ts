@@ -2257,14 +2257,33 @@ export class IIFEApp {
       // would throw). Known failure mode: core re-copy lags app re-copy on
       // SF — so feature-detect the core version and fall back to a plain
       // dependency reflow (+ a visible note) on stale cores.
-      const coreSupportsCapacity = ((): boolean => {
+      const coreMinor = ((): number => {
         try {
           const caps = (ganttInst as unknown as { capabilities?: () => Record<string, unknown> }).capabilities?.();
           const v = caps && typeof caps['version'] === 'string' ? (caps['version'] as string) : '0';
           const [maj, min] = v.split('.').map((x) => parseInt(x, 10) || 0);
-          return maj > 0 || min >= 204;
-        } catch (_e) { return false; }
+          return maj > 0 ? 999 : min;
+        } catch (_e) { return 0; }
       })();
+      const coreSupportsCapacity = coreMinor >= 204;
+      // 0.206.0 — data overrides: the preview schedules the FULL board, not
+      // the filtered engine subset (hidden deps + demand were invisible to
+      // the ledger). Older cores silently ignore the data keys and schedule
+      // engine state — so the full-board claim is version-gated and the
+      // filtered-subset warning stays on stale cores.
+      const coreSupportsDataOverride = coreMinor >= 206;
+      // The schedule set: every board item except terminal/inactive work —
+      // completed tasks are history and must never be re-dated; excluding
+      // them also frees their dependents. Bucket pseudo-rows are
+      // presentation, not work.
+      function scheduleData(): Record<string, unknown> | null {
+        if (!coreSupportsDataOverride) return null;
+        const schedulable = allTasks.filter((t) => !t.isInactive && !DONE_STAGES[t.stage || '']);
+        return {
+          tasks: buildTasks(schedulable).filter((t) => !isBucketId(t.id)),
+          dependencies: allDependencies,
+        };
+      }
       // Lane → greedy-order rank: most-committed work levels first, so a
       // capacity squeeze pushes PROPOSED out, not the committed plan.
       const LANE_RANK: Record<string, number> = { 'top-priority': 0, 'active': 0, 'follow-on': 1, 'proposed': 2, 'deferred': 3 };
@@ -2305,13 +2324,19 @@ export class IIFEApp {
         // the whole board regardless of view — is a follow-up; it changes
         // what setData feeds the engine.)
         const cutActive = (state.filter && state.filter !== 'all') || !!state.search || !!state.hideCompleted;
-        if (cutActive) {
+        if (cutActive && !coreSupportsDataOverride) {
           const visN = applyFilter(allTasks, state.filter as 'active', state.search)
             .filter((t) => !state.hideCompleted || !DONE_STAGES[t.stage || '']).length;
           w.appendChild(mk('div', 'ngm-note ngm-warn',
             '⚠ A view filter is active: this preview schedules ONLY the ' + visN + ' visible item'
-            + (visN === 1 ? '' : 's') + ' of ' + allTasks.length + ' on the board. Hidden items’ dependencies and '
-            + 'capacity demand are not considered. Switch the view to Everything for a full-board schedule.'));
+            + (visN === 1 ? '' : 's') + ' of ' + allTasks.length + ' on the board (full-board scheduling needs core '
+            + '0.206+ — re-copy the core bundle). Hidden items’ dependencies and capacity demand are not considered.'));
+        } else if (cutActive) {
+          // 0.206.0 — full-board scheduling: say what's being planned so the
+          // user isn't surprised by staged changes to items the view hides.
+          w.appendChild(mk('div', 'ngm-note',
+            'Schedules the FULL board (' + allTasks.length + ' items, completed work excluded) — including items '
+            + 'hidden by the current view. Changes to hidden items still stage for review.'));
         }
         const row = mk('div');
         row.setAttribute('style', 'display:flex;align-items:center;gap:6px;margin:10px 0;flex-wrap:wrap');
@@ -2370,7 +2395,10 @@ export class IIFEApp {
           }
           renderReview(changes, result.violations ?? []);
         };
-        if (ov) gi!.emit!('autoSchedule:preview', ov, cb);
+        // 0.206.0 — merge in the full-board data override (null on old cores).
+        const data = scheduleData();
+        const merged = (ov || data) ? { ...(ov || {}), ...(data || {}) } : null;
+        if (merged) gi!.emit!('autoSchedule:preview', merged, cb);
         else gi!.emit!('autoSchedule:preview', cb);
       }
       runPreview();
@@ -2459,10 +2487,12 @@ export class IIFEApp {
               changes.forEach((c) => options.onPatch!({ id: c.id, startDate: c.startDate, endDate: c.endDate }));
             } else {
               // Standalone/CN/demo: no host patch handler → apply in-engine.
-              // Pass the same capacity overrides the preview used so the
-              // applied schedule matches the reviewed one exactly.
+              // Pass the same capacity + data overrides the preview used so
+              // the applied schedule matches the reviewed one exactly.
               const ov = capacityOverrides();
-              if (ov) gi!.emit!('autoSchedule:run', ov);
+              const data = scheduleData();
+              const merged = (ov || data) ? { ...(ov || {}), ...(data || {}) } : null;
+              if (merged) gi!.emit!('autoSchedule:run', merged);
               else gi!.emit!('autoSchedule:run');
               // 0.205.0 (B2) — also persist to allTasks: autoSchedule:run
               // TASK_MOVEs the ENGINE only, and the next refreshGantt/
