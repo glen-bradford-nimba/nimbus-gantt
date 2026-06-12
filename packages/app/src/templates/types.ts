@@ -317,6 +317,9 @@ export interface AuditPreviewItem {
   id: string;
   /** Display title — falls back to id if absent. */
   title?: string;
+  /** 0.205.0 — last commit failure for this row (continue-on-error mode).
+   *  When present the preview modal paints a ✗ + this message on the row. */
+  error?: string;
   /** Raw list of fields that differ from baseline (e.g. ["start","end"]). */
   fields: string[];
   /** Human-readable change descriptions (e.g. ["dates → 2026-04-13 → 2026-04-17"]). */
