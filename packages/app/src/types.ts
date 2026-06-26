@@ -1,6 +1,7 @@
 // Type-only import (erased at compile — no runtime cycle) so AppInstance can
 // type setPacingData against the canonical PacingData shape.
 import type { PacingData, PacingParamsChange } from './renderers/pacing';
+import type { AuditSubmitHandler } from './templates/types';
 
 export interface PriorityBucket {
   id: string;
@@ -582,6 +583,14 @@ export interface MountOptions {
    *  for an unchanged count). Most relevant under batchMode, but also fires
    *  on the per-patch flow whenever pendingPatchCount moves. */
   onPendingChange?: (count: number) => void;
+
+  /** 0.207.1 — host's audit commit handler. Called by the AuditPanel Submit
+   *  (and the 0.207.0 dirty pill's route to it) with the optional commit note;
+   *  returns `{ ok, msg, sha? }`. Required for batchMode commits on the IIFE
+   *  surface: without it the vanilla Submit falls back to discarding the
+   *  buffer. DH wires this to getPendingEdits → commitGanttPatches. Mirrors
+   *  TemplateConfig.onAuditSubmit (which NimbusGanttAppReact sets directly). */
+  onAuditSubmit?: AuditSubmitHandler;
 
   /** 0.207.0 — refresh / navigation guard. When true (the default whenever
    *  there are staged edits), the IIFE installs a `beforeunload` handler that
