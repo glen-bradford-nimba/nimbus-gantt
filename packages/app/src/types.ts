@@ -569,6 +569,28 @@ export interface MountOptions {
    *
    *  Default: false — existing per-patch flow (CN v10, DH today) untouched. */
   batchMode?: boolean;
+
+  /** 0.207.0 — fires whenever the staged-edit count changes (an edit is
+   *  buffered, committed, reset, rejected, or subset-skipped). Lets the host
+   *  mirror the "N unsaved changes" count in its own chrome (e.g. a DH
+   *  banner or tab badge) without polling getPendingEdits().
+   *
+   *  `count` is the number of distinct tasks with staged edits. The library
+   *  already surfaces this itself via the Audit-toggle badge + floating
+   *  "Review & commit" pill; this callback is purely additive for hosts that
+   *  want their own indicator. Fires on every change, deduped (no repeat fire
+   *  for an unchanged count). Most relevant under batchMode, but also fires
+   *  on the per-patch flow whenever pendingPatchCount moves. */
+  onPendingChange?: (count: number) => void;
+
+  /** 0.207.0 — refresh / navigation guard. When true (the default whenever
+   *  there are staged edits), the IIFE installs a `beforeunload` handler that
+   *  prompts the browser's "leave site?" dialog while edits are uncommitted,
+   *  so a stray refresh can't silently discard the buffer. Set `false` to opt
+   *  out (e.g. the host owns its own guard, or the surface is read-only).
+   *  Best-effort under Salesforce LWS — registration is wrapped in try/catch
+   *  and simply no-ops if the platform blocks beforeunload. */
+  pendingChangesGuard?: boolean;
 }
 
 /**
