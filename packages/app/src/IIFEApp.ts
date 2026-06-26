@@ -531,6 +531,79 @@ function renderAdvisorPanel(
   panel.appendChild(body);
 }
 
+/**
+ * 0.207.0 — floating "unsaved changes" pill. Always-visible dirty indicator
+ * that does NOT depend on the (collapsed-by-default) Audit panel being open.
+ * Appears bottom-right whenever there are staged edits; click routes the user
+ * to the review + commit surface via `onReview`. Removes itself when clean.
+ *
+ * Rendered inline in renderSlots() so it shares the chrome's destroy/rebuild
+ * cycle and repaints on every dirty-state change (syncPendingChanges →
+ * renderSlots). Self-styled inline — no stylesheet dependency, LWS-safe.
+ */
+function renderDirtyPill(
+  container: HTMLElement,
+  count: number,
+  onReview: () => void,
+): void {
+  const id = 'nga-dirty-pill';
+  let pill = container.querySelector<HTMLElement>(`#${id}`);
+  if (count <= 0) {
+    if (pill) pill.remove();
+    return;
+  }
+  const noun = count === 1 ? 'unsaved change' : 'unsaved changes';
+  if (!pill) {
+    pill = document.createElement('div');
+    pill.id = id;
+    pill.setAttribute('role', 'status');
+    pill.setAttribute('aria-live', 'polite');
+    pill.style.cssText = [
+      'position:absolute',
+      'bottom:18px',
+      'right:18px',
+      'display:flex',
+      'align-items:center',
+      'gap:10px',
+      'background:#7e22ce',
+      'color:#fff',
+      'border-radius:9999px',
+      'padding:8px 8px 8px 14px',
+      'box-shadow:0 10px 28px rgba(126,34,206,0.35)',
+      'z-index:9997',
+      'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif',
+      'font-size:12.5px',
+      'font-weight:600',
+      'user-select:none',
+    ].join(';');
+    container.appendChild(pill);
+  }
+  pill.innerHTML = '';
+
+  const label = document.createElement('span');
+  label.setAttribute('data-testid', 'dirty-pill-label');
+  label.style.cssText = 'display:inline-flex;align-items:center;gap:7px';
+  const dot = document.createElement('span');
+  dot.style.cssText = 'display:inline-block;width:18px;height:18px;border-radius:9999px;background:rgba(255,255,255,0.22);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center';
+  dot.textContent = count > 99 ? '99+' : String(count);
+  label.appendChild(dot);
+  const txt = document.createElement('span');
+  txt.textContent = noun;
+  label.appendChild(txt);
+  pill.appendChild(label);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.setAttribute('data-testid', 'dirty-pill-review');
+  btn.textContent = 'Review & commit';
+  btn.style.cssText = 'background:#fff;color:#7e22ce;border:0;border-radius:9999px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;line-height:1.2;white-space:nowrap';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    try { onReview(); } catch (_e) { /* ok */ }
+  });
+  pill.appendChild(btn);
+}
+
 function renderComingSoon(container: HTMLElement, viewLabel: string): void {
   container.innerHTML = '';
   const wrap = el('div', [
@@ -2668,6 +2741,76 @@ export class IIFEApp {
       // Claude-API infrastructure is scoped.
       renderAdminPanel(container, state, dispatch, tplConfig);
       renderAdvisorPanel(container, state, dispatch);
+
+      // 0.207.0 — floating "unsaved changes" pill. Always-visible dirty signal,
+      // gated on batchMode (the buffering / audit-pass mode), NOT on
+      // features.auditPanel. Critical: DH's embedded surface forces auditPanel
+      // OFF via EMBEDDED_FEATURE_OVERRIDES *and* hides chrome — so the staged
+      // buffer is invisible AND has no commit UI there. Gating on auditPanel
+      // would ship this dark on the exact surface that needs it. batchMode is
+      // on regardless of mode, so the pill shows wherever edits can be staged.
+      //
+      // Click reveals the existing toolbar (toggleChrome restores the
+      // default-on auditPanel) and opens the Audit strip — the real, proven
+      // Submit → preview → commit surface. We reveal existing UI rather than
+      // re-implement commit (which is host-wired via onAuditSubmit).
+      if (options.batchMode) {
+        renderDirtyPill(container, pendingEditCount(), () => {
+          try { tplConfig.toggleChrome?.(true); } catch (_e) { /* ok */ }
+          if (!state.auditPanelOpen) dispatch({ type: 'TOGGLE_AUDIT_PANEL' });
+        });
+      } else {
+        const stale = container.querySelector('#nga-dirty-pill');
+        if (stale) stale.remove();
+      }
+
+      // 0.207.0 — notify the host + refresh the unload guard whenever the
+      // staged-edit count changes. Deduped, so the frequent renderSlots calls
+      // (zoom/scroll/toggle) don't spam the callback.
+      notifyPendingChange();
+    }
+
+    /** 0.207.0 — single source of truth for the staged-edit count, shared by
+     *  the floating pill, the Audit-toggle badge (via tplConfig.pendingChanges)
+     *  and the onPendingChange host callback. In batchMode the buffer is
+     *  authoritative; otherwise fall back to the template's pendingPatchCount. */
+    function pendingEditCount(): number {
+      // Count distinct TASKS with staged edits — matches the audit preview
+      // modal + Audit-toggle badge (both coalesce a task's edit+reorder into
+      // one row). In batchMode tplConfig.pendingChanges is the buffer-mirrored
+      // per-task list; fall back to pendingPatchCount on the per-patch flow.
+      return tplConfig.pendingChanges?.length ?? state.pendingPatchCount ?? 0;
+    }
+
+    // 0.207.0 — dirty-state side effects: host callback + beforeunload guard.
+    let lastPendingCount = -1;
+    let beforeUnloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
+    function notifyPendingChange(): void {
+      const count = pendingEditCount();
+      if (count === lastPendingCount) return;
+      lastPendingCount = count;
+      // (4) host callback — additive; host mirrors the count in its own chrome.
+      try { options.onPendingChange?.(count); } catch (_e) { /* host fault — never break render */ }
+      // (3) refresh/navigation guard. Only meaningful in batchMode (buffered
+      // edits are lost on refresh; per-patch edits already persisted). Default
+      // ON there; opt out via pendingChangesGuard:false. Best-effort under LWS:
+      // Lightning's client-side tab nav won't trigger beforeunload, but a hard
+      // browser refresh (F5) will when the platform allows it.
+      const guardEnabled = !!options.batchMode && options.pendingChangesGuard !== false;
+      try {
+        if (count > 0 && guardEnabled && !beforeUnloadHandler) {
+          beforeUnloadHandler = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            // Legacy browsers require returnValue to be set to trigger the prompt.
+            e.returnValue = '';
+            return '';
+          };
+          window.addEventListener('beforeunload', beforeUnloadHandler);
+        } else if ((count === 0 || !guardEnabled) && beforeUnloadHandler) {
+          window.removeEventListener('beforeunload', beforeUnloadHandler);
+          beforeUnloadHandler = null;
+        }
+      } catch (_e) { /* LWS may block beforeunload — no-op */ }
     }
 
     /* ── Gantt engine mount ─────────────────────────────────────────── */
@@ -3500,6 +3643,11 @@ export class IIFEApp {
       if (ganttInst) { try { (ganttInst as any).destroy(); } catch (_e) { /* ok */ void 0; } }
       slotInstances.forEach((inst) => inst.destroy());
       slotInstances.clear();
+      // 0.207.0 — tear down the dirty-state unload guard.
+      if (beforeUnloadHandler) {
+        try { window.removeEventListener('beforeunload', beforeUnloadHandler); } catch (_e) { /* ok */ }
+        beforeUnloadHandler = null;
+      }
       removeTemplateCss(container);
       try { themeStyleEl.remove(); } catch (_e) { /* ok */ void 0; }
     };

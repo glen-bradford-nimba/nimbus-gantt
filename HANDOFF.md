@@ -1,6 +1,30 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.206.0 full-board auto-schedule (2026-06-12). ⚠ TWO-BUNDLE cut — vendor THIS pair.**
+**📣 Latest cut: 0.207.0 staged-changes dirty indicator (2026-06-26). APP-only.**
+Fixes the "I make changes and nothing tells me they're staged" problem on the
+audit-pass (batchMode) surface — Glen's report. **Root cause (corrected):** the
+only honest "unsaved changes" signal lived inside the Audit strip, which is
+`display:none` until toggled open AND is force-disabled entirely by
+`EMBEDDED_FEATURE_OVERRIDES` on DH's embedded Delivery_Timeline tab (chrome
+hidden + `auditPanel:false`). So on the surface Glen actually drags on, a
+staged buffer was **invisible and had no commit UI at all**. Fix: **(1)** a
+floating bottom-right **"N unsaved changes · Review & commit" pill**, gated on
+`batchMode` (on regardless of mode) — NOT on `auditPanel` — so it shows on
+embedded; clicking it reveals the toolbar (`toggleChrome(true)` restores the
+default-on Audit strip) and opens the real Submit→preview→commit surface.
+**(2)** a count **badge on the Audit toggle** when chrome is visible.
+**(3)** a `beforeunload` refresh guard while edits are staged (best-effort
+under LWS — catches a hard F5 where allowed; Lightning client-side tab nav
+won't trip it). **(4)** new mount option `onPendingChange(count)` so the host
+can mirror the staged count in its own chrome (additive — the pill+badge are
+the real fix, auto-on via bundle re-copy, zero DH changes). Opt out of the
+guard via `pendingChangesGuard:false`. Re-copy app md5
+**`11931023cc41aaa1ec6867f29d8ce702`** (supersedes `0de02235`; cumulative —
+carries 0.206.0). Core unchanged (still `81f6c485`). **194/194**.
+⚠ **Not yet verified live** — built + tested green, but confirm the pill paints
+on the embedded MF surface after the bundle re-copy + one staged drag.
+
+**0.206.0 full-board auto-schedule (2026-06-12). ⚠ TWO-BUNDLE cut — vendor THIS pair.**
 Closes 0.205.0's B1 warning for real: the Auto-Schedule preview/apply now plans
 the **FULL board regardless of the active view filter** — hidden items'
 dependencies + capacity demand are back in the ledger (they were silently

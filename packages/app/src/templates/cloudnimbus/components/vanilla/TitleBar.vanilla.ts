@@ -217,7 +217,20 @@ export function TitleBarVanilla(initial: SlotProps): VanillaSlotInstance {
     rowMain.appendChild(toggleBtn('Sidebar', state.sidebarOpen, () => dispatch({ type: 'TOGGLE_SIDEBAR' })));
     rowMain.appendChild(toggleBtn('Stats',   state.statsOpen,   () => dispatch({ type: 'TOGGLE_STATS' })));
     if (config.features.auditPanel) {
-      rowMain.appendChild(toggleBtn('Audit',  state.auditPanelOpen, () => dispatch({ type: 'TOGGLE_AUDIT_PANEL' })));
+      const auditBtn = toggleBtn('Audit', state.auditPanelOpen, () => dispatch({ type: 'TOGGLE_AUDIT_PANEL' }));
+      // 0.207.0 — staged-change count badge. Always visible on the toggle (no
+      // need to open the panel to learn you have uncommitted edits). Source is
+      // the buffer-mirrored pendingChanges in batchMode, else pendingPatchCount.
+      const pendingCount = config.pendingChanges?.length ?? state.pendingPatchCount ?? 0;
+      if (pendingCount > 0) {
+        auditBtn.style.position = 'relative';
+        const badge = el('span');
+        badge.setAttribute('data-testid', 'audit-badge');
+        badge.textContent = pendingCount > 99 ? '99+' : String(pendingCount);
+        badge.style.cssText = 'margin-left:6px;display:inline-block;min-width:16px;height:16px;padding:0 4px;border-radius:9999px;background:#7e22ce;color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;vertical-align:middle';
+        auditBtn.appendChild(badge);
+      }
+      rowMain.appendChild(auditBtn);
     }
     if (config.features.hrsWkStrip) {
       rowMain.appendChild(toggleBtn('Hrs/Wk', state.hrsWkStripOpen, () => dispatch({ type: 'TOGGLE_HRSWK_STRIP' })));
