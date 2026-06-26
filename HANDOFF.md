@@ -1,28 +1,39 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.207.0 staged-changes dirty indicator (2026-06-26). APP-only.**
-Fixes the "I make changes and nothing tells me they're staged" problem on the
-audit-pass (batchMode) surface — Glen's report. **Root cause (corrected):** the
-only honest "unsaved changes" signal lived inside the Audit strip, which is
-`display:none` until toggled open AND is force-disabled entirely by
-`EMBEDDED_FEATURE_OVERRIDES` on DH's embedded Delivery_Timeline tab (chrome
-hidden + `auditPanel:false`). So on the surface Glen actually drags on, a
-staged buffer was **invisible and had no commit UI at all**. Fix: **(1)** a
-floating bottom-right **"N unsaved changes · Review & commit" pill**, gated on
-`batchMode` (on regardless of mode) — NOT on `auditPanel` — so it shows on
-embedded; clicking it reveals the toolbar (`toggleChrome(true)` restores the
-default-on Audit strip) and opens the real Submit→preview→commit surface.
-**(2)** a count **badge on the Audit toggle** when chrome is visible.
-**(3)** a `beforeunload` refresh guard while edits are staged (best-effort
-under LWS — catches a hard F5 where allowed; Lightning client-side tab nav
-won't trip it). **(4)** new mount option `onPendingChange(count)` so the host
-can mirror the staged count in its own chrome (additive — the pill+badge are
-the real fix, auto-on via bundle re-copy, zero DH changes). Opt out of the
-guard via `pendingChangesGuard:false`. Re-copy app md5
-**`11931023cc41aaa1ec6867f29d8ce702`** (supersedes `0de02235`; cumulative —
-carries 0.206.0). Core unchanged (still `81f6c485`). **194/194**.
-⚠ **Not yet verified live** — built + tested green, but confirm the pill paints
-on the embedded MF surface after the bundle re-copy + one staged drag.
+**📣 Latest cut: 0.207.1 staged-changes visibility + Submit-commit wire fix (2026-06-26). APP-only.**
+Two findings behind Glen's "I drag and nothing tells me / it doesn't stick" report.
+
+**(A) The real "doesn't stick" bug — vanilla Submit was discarding (0.207.1).**
+`IIFEApp.mount` never piped `options.onAuditSubmit` onto `tplConfig` (only
+`NimbusGanttAppReact` did). So on the IIFE surface DH uses, the AuditPanel
+Submit hit its `else` branch and dispatched `RESET_PATCHES` — **discarding the
+staged buffer instead of committing it.** DH has no host Submit button; it
+relies on "the existing nimbus-gantt Submit → onAuditSubmit → commitGanttPatches"
+(deliveryProFormaTimeline comments 481/569), so drag-buffer commits never fired
+— only right-click immediate-DML persisted. That's the "some changes stick,
+some don't" split. Fix: pipe `options.onAuditSubmit → tplConfig.onAuditSubmit`
+(+ declare it on `MountOptions`). Nothing else invokes it, so no double-commit.
+⚠ **Confirm live** (drag → Submit → **refresh → still there**) — this is the
+one that matters; memory says 0.185.34 walked "end-to-end," so a parallel path
+may have masked it. Surfaced to DH for the round-trip test.
+
+**(B) Visibility — dirty pill + badge + guard + callback (0.207.0).** The only
+"unsaved changes" signal lived in the Audit strip, which is `display:none`
+until toggled AND force-disabled by `EMBEDDED_FEATURE_OVERRIDES` on DH's
+embedded tab (chrome hidden + `auditPanel:false`) — so the buffer was invisible
+with no commit UI there. **(1)** floating **"N unsaved changes · Review &
+commit" pill**, gated on `batchMode` (NOT `auditPanel`, which is the trap), so
+it shows on embedded; click reveals the toolbar (`toggleChrome(true)`) + opens
+the now-committing Submit surface. **(2)** count **badge on the Audit toggle**
+when chrome visible. **(3)** `beforeunload` refresh guard while staged
+(best-effort LWS — hard F5 where allowed; Lightning tab-nav won't trip it; opt
+out `pendingChangesGuard:false`). **(4)** mount option `onPendingChange(count)`
+for the host to mirror the count in its own chrome (additive).
+
+Re-copy app md5 **`ac49351339dd10d1b86a04039c627b9a`** (supersedes `0de02235`;
+cumulative — carries 0.206.0 + 0.207.0). Core unchanged (still `81f6c485`).
+**194/194.** Pill-click reveals the FULL toolbar (same as "Show toolbar"), not
+just a commit control — expected, but a heads-up for mid-demo.
 
 **0.206.0 full-board auto-schedule (2026-06-12). ⚠ TWO-BUNDLE cut — vendor THIS pair.**
 Closes 0.205.0's B1 warning for real: the Auto-Schedule preview/apply now plans

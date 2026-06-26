@@ -762,6 +762,17 @@ export class IIFEApp {
     if (options.cssUrl) tplConfig.stylesheet = { ...tplConfig.stylesheet, url: options.cssUrl };
     if (options.engine) tplConfig.engine = options.engine;
     if (options.recordUrlTemplate) tplConfig.recordUrlTemplate = options.recordUrlTemplate;
+    // 0.207.1 — pipe the host's audit commit handler through to tplConfig so
+    // the VANILLA AuditPanel Submit actually commits. Without this, the IIFE
+    // path left tplConfig.onAuditSubmit undefined (only NimbusGanttAppReact
+    // wired it), so AuditPanel.vanilla's Submit took its `else` branch and
+    // dispatched RESET_PATCHES — DISCARDING the staged buffer instead of
+    // committing it. DH wires onAuditSubmit (→ getPendingEdits →
+    // commitGanttPatches) and has no host Submit button, so the vanilla Submit
+    // is the only commit trigger on that surface. Nothing else invokes
+    // onAuditSubmit, so this can't double-commit. The 0.207.0 dirty pill routes
+    // the user to this Submit — it must commit, not discard.
+    if (options.onAuditSubmit) tplConfig.onAuditSubmit = options.onAuditSubmit;
     // 0.185.15 — pipe fieldSchema mount option through to tplConfig so
     // DetailPanel (vanilla + React) can read it via slot props.
     if (options.fieldSchema) tplConfig.fieldSchema = options.fieldSchema;
