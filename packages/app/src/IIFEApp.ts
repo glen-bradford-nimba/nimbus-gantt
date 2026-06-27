@@ -17,6 +17,7 @@
 import type {
   NormalizedTask, AppInstance, MountOptions, TaskPatch, NimbusGanttEngine,
   PendingEdit, CommitEditsResult, CommitEditsOptions, CommitOutcome, GanttDependency, AutoScheduleChange,
+  PendingPillPosition,
 } from './types';
 import type {
   TemplateOverrides, TemplateConfig, AppState, AppEvent, SlotProps, SlotData, PatchLogEntry,
@@ -546,6 +547,7 @@ function renderDirtyPill(
   container: HTMLElement,
   count: number,
   onReview: () => void,
+  pos: PendingPillPosition,
 ): void {
   const id = 'nga-dirty-pill';
   let pill = container.querySelector<HTMLElement>(`#${id}`);
@@ -559,10 +561,8 @@ function renderDirtyPill(
     pill.id = id;
     pill.setAttribute('role', 'status');
     pill.setAttribute('aria-live', 'polite');
+    // Static (non-positional) styling — set once on creation.
     pill.style.cssText = [
-      'position:absolute',
-      'bottom:18px',
-      'right:18px',
       'display:flex',
       'align-items:center',
       'gap:10px',
@@ -579,6 +579,16 @@ function renderDirtyPill(
     ].join(';');
     container.appendChild(pill);
   }
+  // Positional styling — (re)applied every render so a live
+  // setPendingPillPosition() / config override takes effect immediately.
+  // Default (absolute + bottom-right + 18/18) reproduces the original exactly.
+  pill.style.position = pos.fixed ? 'fixed' : 'absolute';
+  const vert = pos.corner.startsWith('top') ? 'top' : 'bottom';
+  const horiz = pos.corner.endsWith('left') ? 'left' : 'right';
+  pill.style.top = vert === 'top' ? pos.offsetY + 'px' : '';
+  pill.style.bottom = vert === 'bottom' ? pos.offsetY + 'px' : '';
+  pill.style.left = horiz === 'left' ? pos.offsetX + 'px' : '';
+  pill.style.right = horiz === 'right' ? pos.offsetX + 'px' : '';
   pill.innerHTML = '';
 
   const label = document.createElement('span');
@@ -2815,7 +2825,7 @@ export class IIFEApp {
               : undefined,
             tplConfig.onSkipPendingChanges,
           );
-        });
+        }, pillPos);
       } else {
         const stale = container.querySelector('#nga-dirty-pill');
         if (stale) stale.remove();
@@ -2842,6 +2852,15 @@ export class IIFEApp {
     // 0.207.0 — dirty-state side effects: host callback + beforeunload guard.
     let lastPendingCount = -1;
     let beforeUnloadHandler: ((e: BeforeUnloadEvent) => void) | null = null;
+    // 0.210.0 — pill position. Defaults reproduce the original placement exactly
+    // (absolute, bottom-right, 18px). Overridable via options.pendingPill and
+    // live via handle.setPendingPillPosition(...).
+    const pillPos: PendingPillPosition = {
+      corner: options.pendingPill?.corner ?? 'bottom-right',
+      offsetX: options.pendingPill?.offsetX ?? 18,
+      offsetY: options.pendingPill?.offsetY ?? 18,
+      fixed: options.pendingPill?.fixed ?? false,
+    };
     function notifyPendingChange(): void {
       const count = pendingEditCount();
       if (count === lastPendingCount) return;
@@ -3723,6 +3742,18 @@ export class IIFEApp {
        *  setData when it's absent; exposing it keeps auto-schedule (and any
        *  host-driven edit) inside the review-&-commit gate. */
       dispatch(action: AppEvent): void { dispatch(action); },
+      /** 0.210.0 — move the "unsaved changes" pill at runtime (no re-deploy).
+       *  Partial — only the fields you pass change. e.g.
+       *  `handle.setPendingPillPosition({ corner:'top-right', offsetY:100, fixed:true })`.
+       *  Returns the resolved position. Handy for dialing in placement live. */
+      setPendingPillPosition(p: Partial<PendingPillPosition>): PendingPillPosition {
+        if (p.corner !== undefined) pillPos.corner = p.corner;
+        if (p.offsetX !== undefined) pillPos.offsetX = p.offsetX;
+        if (p.offsetY !== undefined) pillPos.offsetY = p.offsetY;
+        if (p.fixed !== undefined) pillPos.fixed = p.fixed;
+        renderSlots();
+        return { ...pillPos };
+      },
       // 0.199.0 — Saved Views programmatic API. Hosts can read/seed/drive the
       // saved-view list and default without touching the UI (e.g. provision a
       // "Client forecast" view per org, or set which view opens on load).

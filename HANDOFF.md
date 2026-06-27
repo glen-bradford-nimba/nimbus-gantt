@@ -1,6 +1,22 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.209.0 pill-commit works on embedded + buffer clears on commit (2026-06-27). APP-only. ✅ HEADLESS-VERIFIED.**
+**📣 Latest cut: 0.210.0 configurable "Review & commit" pill position (2026-06-27). APP-only. ✅ HEADLESS-VERIFIED.**
+Glen's ask: the pill is important to click but on a tall board it sat below the fold (you had to scroll to the bottom to
+reach it). Keep the default exactly as-is, but add knobs. New mount option **`pendingPill?: { corner, offsetX, offsetY,
+fixed }`** — all optional; omitting it reproduces the original placement byte-for-byte (absolute, bottom-right, 18px).
+- `corner`: `'bottom-right'|'bottom-left'|'top-right'|'top-left'` (default bottom-right).
+- `offsetX`/`offsetY`: px insets (default 18) — e.g. bottom-right + `offsetY:118` lifts it ~100px off the bottom.
+- `fixed`: `true` → `position:fixed` (anchored to the viewport, never needs scrolling-to) vs the default `absolute`
+  (anchored to the container, which on a tall board is below the fold). **Recommended `true` for the scrolling surface.**
+  Proven safe under LWS — the audit preview modal already uses fixed on Salesforce.
+Also live-tweakable without redeploy: **`handle.setPendingPillPosition({ corner, offsetX, offsetY, fixed })`** (partial;
+returns resolved pos) — dial in placement from the console, then bake the winner into the mount option.
+Re-copy app md5 **`32e97b372969cfc2caf19d9b08ad709c`** (supersedes `4818166a`; cumulative). Core unchanged.
+**198/198** + **8/8 harness** (incl. "default unchanged" + "override applies live").
+Suggested for the embedded MF surface: `pendingPill: { fixed: true }` (or `{ fixed:true, corner:'top-right' }` if it
+fights the bottom popover) — fixes the "had to scroll to reach it" first-pass complaint.
+
+**0.209.0 pill-commit works on embedded + buffer clears on commit (2026-06-27). APP-only. ✅ HEADLESS-VERIFIED.**
 Fixes DH's live MF-Prod finding: drag → "Review & commit" pill appears, but **clicking it did nothing** on the embedded
 Delivery_Timeline tab, so commits were unreachable. Three root causes, all now reproduced + fixed in a real headless
 browser (not by reasoning — see `packages/app/dev/`):
