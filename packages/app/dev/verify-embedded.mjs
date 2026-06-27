@@ -35,10 +35,36 @@ check('pill appears after staging an edit', !!pill);
 const reviewBtn = await page.$('[data-testid="dirty-pill-review"]');
 check('pill has a "Review & commit" button', !!reviewBtn);
 
+// 1b. Default position must be UNCHANGED from the original (absolute,
+//     bottom-right, 18px) — Glen: "stay where and how it is" by default.
+const defPos = await page.evaluate(() => {
+  const el = document.querySelector('#nga-dirty-pill');
+  const s = el && getComputedStyle(el);
+  return s ? { position: s.position, right: s.right, bottom: s.bottom } : null;
+});
+check('default pill position unchanged (absolute, bottom-right, 18px)',
+  !!defPos && defPos.position === 'absolute' && defPos.right === '18px' && defPos.bottom === '18px');
+
+// 1c. setPendingPillPosition override must take effect live (top-right, fixed,
+//     offsets) — the configurable optionality Glen asked for.
+const ovPos = await page.evaluate(() => {
+  window.__handle.setPendingPillPosition({ corner: 'top-right', offsetX: 100, offsetY: 120, fixed: true });
+  const el = document.querySelector('#nga-dirty-pill');
+  const s = el && getComputedStyle(el);
+  return s ? { position: s.position, top: s.top, right: s.right } : null;
+});
+check('setPendingPillPosition moves pill live (fixed, top-right, offsets)',
+  !!ovPos && ovPos.position === 'fixed' && ovPos.top === '120px' && ovPos.right === '100px');
+// restore default placement for the rest of the run
+await page.evaluate(() => window.__handle.setPendingPillPosition({ corner: 'bottom-right', offsetX: 18, offsetY: 18, fixed: false }));
+
 // 2. Click the pill → a review/commit surface must open. THIS is the bug:
 //    on the current bundle toggleChrome() is a no-op in embedded mode, so
 //    nothing opens. After the fix the audit preview modal opens directly.
-if (reviewBtn) await reviewBtn.click();
+// re-query: setPendingPillPosition above rebuilt the pill, detaching the old handle.
+await page.waitForTimeout(250);
+const reviewBtnLive = await page.$('[data-testid="dirty-pill-review"]');
+if (reviewBtnLive) await reviewBtnLive.click({ force: true });
 const modal = await page.waitForSelector('#ng-audit-preview-modal', { timeout: 3000 }).catch(() => null);
 check('clicking the pill opens the review/commit surface', !!modal);
 

@@ -600,6 +600,38 @@ export interface MountOptions {
    *  Best-effort under Salesforce LWS — registration is wrapped in try/catch
    *  and simply no-ops if the platform blocks beforeunload. */
   pendingChangesGuard?: boolean;
+
+  /** 0.210.0 — position of the floating "N unsaved changes · Review & commit"
+   *  pill. ALL fields optional; the defaults reproduce the original placement
+   *  exactly (absolute, bottom-right, 18px insets) so omitting this changes
+   *  nothing. Override to move it where it's easier to reach.
+   *
+   *  - `corner`  — which corner to anchor to. Default `'bottom-right'`.
+   *  - `offsetX` — px inset from the left/right edge. Default 18.
+   *  - `offsetY` — px inset from the top/bottom edge. Default 18. (Use this for
+   *                Glen's "100px higher" — e.g. bottom-right + offsetY:118.)
+   *  - `fixed`   — when true, `position:fixed` (anchored to the viewport, so it
+   *                stays put and never needs scrolling-to) instead of `absolute`
+   *                (anchored to the gantt container, which on a tall board sits
+   *                below the fold). Default false (original behaviour). Recommended
+   *                `true` on scrolling surfaces. Proven safe under LWS — the audit
+   *                preview modal already uses position:fixed on Salesforce.
+   *
+   *  Tweakable live (without re-deploy) via `handle.setPendingPillPosition(...)`. */
+  pendingPill?: {
+    corner?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+    offsetX?: number;
+    offsetY?: number;
+    fixed?: boolean;
+  };
+}
+
+/** 0.210.0 — resolved pill-position (all fields required); see MountOptions.pendingPill. */
+export interface PendingPillPosition {
+  corner: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
+  offsetX: number;
+  offsetY: number;
+  fixed: boolean;
 }
 
 /**
