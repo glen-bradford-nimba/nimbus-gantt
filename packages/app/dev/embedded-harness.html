@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<!--
+  embedded-harness.html — local reproduction of DH's embedded Delivery_Timeline
+  mount (mode:'embedded' + batchMode:true), with NO Salesforce / LWS needed.
+
+  Why this exists: the audit-pass commit path (drag → stage → "Review & commit"
+  pill → onAuditSubmit) only runs under mode:'embedded' + batchMode:true, which
+  DH ships on the timeline tab. That combo is plain feature-flag/state logic and
+  reproduces in any browser against the built IIFE bundle. Three prod bugs
+  (pill gated dark, Submit discarded, pill-click dead) all slipped because this
+  path was only ever reasoned about, never executed locally. Open this file in a
+  browser (or drive it with dev/verify-embedded.mjs) to exercise it in seconds
+  instead of the promote → install → click cycle.
+
+  Buttons below stage edits the same way a drag does (dispatch PATCH), so you
+  can watch the pill appear, click "Review & commit", and confirm the modal +
+  the spy onAuditSubmit fire. The on-page log records every onAuditSubmit call
+  and the live pending count.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>NG embedded + batchMode harness</title>
+  <style>
+    body { font: 13px/1.5 system-ui, sans-serif; margin: 0; }
+    #bar { padding: 8px 12px; background: #0f172a; color: #fff; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #bar button { font: 12px system-ui; padding: 4px 10px; cursor: pointer; }
+    #gantt { position: relative; height: 70vh; border-bottom: 1px solid #e2e8f0; }
+    #log { padding: 8px 12px; font-family: ui-monospace, monospace; font-size: 11.5px; white-space: pre-wrap; max-height: 22vh; overflow: auto; background: #f8fafc; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <strong>embedded + batchMode</strong>
+    <button id="stage">Stage a date edit (= drag)</button>
+    <button id="stage2">Stage a 2nd edit</button>
+    <button id="count">Log pending count</button>
+    <span id="status"></span>
+  </div>
+  <div id="gantt"></div>
+  <div id="log"></div>
+
+  <script src="../dist/nimbus-gantt-app.iife.js"></script>
+  <script>
+    const logEl = document.getElementById('log');
+    const log = (m) => { logEl.textContent += m + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+    window.__auditSubmitCalls = [];
+
+    const tasks = [
+      { id: 't1', name: 'Design spec',   startDate: '2026-06-01', endDate: '2026-06-08', priorityGroup: 'NOW',  progress: 0.4 },
+      { id: 't2', name: 'Build feature', startDate: '2026-06-09', endDate: '2026-06-20', priorityGroup: 'NOW',  progress: 0.1 },
+      { id: 't3', name: 'QA pass',       startDate: '2026-06-21', endDate: '2026-06-28', priorityGroup: 'NEXT', progress: 0 },
+    ];
+
+    const handle = window.NimbusGanttApp.mount(document.getElementById('gantt'), {
+      mode: 'embedded',
+      batchMode: true,
+      tasks,
+      enableDragReparent: true,
+      enableDragBarToReprioritize: true,
+      onPendingChange: (n) => log('onPendingChange(' + n + ')'),
+      onAuditSubmit: async (note) => {
+        window.__auditSubmitCalls.push(note ?? '');
+        log('>>> onAuditSubmit FIRED note=' + JSON.stringify(note ?? ''));
+        // mimic DH: succeed. DH would then refetch via setData.
+        return { ok: true, msg: 'committed (harness spy)' };
+      },
+    });
+    window.__handle = handle;
+    document.getElementById('status').textContent = 'mounted';
+    log('mounted embedded+batchMode');
+
+    let n = 0;
+    function stage(id, newStart, newEnd) {
+      handle.dispatch({ type: 'PATCH', patch: { id, startDate: newStart, endDate: newEnd } });
+      log('staged PATCH ' + id + ' ' + newStart + '..' + newEnd);
+    }
+    document.getElementById('stage').onclick  = () => stage('t1', '2026-06-03', '2026-06-10');
+    document.getElementById('stage2').onclick = () => stage('t2', '2026-06-11', '2026-06-22');
+    document.getElementById('count').onclick  = () => {
+      const pe = (handle.getPendingEdits && handle.getPendingEdits()) || [];
+      log('getPendingEdits().length = ' + pe.length);
+    };
+  </script>
+</body>
+</html>

@@ -1,6 +1,33 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.208.0 PriorityGroupingPlugin per-bucket `startCollapsed` (2026-06-27). CORE-only.**
+**📣 Latest cut: 0.209.0 pill-commit works on embedded + buffer clears on commit (2026-06-27). APP-only. ✅ HEADLESS-VERIFIED.**
+Fixes DH's live MF-Prod finding: drag → "Review & commit" pill appears, but **clicking it did nothing** on the embedded
+Delivery_Timeline tab, so commits were unreachable. Three root causes, all now reproduced + fixed in a real headless
+browser (not by reasoning — see `packages/app/dev/`):
+- **(1) Pill click was dead on embedded.** It called `toggleChrome(true)` to reveal the audit panel, but
+  `EMBEDDED_FEATURE_OVERRIDES` bakes `auditPanel:false` into `ORIGINAL_FEATURES` at resolve time (IIFEApp 744-748/1291),
+  so `toggleChrome` can NEVER bring the panel back — click = no-op. Fix: the pill now opens the audit preview modal
+  **directly** (chrome-independent) — same review list + per-row reject/skip + Confirm→`onAuditSubmit`.
+- **(2) Buffer never cleared after commit.** DH's `onAuditSubmit` refetches via `handle.setData()`, which does NOT clear
+  `pendingBuffer`/`dirtyTaskIds` (only `commitEdits`/`discardEdits` do; DH calls neither). The dirty signal lingered
+  post-commit. Fix: NG now WRAPS the piped `onAuditSubmit` — on success it drops the buffer (no revert; edits are real)
+  + `RESET_PATCHES` + repaint.
+- **(3) `handle.dispatch` was missing.** DH's `autoScheduleDispatcher` calls `handle.dispatch` first and silently falls
+  back to a buffer-BYPASSING `setData` when absent (DH WARN, line 550) — so auto-schedule applies escaped the audit
+  gate. Fix: `handle.dispatch(action)` now exposed; PATCHes route through the same staging path as drags.
+
+**New verification harness** (Glen's cycle-time ask): `packages/app/dev/embedded-harness.html` mounts the built bundle
+in `mode:'embedded'`+`batchMode:true` with NO Salesforce — open in a browser to exercise the audit-pass commit path in
+seconds. `node packages/app/dev/verify-embedded.mjs` drives it headlessly (Playwright) → **6/6 PASS**. This path is plain
+state logic, NOT LWS-specific; it would have caught all of 0.207.x's bugs pre-merge.
+
+Re-copy app md5 **`4818166a9443a5b05ad4520854122176`** (supersedes `0de02235`; cumulative — carries 0.206.0 + 0.207.x).
+Core unchanged by THIS cut (still the 0.208.0 core below). **198/198** + **6/6 harness**.
+⚠ Still owed: **DH-side rework** (see `docs/dispatches/dispatch-DH-NG-gate-everything-0627.md`) — `onAuditSubmit` reads
+`getPendingEdits()` (all rows, ignores per-row skip), and not all timeline edits (right-click priority, detail-panel
+field edits) route through the buffer. "Gate EVERYTHING behind review & commit" is a joint NG+DH design item, not in this cut.
+
+**0.208.0 PriorityGroupingPlugin per-bucket `startCollapsed` (2026-06-27). CORE-only.**
 `startCollapsed` now accepts `string[]` (bucket ids to collapse on load) on top of
 the existing `boolean` (all/none). Back-compatible — `true`/`false`/omitted are
 unchanged. Lets a host open the board with just the staging lanes collapsed (e.g.

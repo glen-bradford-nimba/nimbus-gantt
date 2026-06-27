@@ -158,7 +158,7 @@ export function AuditPanelVanilla(initial: SlotProps): VanillaSlotInstance {
   };
 }
 
-function openPreviewModal(
+export function openPreviewModal(
   items: { id: string; title?: string; error?: string; fields: string[]; descs: string[] }[],
   onConfirm: () => void | Promise<void>,
   /** 0.190 \u2014 per-row \u2717 rejector. Returns the post-reject items list so

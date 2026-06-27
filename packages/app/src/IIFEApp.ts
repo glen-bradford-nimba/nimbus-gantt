@@ -29,6 +29,7 @@ import {
 import { startDepthShading } from './depthShading';
 import { startDragReparent } from './dragReparent';
 import { renderAuditListView } from './templates/cloudnimbus/components/vanilla/AuditListView.vanilla';
+import { openPreviewModal } from './templates/cloudnimbus/components/vanilla/AuditPanel.vanilla';
 import { renderTreemap } from './renderers/treemap';
 import { renderBubble } from './renderers/bubble';
 import { renderPacingView, getPacingPrefs, setPacingPrefs } from './renderers/pacing';
@@ -769,10 +770,33 @@ export class IIFEApp {
     // dispatched RESET_PATCHES — DISCARDING the staged buffer instead of
     // committing it. DH wires onAuditSubmit (→ getPendingEdits →
     // commitGanttPatches) and has no host Submit button, so the vanilla Submit
-    // is the only commit trigger on that surface. Nothing else invokes
-    // onAuditSubmit, so this can't double-commit. The 0.207.0 dirty pill routes
-    // the user to this Submit — it must commit, not discard.
-    if (options.onAuditSubmit) tplConfig.onAuditSubmit = options.onAuditSubmit;
+    // (and the 0.207.0 pill) is the only commit trigger on that surface.
+    //
+    // 0.208.0 — WRAP it so a successful commit also clears the local buffer.
+    // DH's onAuditSubmit refetches via handle.setData(), which does NOT clear
+    // pendingBuffer/dirtyTaskIds (only commitEdits/discardEdits do, and DH
+    // calls neither). Without this, the staged edits are persisted but the
+    // dirty signal (pill/badge/dim bars) lingers forever. On success we drop
+    // the optimistic buffer WITHOUT reverting (the edits are real now; the
+    // host's refetch supplies authoritative state). Note: onAuditSubmit's
+    // contract is "commit the whole pending set", so clear-all is correct;
+    // hosts wanting a subset commit use handle.commitEdits({only}) instead.
+    if (options.onAuditSubmit) {
+      const hostAuditSubmit = options.onAuditSubmit;
+      tplConfig.onAuditSubmit = async (note: string) => {
+        const res = await hostAuditSubmit(note);
+        if (res?.ok) {
+          if (options.batchMode) {
+            pendingBuffer.clear();
+            dirtyTaskIds.clear();
+            skippedCommitTaskIds = new Set();
+          }
+          dispatch({ type: 'RESET_PATCHES' });
+          syncPendingChanges();
+        }
+        return res;
+      };
+    }
     // 0.185.15 — pipe fieldSchema mount option through to tplConfig so
     // DetailPanel (vanilla + React) can read it via slot props.
     if (options.fieldSchema) tplConfig.fieldSchema = options.fieldSchema;
@@ -2767,8 +2791,30 @@ export class IIFEApp {
       // re-implement commit (which is host-wired via onAuditSubmit).
       if (options.batchMode) {
         renderDirtyPill(container, pendingEditCount(), () => {
-          try { tplConfig.toggleChrome?.(true); } catch (_e) { /* ok */ }
-          if (!state.auditPanelOpen) dispatch({ type: 'TOGGLE_AUDIT_PANEL' });
+          // 0.208.0 — open the review/commit surface DIRECTLY. The earlier
+          // approach (toggleChrome(true) + open audit panel) is a no-op on the
+          // embedded surface: EMBEDDED_FEATURE_OVERRIDES bakes auditPanel:false
+          // into ORIGINAL_FEATURES at resolve time, so toggleChrome can never
+          // bring the panel back — the click did nothing (DH's live report).
+          // openPreviewModal is chrome-independent: same review list + per-row
+          // reject/skip + Confirm→onAuditSubmit the AuditPanel Submit drives.
+          const items = tplConfig.pendingChanges ?? [];
+          if (!items.length) return;
+          openPreviewModal(
+            items,
+            async () => {
+              if (tplConfig.onAuditSubmit) {
+                // wrapped above: clears buffer + RESET_PATCHES on success.
+                await tplConfig.onAuditSubmit('');
+              } else {
+                dispatch({ type: 'RESET_PATCHES' });
+              }
+            },
+            tplConfig.onRejectPendingChange
+              ? (taskId: string) => { tplConfig.onRejectPendingChange?.(taskId); return tplConfig.pendingChanges ?? []; }
+              : undefined,
+            tplConfig.onSkipPendingChanges,
+          );
         });
       } else {
         const stale = container.querySelector('#nga-dirty-pill');
@@ -3669,6 +3715,14 @@ export class IIFEApp {
        *  instance for additional plugin installs / direct core API calls. */
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       get gantt(): any { return ganttInst; },
+      /** 0.208.0 — public store dispatch. Hosts push app actions (notably
+       *  `{type:'PATCH', patch:{id,...}}`) that route through the SAME path as
+       *  a drag — so in batchMode they STAGE into the audit buffer rather than
+       *  committing immediately. DH's autoScheduleDispatcher already calls
+       *  `handle.dispatch` first and only falls back to a buffer-BYPASSING
+       *  setData when it's absent; exposing it keeps auto-schedule (and any
+       *  host-driven edit) inside the review-&-commit gate. */
+      dispatch(action: AppEvent): void { dispatch(action); },
       // 0.199.0 — Saved Views programmatic API. Hosts can read/seed/drive the
       // saved-view list and default without touching the UI (e.g. provision a
       // "Client forecast" view per org, or set which view opens on load).
