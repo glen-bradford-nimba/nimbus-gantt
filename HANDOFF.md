@@ -1,6 +1,17 @@
 # nimbus-gantt — HANDOFF
 
-**📣 Latest cut: 0.207.1 staged-changes visibility + Submit-commit wire fix (2026-06-26). APP-only.**
+**📣 Latest cut: 0.208.0 PriorityGroupingPlugin per-bucket `startCollapsed` (2026-06-27). CORE-only.**
+`startCollapsed` now accepts `string[]` (bucket ids to collapse on load) on top of
+the existing `boolean` (all/none). Back-compatible — `true`/`false`/omitted are
+unchanged. Lets a host open the board with just the staging lanes collapsed (e.g.
+PROPOSED + HOLD) while NOW/NEXT/PLANNED stay expanded, instead of all-or-nothing.
+cloudnimbusllc.com v5/v7/v8 wire `startCollapsed: ['deferred','proposed']`. Core
+version → **0.208.0** (supersedes 0.206.0; 0.207.x was app-only). **+4 tests**
+(`PriorityGroupingPlugin.test.ts` — first coverage for this plugin), **173/173**
+core. App bundle unchanged; no app re-copy needed. CN consumes via the vendored
+`src/lib/nimbus-gantt/` source (mirrored), not the IIFE.
+
+**📣 0.207.1 staged-changes visibility + Submit-commit wire fix (2026-06-26). APP-only.**
 Two findings behind Glen's "I drag and nothing tells me / it doesn't stick" report.
 
 **(A) The real "doesn't stick" bug — vanilla Submit was discarding (0.207.1).**

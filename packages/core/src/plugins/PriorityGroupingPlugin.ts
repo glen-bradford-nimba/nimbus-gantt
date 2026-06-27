@@ -65,7 +65,15 @@ export interface PriorityGroupingConfig {
   buckets: PriorityBucket[];
   getBucket?: (task: GanttTask) => string | null;
   getBucketProgress?: (tasks: GanttTask[]) => number;
-  startCollapsed?: boolean;
+  /**
+   * Which buckets start collapsed on first render.
+   *   - `true`  → every bucket collapsed
+   *   - `string[]` → only the listed bucket ids collapsed (others expanded)
+   *   - `false` / omitted → all expanded
+   * Bucket ids unknown to `buckets` are ignored. Initial state only — the
+   * user can still toggle any bucket open/closed after load.
+   */
+  startCollapsed?: boolean | string[];
 }
 
 // ─── Internal state ─────────────────────────────────────────────────────────
@@ -118,8 +126,10 @@ export function PriorityGroupingPlugin(
     config.getBucketProgress ?? defaultGetBucketProgress;
 
   const collapsedIds = new Set<string>();
-  if (config.startCollapsed) {
+  if (config.startCollapsed === true) {
     for (const b of sortedBuckets) collapsedIds.add(b.id);
+  } else if (Array.isArray(config.startCollapsed)) {
+    for (const id of config.startCollapsed) collapsedIds.add(id);
   }
 
   let host: PluginHost | null = null;
